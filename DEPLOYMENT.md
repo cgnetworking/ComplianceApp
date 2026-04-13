@@ -84,7 +84,7 @@ Container files:
 
 Useful compose variables (set in your shell or a compose env file):
 
-- `COMPOSE_POSTGRES_DB` (default `iso27001`)
+- `COMPOSE_POSTGRES_DB` (default `complianceapp`)
 - `COMPOSE_POSTGRES_USER` (default `postgres`)
 - `COMPOSE_POSTGRES_PASSWORD` (default `postgres`)
 - `COMPOSE_DJANGO_SECRET_KEY`
@@ -103,7 +103,7 @@ Stop and remove containers + database volume:
 
 PostgreSQL is required for both local development and hosting. Set `DATABASE_URL` in `.env` to a PostgreSQL connection string, for example:
 
-`postgresql://localhost:5432/iso27001`
+`postgresql://localhost:5432/complianceapp`
 
 Set credentials separately:
 
@@ -122,13 +122,13 @@ If you want a different local connection string or user, run the setup script wi
 Deployment includes Nginx as the reverse proxy in front of Gunicorn.
 
 1. Install Nginx on the host (for example, `sudo apt-get install -y nginx` on Ubuntu).
-2. Copy [deploy/nginx/iso27001.conf](/Users/coreygeorge/Documents/ISO27001/deploy/nginx/iso27001.conf) to `/etc/nginx/sites-available/iso27001.conf`.
+2. Copy [deploy/nginx/complianceapp.conf](/Users/coreygeorge/Documents/ISO27001/deploy/nginx/complianceapp.conf) to `/etc/nginx/sites-available/complianceapp.conf`.
 3. Update `server_name`, TLS certificate paths, the static assets path, and Gunicorn port to match your environment.
 4. Enable the site and reload Nginx.
 
 Example on Ubuntu:
 
-`sudo ln -sf /etc/nginx/sites-available/iso27001.conf /etc/nginx/sites-enabled/iso27001.conf`
+`sudo ln -sf /etc/nginx/sites-available/complianceapp.conf /etc/nginx/sites-enabled/`
 
 `sudo nginx -t && sudo systemctl reload nginx`
 

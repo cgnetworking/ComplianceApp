@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${COMPOSE_POSTGRES_DB:-iso27001}
+      POSTGRES_DB: ${COMPOSE_POSTGRES_DB:-complianceapp}
       POSTGRES_USER: ${COMPOSE_POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-postgres}
     volumes:
@@ -28,7 +28,7 @@ services:
       ALLOWED_HOSTS: ${COMPOSE_ALLOWED_HOSTS:-localhost,127.0.0.1}
       CSRF_TRUSTED_ORIGINS: ${COMPOSE_CSRF_TRUSTED_ORIGINS:-http://localhost:8000}
       TIME_ZONE: ${COMPOSE_TIME_ZONE:-America/New_York}
-      DATABASE_URL: postgresql://db:5432/${COMPOSE_POSTGRES_DB:-iso27001}
+      DATABASE_URL: postgresql://db:5432/${COMPOSE_POSTGRES_DB:-complianceapp}
       DATABASE_USER: ${COMPOSE_POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-postgres}
       COLLECTSTATIC_ON_START: ${COMPOSE_COLLECTSTATIC_ON_START:-true}

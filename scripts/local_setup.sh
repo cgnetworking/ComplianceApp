@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv}"
 ENV_FILE="$ROOT_DIR/.env"
-DEFAULT_DATABASE_URL="${LOCAL_SETUP_DATABASE_URL:-postgresql://localhost:5432/iso27001}"
+DEFAULT_DATABASE_URL="${LOCAL_SETUP_DATABASE_URL:-postgresql://localhost:5432/complianceapp}"
 DEFAULT_DATABASE_USER="${LOCAL_SETUP_DATABASE_USER:-postgres}"
 PG_SERVICE_FORMULA=""
 PSQL_ADMIN_CMD=""
@@ -196,6 +196,91 @@ install_nginx() {
     echo "NGINX installation did not provide the nginx command." >&2
     exit 1
   fi
+}
+
+configure_nginx_site_link() {
+  local source_conf="$ROOT_DIR/deploy/nginx/complianceapp.conf"
+  local available_dir="/etc/nginx/sites-available"
+  local enabled_dir="/etc/nginx/sites-enabled"
+  local target_conf="$available_dir/complianceapp.conf"
+  local target_link="$enabled_dir/complianceapp.conf"
+  local manager
+
+  if [ ! -f "$source_conf" ]; then
+    echo "Expected NGINX config file at $source_conf." >&2
+    exit 1
+  fi
+
+  manager="$(detect_package_manager)"
+  if [ ! -d "$available_dir" ] && [ ! -d "$enabled_dir" ] && [ "$manager" != "apt" ]; then
+    log "Skipping NGINX sites-available/sites-enabled symlink setup on non-APT layout."
+    return
+  fi
+
+  run_as_root mkdir -p "$available_dir" "$enabled_dir"
+  run_as_root cp "$source_conf" "$target_conf"
+  run_as_root ln -sfn "$target_conf" "$target_link"
+}
+
+setup_gunicorn_systemd_service() {
+  local service_name="${LOCAL_SETUP_GUNICORN_SERVICE_NAME:-$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')-gunicorn}"
+  local service_unit="${service_name}.service"
+  local service_path="/etc/systemd/system/$service_unit"
+  local service_user="${LOCAL_SETUP_GUNICORN_USER:-${SUDO_USER:-$(id -un)}}"
+  local service_group="${LOCAL_SETUP_GUNICORN_GROUP:-}"
+  local service_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
+  local service_workers="${LOCAL_SETUP_GUNICORN_WORKERS:-3}"
+  local tmp_file=""
+
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    log "Skipping Gunicorn systemd service setup because systemd is unavailable."
+    return
+  fi
+
+  if ! id "$service_user" >/dev/null 2>&1; then
+    echo "Cannot create Gunicorn service: user '$service_user' does not exist." >&2
+    exit 1
+  fi
+
+  if [ -z "$service_group" ]; then
+    service_group="$(id -gn "$service_user" 2>/dev/null || true)"
+  fi
+  if [ -z "$service_group" ]; then
+    service_group="$service_user"
+  fi
+
+  if [ ! -x "$VENV_DIR/bin/gunicorn" ]; then
+    echo "Gunicorn executable not found at $VENV_DIR/bin/gunicorn." >&2
+    echo "Ensure dependencies are installed in the virtual environment and rerun." >&2
+    exit 1
+  fi
+
+  tmp_file="$(mktemp)"
+  cat > "$tmp_file" <<EOF
+[Unit]
+Description=$(basename "$ROOT_DIR") Gunicorn service
+After=network.target
+
+[Service]
+Type=simple
+User=$service_user
+Group=$service_group
+WorkingDirectory=$ROOT_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$VENV_DIR/bin/gunicorn --chdir $ROOT_DIR portal_backend.wsgi:application --bind $service_bind --workers $service_workers --access-logfile - --error-logfile -
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  log "Installing Gunicorn systemd service at $service_path"
+  run_as_root install -m 0644 "$tmp_file" "$service_path"
+  rm -f "$tmp_file"
+
+  run_as_root systemctl daemon-reload
+  run_as_root systemctl enable --now "$service_unit"
 }
 
 ensure_python_venv() {
@@ -454,6 +539,7 @@ SQL
 ensure_python_runtime
 ensure_python_venv
 install_nginx
+configure_nginx_site_link
 
 if [ ! -d "$VENV_DIR" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
@@ -480,7 +566,7 @@ if [ ! -f "$ENV_FILE" ]; then
     "# Default SSO configuration uses generic OpenID Connect." \
     "SOCIAL_AUTH_SSO_BACKEND_PATH=social_core.backends.open_id_connect.OpenIdConnectAuth" \
     "SOCIAL_AUTH_SSO_BACKEND_NAME=oidc" \
-    "SOCIAL_AUTH_SSO_LOGIN_LABEL=Sign in with SSO" \
+    "SOCIAL_AUTH_SSO_LOGIN_LABEL=\"Sign in with SSO\"" \
     "# SOCIAL_AUTH_ALLOWED_DOMAINS=example.com" \
     "# SOCIAL_AUTH_ALLOWED_EMAILS=" \
     "SOCIAL_AUTH_REDIRECT_IS_HTTPS=False" \
@@ -550,6 +636,7 @@ else
 fi
 
 python "$ROOT_DIR/manage.py" migrate
+setup_gunicorn_systemd_service
 
 echo
 echo "Local setup complete."
