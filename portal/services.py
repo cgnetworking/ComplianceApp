@@ -16,6 +16,7 @@ from .models import PortalState, RiskRecord, UploadedPolicy, VendorResponse
 
 
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
+SUPPORTED_MAPPING_EXTENSIONS = {"json", "js"}
 TEXT_VENDOR_EXTENSIONS = {"csv", "json", "txt", "md", "markdown", "html", "htm", "xml"}
 BLOCKED_TAGS_RE = re.compile(
     r"<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>.*?<\s*/\s*\1\s*>",
@@ -32,15 +33,379 @@ JAVASCRIPT_QUOTED_ATTR_RE = re.compile(
 )
 JAVASCRIPT_UNQUOTED_ATTR_RE = re.compile(r"\s+(href|src)\s*=\s*javascript:[^\s>]+", re.IGNORECASE)
 PURPOSE_RE = re.compile(r"^## 1\. Purpose\s+([\s\S]*?)\s+## ", re.MULTILINE)
+MAPPING_ASSIGNMENT_RE = re.compile(r"^\s*window\.ISMS_DATA\s*=\s*", re.IGNORECASE)
 
 
 class ValidationError(Exception):
     pass
 
 
+def default_mapping_summary() -> dict[str, object]:
+    return {
+        "controlCount": 0,
+        "documentCount": 0,
+        "policyCount": 0,
+        "activityCount": 0,
+        "checklistCount": 0,
+        "domainCounts": {},
+        "documentReviewFrequencies": {},
+        "checklistFrequencies": {},
+    }
+
+
+def default_mapping_payload() -> dict[str, object]:
+    return {
+        "generatedAt": timezone.now().isoformat(),
+        "sourceSnapshot": {
+            "controlRegister": "",
+            "reviewSchedule": "",
+            "runtimeDependency": False,
+        },
+        "summary": default_mapping_summary(),
+        "controls": [],
+        "documents": [],
+        "activities": [],
+        "checklist": [],
+        "policyCoverage": [],
+    }
+
+
+def coerce_non_negative_int(value: object, default: int = 0) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return default
+    return normalized if normalized >= 0 else default
+
+
+def normalize_string(value: object, fallback: str = "") -> str:
+    if value is None:
+        return fallback
+    normalized = str(value).strip()
+    return normalized if normalized else fallback
+
+
+def normalize_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def normalize_mapping_timestamp(value: object) -> str:
+    if isinstance(value, str):
+        raw_value = value.strip().replace("Z", "+00:00")
+        if raw_value:
+            try:
+                parsed = datetime.fromisoformat(raw_value)
+                if timezone.is_naive(parsed):
+                    parsed = timezone.make_aware(parsed, dt_timezone.utc)
+                return parsed.isoformat()
+            except ValueError:
+                pass
+    return timezone.now().isoformat()
+
+
+def normalize_mapping_source_snapshot(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "controlRegister": normalize_string(value.get("controlRegister")),
+        "reviewSchedule": normalize_string(value.get("reviewSchedule")),
+        "runtimeDependency": bool(value.get("runtimeDependency")),
+    }
+
+
+def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    controls: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        control_id = normalize_string(item.get("id"))
+        if not control_id:
+            continue
+
+        document_ids = normalize_string_list(item.get("documentIds"))
+        policy_document_ids = normalize_string_list(item.get("policyDocumentIds")) or document_ids
+        preferred_document_id = normalize_string(item.get("preferredDocumentId"))
+        if not preferred_document_id and policy_document_ids:
+            preferred_document_id = policy_document_ids[0]
+
+        controls.append(
+            {
+                "id": control_id,
+                "name": normalize_string(item.get("name")),
+                "domain": normalize_string(item.get("domain")),
+                "applicability": normalize_string(item.get("applicability"), "Applicable"),
+                "implementationModel": normalize_string(item.get("implementationModel"), "Implemented"),
+                "owner": normalize_string(item.get("owner")),
+                "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Annual"),
+                "rationale": normalize_string(item.get("rationale")),
+                "evidence": normalize_string(item.get("evidence")),
+                "documentIds": document_ids,
+                "policyDocumentIds": policy_document_ids,
+                "preferredDocumentId": preferred_document_id,
+            }
+        )
+    return controls
+
+
+def normalize_mapping_documents(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    documents: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        document_id = normalize_string(item.get("id"))
+        if not document_id:
+            continue
+
+        title = normalize_string(item.get("title")) or document_id
+        documents.append(
+            {
+                "id": document_id,
+                "title": title,
+                "type": normalize_string(item.get("type")),
+                "owner": normalize_string(item.get("owner")),
+                "approver": normalize_string(item.get("approver")),
+                "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Not scheduled"),
+                "path": normalize_string(item.get("path")),
+                "folder": normalize_string(item.get("folder")),
+                "purpose": normalize_string(item.get("purpose")),
+                "contentHtml": normalize_string(item.get("contentHtml")),
+                "isUploaded": bool(item.get("isUploaded")),
+                "originalFilename": normalize_string(item.get("originalFilename")),
+            }
+        )
+    return documents
+
+
+def normalize_mapping_activities(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    activities: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        activity_id = normalize_string(item.get("id"))
+        if not activity_id:
+            continue
+
+        activities.append(
+            {
+                "id": activity_id,
+                "month": normalize_string(item.get("month")),
+                "monthIndex": coerce_non_negative_int(item.get("monthIndex")),
+                "frequency": normalize_string(item.get("frequency")),
+                "activity": normalize_string(item.get("activity")),
+                "owner": normalize_string(item.get("owner")),
+                "evidence": normalize_string(item.get("evidence")),
+            }
+        )
+    return activities
+
+
+def normalize_mapping_checklist(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    checklist_items: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        checklist_id = normalize_string(item.get("id"))
+        if not checklist_id:
+            continue
+
+        checklist_items.append(
+            {
+                "id": checklist_id,
+                "category": normalize_string(item.get("category")),
+                "item": normalize_string(item.get("item")),
+                "frequency": normalize_string(item.get("frequency")),
+                "owner": normalize_string(item.get("owner")),
+            }
+        )
+    return checklist_items
+
+
+def normalize_mapping_policy_coverage(value: object, documents: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    titles = {item["id"]: item["title"] for item in documents if isinstance(item.get("id"), str)}
+    coverage: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+
+        document_id = normalize_string(item.get("id"))
+        if not document_id:
+            continue
+
+        coverage.append(
+            {
+                "id": document_id,
+                "title": normalize_string(item.get("title")) or titles.get(document_id, document_id),
+                "controlCount": coerce_non_negative_int(item.get("controlCount")),
+                "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Not scheduled"),
+            }
+        )
+    return coverage
+
+
+def build_mapping_policy_coverage(
+    controls: list[dict[str, object]],
+    documents: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    titles = {item["id"]: item["title"] for item in documents if isinstance(item.get("id"), str)}
+    review_frequencies = {
+        item["id"]: item["reviewFrequency"]
+        for item in documents
+        if isinstance(item.get("id"), str) and isinstance(item.get("reviewFrequency"), str)
+    }
+    counts: dict[str, int] = {}
+
+    for control in controls:
+        if not isinstance(control, dict):
+            continue
+        document_ids = normalize_string_list(control.get("policyDocumentIds")) or normalize_string_list(control.get("documentIds"))
+        for document_id in document_ids:
+            counts[document_id] = counts.get(document_id, 0) + 1
+
+    rows: list[dict[str, object]] = []
+    for document_id in sorted(counts.keys()):
+        rows.append(
+            {
+                "id": document_id,
+                "title": titles.get(document_id, document_id),
+                "controlCount": counts[document_id],
+                "reviewFrequency": review_frequencies.get(document_id, "Not scheduled"),
+            }
+        )
+    return rows
+
+
+def build_mapping_summary(
+    controls: list[dict[str, object]],
+    documents: list[dict[str, object]],
+    activities: list[dict[str, object]],
+    checklist_items: list[dict[str, object]],
+) -> dict[str, object]:
+    domain_counts: dict[str, int] = {}
+    for control in controls:
+        if not isinstance(control, dict):
+            continue
+        domain = normalize_string(control.get("domain"))
+        if not domain:
+            continue
+        domain_counts[domain] = domain_counts.get(domain, 0) + 1
+
+    document_review_frequencies: dict[str, int] = {}
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
+        frequency = normalize_string(document.get("reviewFrequency"))
+        if not frequency:
+            continue
+        document_review_frequencies[frequency] = document_review_frequencies.get(frequency, 0) + 1
+
+    checklist_frequencies: dict[str, int] = {}
+    for item in checklist_items:
+        if not isinstance(item, dict):
+            continue
+        frequency = normalize_string(item.get("frequency"))
+        if not frequency:
+            continue
+        checklist_frequencies[frequency] = checklist_frequencies.get(frequency, 0) + 1
+
+    policy_count = len({item["id"] for item in documents if re.fullmatch(r"(POL|GOV|PR|UPL)-\d+", str(item.get("id", "")), re.IGNORECASE)})
+
+    return {
+        "controlCount": len(controls),
+        "documentCount": len(documents),
+        "policyCount": policy_count,
+        "activityCount": len(activities),
+        "checklistCount": len(checklist_items),
+        "domainCounts": domain_counts,
+        "documentReviewFrequencies": document_review_frequencies,
+        "checklistFrequencies": checklist_frequencies,
+    }
+
+
+def normalize_mapping_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        payload = {}
+
+    controls = normalize_mapping_controls(payload.get("controls"))
+    documents = normalize_mapping_documents(payload.get("documents"))
+    activities = normalize_mapping_activities(payload.get("activities"))
+    checklist_items = normalize_mapping_checklist(payload.get("checklist"))
+    policy_coverage = normalize_mapping_policy_coverage(payload.get("policyCoverage"), documents)
+    if not policy_coverage:
+        policy_coverage = build_mapping_policy_coverage(controls, documents)
+
+    normalized_payload = default_mapping_payload()
+    normalized_payload.update(
+        {
+            "generatedAt": normalize_mapping_timestamp(payload.get("generatedAt")),
+            "sourceSnapshot": normalize_mapping_source_snapshot(payload.get("sourceSnapshot")),
+            "summary": build_mapping_summary(controls, documents, activities, checklist_items),
+            "controls": controls,
+            "documents": documents,
+            "activities": activities,
+            "checklist": checklist_items,
+            "policyCoverage": policy_coverage,
+        }
+    )
+    return normalized_payload
+
+
+def parse_mapping_text(raw_text: str) -> object:
+    value = str(raw_text).strip().lstrip("\ufeff")
+    if not value:
+        raise ValidationError("Uploaded mapping file is empty.")
+
+    if MAPPING_ASSIGNMENT_RE.match(value):
+        value = MAPPING_ASSIGNMENT_RE.sub("", value, count=1).strip()
+        if value.endswith(";"):
+            value = value[:-1].strip()
+
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValidationError("Uploaded mapping must be valid JSON or a window.ISMS_DATA assignment.") from error
+
+
+def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
+    extension = file_extension(file.name)
+    if extension not in SUPPORTED_MAPPING_EXTENSIONS:
+        raise ValidationError("Upload a JSON mapping file (.json) or data snapshot file (.js).")
+
+    parsed_payload = parse_mapping_text(decode_upload(file))
+    normalized_payload = normalize_mapping_payload(parsed_payload)
+    set_state_payload("mapping_state", normalized_payload)
+    return normalized_payload
+
+
+def get_mapping_payload() -> dict[str, object]:
+    payload = get_state_payload("mapping_state", {})
+    return normalize_mapping_payload(payload)
+
+
 def get_bootstrap_payload() -> dict[str, object]:
     return {
         "persistenceMode": "api",
+        "mapping": get_mapping_payload(),
         "uploadedDocuments": [item.to_portal_dict() for item in UploadedPolicy.objects.all()],
         "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
         "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],

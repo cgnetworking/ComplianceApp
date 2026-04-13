@@ -1,14 +1,22 @@
 # ISMS Portal Hosting
 
-This repo now includes a Django backend that persists portal uploads and workspace state. The static ISO snapshot in `webapp/data.js` stays embedded, and the shared data now lives in the database.
+This repo includes a Django backend that persists portal uploads and workspace state. In API mode, controls/policy mapping and uploaded policies are loaded from PostgreSQL, so a fresh deployment starts with no policies until you upload mapping and policy content.
 
 ## What the backend stores
 
 - Uploaded policy documents from the Policies page
+- Control/policy mapping snapshot data uploaded from the Controls page
 - Imported vendor questionnaire metadata and extracted preview text
 - Risk register entries
 - Review checklist progress
 - Local control exclusion state
+
+## Initial data load
+
+After first deploy (or after clearing the database), load content in this order:
+
+1. Open Controls and upload a mapping snapshot (`.json` or `data.js` with `window.ISMS_DATA = {...}`).
+2. Open Policies and upload policy source files (`.md`, `.txt`, `.html`).
 
 ## Authentication
 
@@ -55,49 +63,6 @@ The portal pages will be available at:
 - `http://localhost:8000/policies.html`
 - `http://localhost:8000/risks.html`
 - `http://localhost:8000/vendors.html`
-
-## Containers
-
-This repo includes a containerized runtime with Django + PostgreSQL.
-
-1. Build and start services:
-
-`docker compose up --build -d`
-
-2. Watch logs:
-
-`docker compose logs -f web`
-
-3. Create an admin user:
-
-`docker compose exec web python manage.py createsuperuser`
-
-4. Open the app:
-
-`http://localhost:8000/`
-
-Container files:
-
-- [Dockerfile](/Users/coreygeorge/Documents/ISO27001/Dockerfile)
-- [docker-compose.yml](/Users/coreygeorge/Documents/ISO27001/docker-compose.yml)
-- [scripts/docker_start.sh](/Users/coreygeorge/Documents/ISO27001/scripts/docker_start.sh)
-
-Useful compose variables (set in your shell or a compose env file):
-
-- `COMPOSE_POSTGRES_DB` (default `complianceapp`)
-- `COMPOSE_POSTGRES_USER` (default `postgres`)
-- `COMPOSE_POSTGRES_PASSWORD` (default `postgres`)
-- `COMPOSE_DJANGO_SECRET_KEY`
-- `COMPOSE_DJANGO_DEBUG`
-- `COMPOSE_WEB_PORT` (default `8000`)
-
-Stop and remove containers:
-
-`docker compose down`
-
-Stop and remove containers + database volume:
-
-`docker compose down -v`
 
 ## PostgreSQL
 

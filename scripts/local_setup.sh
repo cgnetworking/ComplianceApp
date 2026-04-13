@@ -8,6 +8,8 @@ VENV_DIR="${VENV_DIR:-$ROOT_DIR/.venv}"
 ENV_FILE="$ROOT_DIR/.env"
 DEFAULT_DATABASE_URL="${LOCAL_SETUP_DATABASE_URL:-postgresql://localhost:5432/complianceapp}"
 DEFAULT_DATABASE_USER="${LOCAL_SETUP_DATABASE_USER:-postgres}"
+DEFAULT_NGINX_SERVER_NAME="${LOCAL_SETUP_NGINX_SERVER_NAME:-localhost}"
+NGINX_SERVER_NAME="$DEFAULT_NGINX_SERVER_NAME"
 PG_SERVICE_FORMULA=""
 PSQL_ADMIN_CMD=""
 
@@ -205,6 +207,7 @@ configure_nginx_site_link() {
   local target_conf="$available_dir/complianceapp.conf"
   local target_link="$enabled_dir/complianceapp.conf"
   local manager
+  local rendered_conf
 
   if [ ! -f "$source_conf" ]; then
     echo "Expected NGINX config file at $source_conf." >&2
@@ -217,9 +220,54 @@ configure_nginx_site_link() {
     return
   fi
 
+  rendered_conf="$(mktemp)"
+  python - "$source_conf" "$NGINX_SERVER_NAME" "$rendered_conf" <<'PY'
+from pathlib import Path
+import sys
+
+source_path = Path(sys.argv[1])
+server_name = sys.argv[2]
+rendered_path = Path(sys.argv[3])
+
+lines = source_path.read_text(encoding="utf-8").splitlines()
+updated = []
+for line in lines:
+    stripped = line.lstrip()
+    indentation = line[: len(line) - len(stripped)]
+    if stripped.startswith("server_name "):
+        updated.append(f"{indentation}server_name {server_name};")
+    else:
+        updated.append(line)
+
+rendered_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+PY
+
   run_as_root mkdir -p "$available_dir" "$enabled_dir"
-  run_as_root cp "$source_conf" "$target_conf"
+  run_as_root install -m 0644 "$rendered_conf" "$target_conf"
   run_as_root ln -sfn "$target_conf" "$target_link"
+  rm -f "$rendered_conf"
+}
+
+prompt_for_nginx_server_name() {
+  local input=""
+
+  if [ -n "${LOCAL_SETUP_NGINX_SERVER_NAME:-}" ]; then
+    NGINX_SERVER_NAME="$LOCAL_SETUP_NGINX_SERVER_NAME"
+    log "Using NGINX server_name from LOCAL_SETUP_NGINX_SERVER_NAME: $NGINX_SERVER_NAME"
+    return
+  fi
+
+  if [ ! -t 0 ]; then
+    log "No interactive terminal detected; using default NGINX server_name: $NGINX_SERVER_NAME"
+    return
+  fi
+
+  read -r -p "Enter NGINX server_name (space-separated hostnames) [$NGINX_SERVER_NAME]: " input
+  input="${input#"${input%%[![:space:]]*}"}"
+  input="${input%"${input##*[![:space:]]}"}"
+  if [ -n "$input" ]; then
+    NGINX_SERVER_NAME="$input"
+  fi
 }
 
 setup_gunicorn_systemd_service() {
@@ -539,6 +587,7 @@ SQL
 ensure_python_runtime
 ensure_python_venv
 install_nginx
+prompt_for_nginx_server_name
 configure_nginx_site_link
 
 if [ ! -d "$VENV_DIR" ]; then

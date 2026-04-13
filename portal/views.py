@@ -19,8 +19,11 @@ from .services import (
     create_uploaded_policies,
     create_vendor_responses,
     get_bootstrap_payload,
+    get_mapping_payload,
     normalize_control_state,
+    normalize_mapping_payload,
     normalize_review_state,
+    replace_mapping_payload,
     replace_risk_register,
     set_state_payload,
 )
@@ -184,6 +187,25 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @require_http_methods(["POST"])
+def upload_mapping(request: HttpRequest) -> JsonResponse:
+    file_obj = request.FILES.get("file")
+    if file_obj is None:
+        files = request.FILES.getlist("files")
+        file_obj = files[0] if files else None
+
+    if file_obj is None:
+        return JsonResponse({"detail": "Select a mapping file to upload."}, status=400)
+
+    try:
+        mapping_payload = replace_mapping_payload(file_obj)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    return JsonResponse({"mapping": mapping_payload})
+
+
+@api_login_required
+@require_http_methods(["POST"])
 def upload_vendors(request: HttpRequest) -> JsonResponse:
     files = request.FILES.getlist("files")
     if not files:
@@ -237,3 +259,16 @@ def control_state(request: HttpRequest) -> JsonResponse:
     normalized = normalize_control_state(payload)
     set_state_payload("control_state", normalized)
     return JsonResponse({"controlState": normalized})
+
+
+@api_login_required
+@require_http_methods(["GET", "PUT"])
+def mapping_state(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"mapping": get_mapping_payload()})
+
+    body = parse_json_body(request)
+    payload = body.get("mapping") if isinstance(body, dict) and "mapping" in body else body
+    normalized = normalize_mapping_payload(payload)
+    set_state_payload("mapping_state", normalized)
+    return JsonResponse({"mapping": normalized})

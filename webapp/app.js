@@ -1,8 +1,6 @@
 (function () {
-  const data = window.ISMS_DATA;
-  if (!data) {
-    return;
-  }
+  const data = window.ISMS_DATA && typeof window.ISMS_DATA === "object" ? window.ISMS_DATA : {};
+  normalizeDataPayload(data);
 
   const monthNames = [
     "January",
@@ -40,13 +38,15 @@
   const vendorSurveyKey = "isms-policy-portal-vendor-surveys-v1";
   const riskRegisterKey = "isms-policy-portal-risk-register-v1";
   let persistenceMode = "local";
-  const controlsById = new Map(data.controls.map((control) => [control.id, control]));
+  const controlsById = new Map();
   let uploadedDocuments = loadUploadedPolicies();
   let vendorSurveyResponses = loadVendorResponses();
-  const documentsById = new Map(data.documents.concat(uploadedDocuments).map((documentItem) => [documentItem.id, documentItem]));
+  const documentsById = new Map();
   const today = new Date();
   const page = document.body.dataset.page || "home";
   const params = new URLSearchParams(window.location.search);
+  refreshControlsIndex();
+  refreshDocumentsIndex();
 
   const state = {
     search: params.get("q") || "",
@@ -86,6 +86,9 @@
     policyUploadTrigger: document.getElementById("policy-upload-trigger"),
     policyUploadInput: document.getElementById("policy-upload-input"),
     policyUploadStatus: document.getElementById("policy-upload-status"),
+    mappingUploadTrigger: document.getElementById("mapping-upload-trigger"),
+    mappingUploadInput: document.getElementById("mapping-upload-input"),
+    mappingUploadStatus: document.getElementById("mapping-upload-status"),
     vendorUploadTrigger: document.getElementById("vendor-upload-trigger"),
     vendorUploadInput: document.getElementById("vendor-upload-input"),
     vendorUploadStatus: document.getElementById("vendor-upload-status"),
@@ -330,6 +333,18 @@
         const files = Array.from(event.target.files || []);
         event.target.value = "";
         await handlePolicyUpload(files);
+      });
+    }
+
+    if (els.mappingUploadTrigger && els.mappingUploadInput) {
+      els.mappingUploadTrigger.addEventListener("click", () => {
+        els.mappingUploadInput.click();
+      });
+
+      els.mappingUploadInput.addEventListener("change", async (event) => {
+        const files = Array.from(event.target.files || []);
+        event.target.value = "";
+        await handleMappingUpload(files);
       });
     }
 
@@ -779,6 +794,45 @@
     }
   }
 
+  async function handleMappingUpload(files) {
+    if (!files.length) {
+      return;
+    }
+
+    const selectedFile = files[0];
+    setMappingUploadStatus(`Uploading mapping from ${selectedFile.name}...`, "info");
+
+    if (!isApiPersistence()) {
+      setMappingUploadStatus("Mapping uploads require API persistence so the mapping can be stored in PostgreSQL.", "error");
+      return;
+    }
+
+    try {
+      const payload = await uploadMappingToApi(selectedFile);
+      applyMappingPayload(payload.mapping);
+      initializeSelection();
+      syncUrl();
+      renderPage();
+
+      setMappingUploadStatus(
+        `Mapping uploaded (${data.controls.length} controls, ${data.documents.length} documents).`,
+        "success"
+      );
+    } catch (error) {
+      setMappingUploadStatus(error.message || "Mapping upload failed.", "error");
+    }
+  }
+
+  async function uploadMappingToApi(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    return apiRequest("/mapping/uploads/", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
   async function createUploadedDocuments(files) {
     const documents = [];
     const messages = [];
@@ -851,6 +905,13 @@
     if (tone === "error") {
       els.policyUploadStatus.classList.add("is-error");
     }
+  }
+
+  function setMappingUploadStatus(message, tone) {
+    if (!els.mappingUploadStatus) {
+      return;
+    }
+    setUploadStatus(els.mappingUploadStatus, message, tone);
   }
 
   function isSupportedUploadedPolicyType(extension) {
@@ -2783,6 +2844,93 @@
     return `risk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function emptySummary() {
+    return {
+      controlCount: 0,
+      documentCount: 0,
+      policyCount: 0,
+      activityCount: 0,
+      checklistCount: 0,
+      domainCounts: {},
+      documentReviewFrequencies: {},
+      checklistFrequencies: {},
+    };
+  }
+
+  function normalizeDataPayload(payload) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    payload.generatedAt = typeof payload.generatedAt === "string" && payload.generatedAt.trim()
+      ? payload.generatedAt
+      : new Date().toISOString();
+    payload.sourceSnapshot = payload.sourceSnapshot && typeof payload.sourceSnapshot === "object"
+      ? payload.sourceSnapshot
+      : {};
+
+    const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
+    payload.summary = {
+      ...emptySummary(),
+      ...summary,
+      domainCounts: summary.domainCounts && typeof summary.domainCounts === "object" ? summary.domainCounts : {},
+      documentReviewFrequencies: summary.documentReviewFrequencies && typeof summary.documentReviewFrequencies === "object"
+        ? summary.documentReviewFrequencies
+        : {},
+      checklistFrequencies: summary.checklistFrequencies && typeof summary.checklistFrequencies === "object"
+        ? summary.checklistFrequencies
+        : {},
+    };
+
+    payload.controls = Array.isArray(payload.controls) ? payload.controls : [];
+    payload.documents = Array.isArray(payload.documents) ? payload.documents : [];
+    payload.activities = Array.isArray(payload.activities) ? payload.activities : [];
+    payload.checklist = Array.isArray(payload.checklist) ? payload.checklist : [];
+    payload.policyCoverage = Array.isArray(payload.policyCoverage) ? payload.policyCoverage : [];
+  }
+
+  function applyMappingPayload(payload) {
+    const mappingPayload = payload && typeof payload === "object" ? payload : {};
+    normalizeDataPayload(mappingPayload);
+
+    data.generatedAt = mappingPayload.generatedAt;
+    data.sourceSnapshot = mappingPayload.sourceSnapshot;
+    data.summary = mappingPayload.summary;
+    data.controls = mappingPayload.controls;
+    data.documents = mappingPayload.documents;
+    data.activities = mappingPayload.activities;
+    data.checklist = mappingPayload.checklist;
+    data.policyCoverage = mappingPayload.policyCoverage;
+
+    refreshControlsIndex();
+    refreshDocumentsIndex();
+    pruneControlState();
+  }
+
+  function refreshControlsIndex() {
+    controlsById.clear();
+    data.controls.forEach((control) => {
+      if (!control || typeof control !== "object" || typeof control.id !== "string") {
+        return;
+      }
+      if (!Array.isArray(control.documentIds)) {
+        control.documentIds = [];
+      }
+      if (!Array.isArray(control.policyDocumentIds)) {
+        control.policyDocumentIds = Array.isArray(control.documentIds) ? control.documentIds : [];
+      }
+      controlsById.set(control.id, control);
+    });
+  }
+
+  function pruneControlState() {
+    Object.keys(state.controlState).forEach((controlId) => {
+      if (!controlsById.has(controlId)) {
+        delete state.controlState[controlId];
+      }
+    });
+  }
+
   function resolveApiBaseUrl() {
     if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl === "string") {
       return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
@@ -2806,7 +2954,10 @@
       return;
     }
 
-    const baseLabel = data.sourceSnapshot.runtimeDependency ? "Workbook dependent" : "Embedded snapshot";
+    const hasMapping = Array.isArray(data.controls) && data.controls.length > 0;
+    const baseLabel = hasMapping
+      ? (data.sourceSnapshot.runtimeDependency ? "Workbook dependent" : "Embedded snapshot")
+      : "No mapping loaded";
     els.runtimeMode.textContent = isApiPersistence() ? `${baseLabel} + API` : baseLabel;
   }
 
@@ -2820,6 +2971,11 @@
       els.vendorUploadStatus.textContent = isApiPersistence()
         ? "Upload completed questionnaires, spreadsheets, or exported response files into the shared portal workspace. Text-based files generate inline previews."
         : "Upload completed questionnaires, spreadsheets, or exported response files. Text-based files generate inline previews.";
+    }
+    if (els.mappingUploadStatus) {
+      els.mappingUploadStatus.textContent = isApiPersistence()
+        ? "Upload a control mapping snapshot (.json or data.js) to populate controls and mapped policy metadata."
+        : "Mapping upload requires API mode so it can be stored in PostgreSQL.";
     }
   }
 
@@ -2850,6 +3006,9 @@
       return;
     }
 
+    if (payload.mapping && typeof payload.mapping === "object") {
+      applyMappingPayload(payload.mapping);
+    }
     if (Array.isArray(payload.uploadedDocuments)) {
       uploadedDocuments = payload.uploadedDocuments;
     }
@@ -2869,7 +3028,9 @@
       state.controlState = payload.controlState;
     }
 
+    refreshControlsIndex();
     refreshDocumentsIndex();
+    pruneControlState();
   }
 
   async function apiRequest(path, options) {
@@ -3014,6 +3175,10 @@
   }
 
   function formatDateTime(value) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return "-";
+    }
     return new Intl.DateTimeFormat(undefined, {
       year: "numeric",
       month: "short",
@@ -3021,7 +3186,7 @@
       hour: "numeric",
       minute: "2-digit",
       timeZoneName: "short",
-    }).format(new Date(value));
+    }).format(parsed);
   }
 
   function escapeHtml(value) {
