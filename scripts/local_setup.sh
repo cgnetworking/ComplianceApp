@@ -884,12 +884,27 @@ configure_nginx_site_link
 prompt_for_self_signed_cert_choice
 create_self_signed_nginx_cert
 
-if [ ! -d "$VENV_DIR" ]; then
-  if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
-    echo "Failed to create virtual environment at $VENV_DIR." >&2
-    echo "Install python3.12-venv and rerun: sudo apt-get install -y python3.12-venv" >&2
-    exit 1
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+  if [ -d "$VENV_DIR" ]; then
+    log "Existing virtual environment at $VENV_DIR is incomplete; recreating it."
+    if ! "$PYTHON_BIN" -m venv --clear "$VENV_DIR"; then
+      echo "Failed to repair virtual environment at $VENV_DIR." >&2
+      echo "Install python3.12-venv and rerun: sudo apt-get install -y python3.12-venv" >&2
+      exit 1
+    fi
+  else
+    if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
+      echo "Failed to create virtual environment at $VENV_DIR." >&2
+      echo "Install python3.12-venv and rerun: sudo apt-get install -y python3.12-venv" >&2
+      exit 1
+    fi
   fi
+fi
+
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+  echo "Virtual environment is missing $VENV_DIR/bin/activate after creation." >&2
+  echo "Install python3.12-venv and rerun: sudo apt-get install -y python3.12-venv" >&2
+  exit 1
 fi
 
 # shellcheck disable=SC1091
