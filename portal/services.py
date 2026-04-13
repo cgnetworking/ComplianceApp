@@ -7,12 +7,13 @@ import json
 import re
 import uuid
 from datetime import date, datetime, timezone as dt_timezone
+from pathlib import Path
 
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 
-from .models import PortalState, RiskRecord, UploadedPolicy, VendorResponse
+from .models import PortalState, ReviewChecklistItem, RiskRecord, UploadedPolicy, VendorResponse
 
 
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
@@ -402,10 +403,90 @@ def get_mapping_payload() -> dict[str, object]:
     return normalize_mapping_payload(payload)
 
 
+def get_bundled_mapping_payload() -> dict[str, object]:
+    data_path = Path(__file__).resolve().parent.parent / "webapp" / "data.js"
+    try:
+        raw_text = data_path.read_text(encoding="utf-8")
+    except OSError:
+        return default_mapping_payload()
+
+    try:
+        parsed = parse_mapping_text(raw_text)
+    except ValidationError:
+        return default_mapping_payload()
+    return normalize_mapping_payload(parsed)
+
+
+def list_review_checklist_items() -> list[dict[str, str]]:
+    return [item.to_portal_dict() for item in ReviewChecklistItem.objects.all()]
+
+
+def ensure_review_checklist_seeded() -> None:
+    if ReviewChecklistItem.objects.exists():
+        return
+
+    mapping_payload = get_mapping_payload()
+    checklist_items = normalize_mapping_checklist(mapping_payload.get("checklist"))
+    if not checklist_items:
+        checklist_items = normalize_mapping_checklist(get_bundled_mapping_payload().get("checklist"))
+    if not checklist_items:
+        return
+
+    seen_ids: set[str] = set()
+    to_create: list[ReviewChecklistItem] = []
+    for item in checklist_items:
+        item_id = normalize_string(item.get("id"))
+        item_text = normalize_string(item.get("item"))
+        if not item_id or not item_text or item_id in seen_ids:
+            continue
+        seen_ids.add(item_id)
+        to_create.append(
+            ReviewChecklistItem(
+                external_id=item_id,
+                category=normalize_string(item.get("category"), "Custom"),
+                item=item_text,
+                frequency=normalize_string(item.get("frequency"), "Annual"),
+                owner=normalize_string(item.get("owner"), "Shared portal"),
+            )
+        )
+
+    if to_create:
+        ReviewChecklistItem.objects.bulk_create(to_create, ignore_conflicts=True)
+
+
+def create_review_checklist_item(payload: object) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise ValidationError("Checklist item payload must be an object.")
+
+    item_text = normalize_string(payload.get("item"))
+    if not item_text:
+        raise ValidationError("Checklist item text is required.")
+
+    category = normalize_string(payload.get("category"), "Custom")
+    frequency = normalize_string(payload.get("frequency"), "Annual")
+    owner = normalize_string(payload.get("owner"), "Shared portal")
+
+    for _ in range(5):
+        external_id = f"checklist-{uuid.uuid4().hex[:12]}"
+        if not ReviewChecklistItem.objects.filter(external_id=external_id).exists():
+            created = ReviewChecklistItem.objects.create(
+                external_id=external_id,
+                category=category,
+                item=item_text,
+                frequency=frequency,
+                owner=owner,
+            )
+            return created.to_portal_dict()
+
+    raise ValidationError("Unable to create checklist item id. Retry the request.")
+
+
 def get_bootstrap_payload() -> dict[str, object]:
+    ensure_review_checklist_seeded()
     return {
         "persistenceMode": "api",
         "mapping": get_mapping_payload(),
+        "checklistItems": list_review_checklist_items(),
         "uploadedDocuments": [item.to_portal_dict() for item in UploadedPolicy.objects.all()],
         "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
         "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],
@@ -520,46 +601,14 @@ def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
     return [item.to_portal_dict() for item in RiskRecord.objects.all()]
 
 
-def normalize_custom_checklist_items(payload: object) -> list[dict[str, str]]:
-    if not isinstance(payload, list):
-        return []
-
-    normalized: list[dict[str, str]] = []
-    seen_ids: set[str] = set()
-
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-
-        item_id = str(item.get("id") or "").strip()
-        checklist_item = str(item.get("item") or "").strip()
-        if not item_id or not checklist_item or item_id in seen_ids:
-            continue
-
-        seen_ids.add(item_id)
-        normalized.append(
-            {
-                "id": item_id,
-                "category": str(item.get("category") or "").strip() or "Custom",
-                "item": checklist_item,
-                "frequency": str(item.get("frequency") or "").strip() or "Annual",
-                "owner": str(item.get("owner") or "").strip() or "Shared portal",
-            }
-        )
-
-    return normalized
-
-
 def normalize_review_state(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
-        return {"activities": {}, "checklist": {}, "customChecklist": []}
+        return {"activities": {}, "checklist": {}}
     activities = payload.get("activities") if isinstance(payload.get("activities"), dict) else {}
     checklist = payload.get("checklist") if isinstance(payload.get("checklist"), dict) else {}
-    custom_checklist = normalize_custom_checklist_items(payload.get("customChecklist"))
     return {
         "activities": {str(key): bool(value) for key, value in activities.items()},
         "checklist": {str(key): bool(value) for key, value in checklist.items()},
-        "customChecklist": custom_checklist,
     }
 
 

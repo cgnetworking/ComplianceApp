@@ -75,7 +75,7 @@
           <p class="section-kicker">Reviews</p>
           <h1>Review tracker</h1>
           <p class="report-copy">
-            Work through the annual review schedule and recurring review checklist from a dedicated page. Completion state is stored locally in the browser.
+            Work through the annual review schedule and recurring review checklist from a dedicated page. Checklist content and completion state are stored in the shared database.
           </p>
         </section>
 
@@ -108,11 +108,11 @@
               <div class="form-grid">
                 <label class="form-field" for="checklist-add-category">
                   <span>Category</span>
-                  <input id="checklist-add-category" type="text" placeholder="Governance">
+                  <select id="checklist-add-category" required></select>
                 </label>
                 <label class="form-field" for="checklist-add-frequency">
                   <span>Frequency</span>
-                  <input id="checklist-add-frequency" type="text" placeholder="Quarterly">
+                  <select id="checklist-add-frequency" required></select>
                 </label>
               </div>
 
@@ -123,7 +123,7 @@
 
               <label class="form-field" for="checklist-add-owner">
                 <span>Owner</span>
-                <input id="checklist-add-owner" type="text" placeholder="Head of IT">
+                <select id="checklist-add-owner" required></select>
               </label>
 
               <div class="form-actions">

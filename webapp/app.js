@@ -18,6 +18,26 @@
   ];
   const shortMonths = monthNames.map((month) => month.slice(0, 3));
   const cadenceLabels = ["Annual", "Quarterly", "Monthly", "Event", "Change"];
+  const defaultChecklistCategories = [
+    "ISMS Governance",
+    "Risk",
+    "Annex A",
+    "People",
+    "Access",
+    "Assets",
+    "Suppliers",
+    "Cloud",
+    "Physical",
+    "Operations",
+    "Backups",
+    "BCDR",
+    "Development",
+    "Incidents",
+    "Compliance",
+    "Custom",
+  ];
+  const defaultChecklistFrequencies = ["Annual", "Quarterly", "Monthly", "Semi-annual", "Per event", "Not scheduled"];
+  const defaultChecklistOwners = ["Head of IT", "CTO", "Shared portal"];
   const domainColors = {
     Organizational: "#7442b8",
     People: "#9d3f9d",
@@ -63,6 +83,7 @@
     isAddingRisk: false,
     riskFormStatus: { message: "", tone: "" },
     reviewState: loadReviewState(),
+    checklistItems: [],
     controlState: loadControlState(),
   };
 
@@ -1920,6 +1941,13 @@
     }
 
     const checklistItems = getAllChecklistItems();
+    if (!checklistItems.length) {
+      els.checklistSummary.innerHTML = `<span class="chip">0/0 complete</span>`;
+      els.checklist.innerHTML = `<div class="empty-state">No checklist items are stored in the database yet.</div>`;
+      refreshChecklistAddFormOptions();
+      return;
+    }
+
     const completedCount = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
     const grouped = groupBy(checklistItems, "category");
     const frequencyCounts = checklistItems.reduce((counts, item) => {
@@ -1943,7 +1971,7 @@
               <div class="check-top">
                 <div>
                   <strong>${escapeHtml(item.item)}</strong>
-                  <div class="mini-copy">${escapeHtml(item.frequency)} / ${escapeHtml(item.owner)}${item.isCustom ? " / Custom" : ""}</div>
+                  <div class="mini-copy">${escapeHtml(item.frequency)} / ${escapeHtml(item.owner)}</div>
                 </div>
                 <span class="status-pill ${isDone ? "is-success" : ""}">${isDone ? "Done" : "Track"}</span>
               </div>
@@ -1956,16 +1984,14 @@
         }).join("")}
       </section>
     `).join("");
+    refreshChecklistAddFormOptions();
   }
 
   function getAllChecklistItems() {
-    const customChecklist = normalizeCustomChecklistItems(state.reviewState.customChecklist);
-    return data.checklist
-      .map((item) => ({ ...item, isCustom: false }))
-      .concat(customChecklist.map((item) => ({ ...item, isCustom: true })));
+    return normalizeChecklistItems(state.checklistItems);
   }
 
-  function normalizeCustomChecklistItems(items) {
+  function normalizeChecklistItems(items) {
     if (!Array.isArray(items)) {
       return [];
     }
@@ -1993,6 +2019,47 @@
       .filter(Boolean);
   }
 
+  function refreshChecklistAddFormOptions() {
+    if (!els.checklistAddCategory || !els.checklistAddFrequency || !els.checklistAddOwner) {
+      return;
+    }
+
+    const checklistItems = getAllChecklistItems();
+    const categories = buildChecklistOptionList(defaultChecklistCategories, checklistItems.map((item) => item.category), "Custom");
+    const frequencies = buildChecklistOptionList(defaultChecklistFrequencies, checklistItems.map((item) => item.frequency), "Annual");
+    const owners = buildChecklistOptionList(defaultChecklistOwners, checklistItems.map((item) => item.owner), "Head of IT");
+
+    const selectedCategory = els.checklistAddCategory.value;
+    const selectedFrequency = els.checklistAddFrequency.value;
+    const selectedOwner = els.checklistAddOwner.value;
+
+    populateSelect(els.checklistAddCategory, categories);
+    populateSelect(els.checklistAddFrequency, frequencies);
+    populateSelect(els.checklistAddOwner, owners);
+
+    els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, selectedCategory || "Custom");
+    els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, selectedFrequency || "Annual");
+    els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, selectedOwner || "Head of IT");
+  }
+
+  function buildChecklistOptionList(defaultValues, dynamicValues, fallbackValue) {
+    const options = defaultValues.slice();
+    dynamicValues.forEach((value) => {
+      if (typeof value !== "string") {
+        return;
+      }
+      const normalized = value.trim();
+      if (!normalized || options.includes(normalized)) {
+        return;
+      }
+      options.push(normalized);
+    });
+    if (!options.length && fallbackValue) {
+      options.push(fallbackValue);
+    }
+    return options;
+  }
+
   function toggleChecklistAddForm(visible) {
     if (!els.checklistAddForm) {
       return;
@@ -2008,53 +2075,68 @@
       return;
     }
 
-    if (els.checklistAddFrequency && !els.checklistAddFrequency.value.trim()) {
-      els.checklistAddFrequency.value = "Annual";
+    refreshChecklistAddFormOptions();
+    if (els.checklistAddCategory && !els.checklistAddCategory.value) {
+      els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, "Custom");
     }
-    if (els.checklistAddOwner && !els.checklistAddOwner.value.trim()) {
-      els.checklistAddOwner.value = "Head of IT";
+    if (els.checklistAddFrequency && !els.checklistAddFrequency.value) {
+      els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, "Annual");
+    }
+    if (els.checklistAddOwner && !els.checklistAddOwner.value) {
+      els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, "Head of IT");
     }
     if (els.checklistAddItem) {
       els.checklistAddItem.focus();
     }
   }
 
-  function createChecklistItemId() {
-    return `custom-check-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function handleChecklistAddSubmit(event) {
+  async function handleChecklistAddSubmit(event) {
     event.preventDefault();
     if (!els.checklistAddForm || !els.checklistAddItem) {
       return;
     }
 
     const itemText = els.checklistAddItem.value.trim();
-    const category = els.checklistAddCategory ? els.checklistAddCategory.value.trim() : "";
-    const frequency = els.checklistAddFrequency ? els.checklistAddFrequency.value.trim() : "";
-    const owner = els.checklistAddOwner ? els.checklistAddOwner.value.trim() : "";
+    const category = els.checklistAddCategory ? els.checklistAddCategory.value : "";
+    const frequency = els.checklistAddFrequency ? els.checklistAddFrequency.value : "";
+    const owner = els.checklistAddOwner ? els.checklistAddOwner.value : "";
 
     if (!itemText) {
       setUploadStatus(els.checklistAddStatus, "Checklist item text is required.", "error");
       return;
     }
 
-    const entry = {
-      id: createChecklistItemId(),
+    if (!isApiPersistence()) {
+      setUploadStatus(els.checklistAddStatus, "Checklist items can only be added in API/database mode.", "error");
+      return;
+    }
+
+    const requestPayload = {
       category: category || "Custom",
       item: itemText,
       frequency: frequency || "Annual",
-      owner: owner || "Head of IT",
+      owner: owner || "Shared portal",
     };
 
-    const existing = normalizeCustomChecklistItems(state.reviewState.customChecklist);
-    state.reviewState.customChecklist = existing.concat(entry);
-    state.reviewState.checklist[entry.id] = false;
-    saveReviewState();
+    setUploadStatus(els.checklistAddStatus, "Saving checklist item...", "");
+    try {
+      const response = await apiRequest("/checklist/", {
+        method: "POST",
+        body: JSON.stringify({ checklistItem: requestPayload }),
+      });
+      const created = normalizeChecklistItems([response && response.checklistItem ? response.checklistItem : null])[0];
+      if (!created) {
+        throw new Error("Created checklist item response was invalid.");
+      }
 
-    setUploadStatus(els.checklistAddStatus, "Checklist item added.", "success");
-    renderReviewsPage();
-    toggleChecklistAddForm(false);
+      state.checklistItems = getAllChecklistItems().concat(created);
+      state.reviewState.checklist[created.id] = false;
+      saveReviewState();
+      renderReviewsPage();
+      toggleChecklistAddForm(false);
+    } catch (error) {
+      setUploadStatus(els.checklistAddStatus, "Checklist item could not be saved to the database.", "error");
+    }
   }
 
   function getAllControlViews() {
@@ -2584,15 +2666,13 @@
       return {
         activities: saved.activities || {},
         checklist: saved.checklist || {},
-        customChecklist: normalizeCustomChecklistItems(saved.customChecklist),
       };
     } catch (error) {
-      return { activities: {}, checklist: {}, customChecklist: [] };
+      return { activities: {}, checklist: {} };
     }
   }
 
   function saveReviewState() {
-    state.reviewState.customChecklist = normalizeCustomChecklistItems(state.reviewState.customChecklist);
     if (!isApiPersistence()) {
       window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
       return;
@@ -3176,11 +3256,13 @@
     if (Array.isArray(payload.riskRegister)) {
       state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
     }
+    if (Array.isArray(payload.checklistItems)) {
+      state.checklistItems = normalizeChecklistItems(payload.checklistItems);
+    }
     if (payload.reviewState && typeof payload.reviewState === "object") {
       state.reviewState = {
         activities: payload.reviewState.activities || {},
         checklist: payload.reviewState.checklist || {},
-        customChecklist: normalizeCustomChecklistItems(payload.reviewState.customChecklist),
       };
     }
     if (payload.controlState && typeof payload.controlState === "object") {

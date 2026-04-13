@@ -16,10 +16,12 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 from .services import (
     ValidationError,
+    create_review_checklist_item,
     create_uploaded_policies,
     create_vendor_responses,
     get_bootstrap_payload,
     get_mapping_payload,
+    list_review_checklist_items,
     normalize_control_state,
     normalize_mapping_payload,
     normalize_review_state,
@@ -231,6 +233,23 @@ def risk_register(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": str(error)}, status=400)
 
     return JsonResponse({"riskRegister": risk_register_payload})
+
+
+@api_login_required
+@require_http_methods(["GET", "POST"])
+def checklist_items(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"checklistItems": list_review_checklist_items()})
+
+    body = parse_json_body(request)
+    payload = body.get("checklistItem") if isinstance(body, dict) and "checklistItem" in body else body
+
+    try:
+        checklist_item = create_review_checklist_item(payload)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    return JsonResponse({"checklistItem": checklist_item}, status=201)
 
 
 @api_login_required
