@@ -3482,7 +3482,10 @@
     }
 
     if (payload.mapping && typeof payload.mapping === "object") {
-      applyMappingPayload(payload.mapping);
+      const remoteControls = Array.isArray(payload.mapping.controls) ? payload.mapping.controls : [];
+      if (remoteControls.length) {
+        applyMappingPayload(payload.mapping);
+      }
     }
     if (Array.isArray(payload.uploadedDocuments)) {
       uploadedDocuments = payload.uploadedDocuments;

@@ -407,7 +407,15 @@ def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
 
 def get_mapping_payload() -> dict[str, object]:
     payload = get_state_payload("mapping_state", {})
-    return normalize_mapping_payload(payload)
+    normalized = normalize_mapping_payload(payload)
+    if normalized.get("controls"):
+        return normalized
+
+    bundled = get_bundled_mapping_payload()
+    if bundled.get("controls"):
+        return bundled
+
+    return normalized
 
 
 def get_bundled_mapping_payload() -> dict[str, object]:
