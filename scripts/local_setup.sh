@@ -10,6 +10,12 @@ DEFAULT_DATABASE_URL="${LOCAL_SETUP_DATABASE_URL:-postgresql://localhost:5432/co
 DEFAULT_DATABASE_USER="${LOCAL_SETUP_DATABASE_USER:-postgres}"
 DEFAULT_NGINX_SERVER_NAME="${LOCAL_SETUP_NGINX_SERVER_NAME:-localhost}"
 NGINX_SERVER_NAME="$DEFAULT_NGINX_SERVER_NAME"
+NGINX_PRIMARY_SERVER_NAME=""
+NGINX_SSL_CERT_PATH=""
+NGINX_SSL_KEY_PATH=""
+GUNICORN_SERVICE_UNITS=""
+APP_HEALTHCHECK_URL=""
+CREATE_SELF_SIGNED_CERT="false"
 PG_SERVICE_FORMULA=""
 PSQL_ADMIN_CMD=""
 
@@ -30,6 +36,42 @@ run_as_root() {
 
   echo "This action requires elevated privileges: $*" >&2
   exit 1
+}
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_supported_platform() {
+  if [ ! -f /etc/os-release ]; then
+    echo "Unsupported platform: /etc/os-release is missing. Ubuntu 24.04+ is required." >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  if [ "${ID:-}" != "ubuntu" ]; then
+    echo "Unsupported platform: this setup only supports Ubuntu 24.04+." >&2
+    exit 1
+  fi
+
+  local version_id="${VERSION_ID:-}"
+  local major=0
+  local minor=0
+  IFS='.' read -r major minor <<< "$version_id"
+  major="${major:-0}"
+  minor="${minor:-0}"
+  if [ "$major" -lt 24 ] || { [ "$major" -eq 24 ] && [ "$minor" -lt 4 ]; }; then
+    echo "Unsupported Ubuntu version: ${version_id:-unknown}. Ubuntu 24.04+ is required." >&2
+    exit 1
+  fi
 }
 
 detect_package_manager() {
@@ -206,6 +248,11 @@ configure_nginx_site_link() {
   local enabled_dir="/etc/nginx/sites-enabled"
   local target_conf="$available_dir/complianceapp.conf"
   local target_link="$enabled_dir/complianceapp.conf"
+  local nginx_upstream_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
+  local nginx_static_root="${LOCAL_SETUP_NGINX_STATIC_ROOT:-$ROOT_DIR/staticfiles}"
+  local primary_server_name=""
+  local tls_cert_path=""
+  local tls_key_path=""
   local manager
   local rendered_conf
 
@@ -220,22 +267,58 @@ configure_nginx_site_link() {
     return
   fi
 
+  primary_server_name="${NGINX_SERVER_NAME%% *}"
+  if [ -z "$primary_server_name" ]; then
+    primary_server_name="localhost"
+  fi
+
+  tls_cert_path="/etc/letsencrypt/live/$primary_server_name/fullchain.pem"
+  tls_key_path="/etc/letsencrypt/live/$primary_server_name/privkey.pem"
+
+  NGINX_PRIMARY_SERVER_NAME="$primary_server_name"
+  NGINX_SSL_CERT_PATH="$tls_cert_path"
+  NGINX_SSL_KEY_PATH="$tls_key_path"
+
   rendered_conf="$(mktemp)"
-  python - "$source_conf" "$NGINX_SERVER_NAME" "$rendered_conf" <<'PY'
+  python - "$source_conf" "$NGINX_SERVER_NAME" "$nginx_upstream_bind" "$nginx_static_root" "$tls_cert_path" "$tls_key_path" "$rendered_conf" <<'PY'
 from pathlib import Path
 import sys
 
 source_path = Path(sys.argv[1])
 server_name = sys.argv[2]
-rendered_path = Path(sys.argv[3])
+upstream_bind = sys.argv[3]
+static_root = sys.argv[4]
+cert_path = sys.argv[5]
+key_path = sys.argv[6]
+rendered_path = Path(sys.argv[7])
 
 lines = source_path.read_text(encoding="utf-8").splitlines()
 updated = []
+in_upstream = False
 for line in lines:
     stripped = line.lstrip()
     indentation = line[: len(line) - len(stripped)]
+
+    if stripped.startswith("upstream ") and stripped.endswith("{"):
+        in_upstream = True
+        updated.append(line)
+        continue
+    if in_upstream and stripped == "}":
+        in_upstream = False
+        updated.append(line)
+        continue
+
     if stripped.startswith("server_name "):
         updated.append(f"{indentation}server_name {server_name};")
+    elif in_upstream and stripped.startswith("server "):
+        updated.append(f"{indentation}server {upstream_bind};")
+    elif stripped.startswith("alias "):
+        static_root_value = static_root.rstrip("/")
+        updated.append(f"{indentation}alias {static_root_value}/;")
+    elif stripped.startswith("ssl_certificate_key "):
+        updated.append(f"{indentation}ssl_certificate_key {key_path};")
+    elif stripped.startswith("ssl_certificate "):
+        updated.append(f"{indentation}ssl_certificate {cert_path};")
     else:
         updated.append(line)
 
@@ -246,6 +329,33 @@ PY
   run_as_root install -m 0644 "$rendered_conf" "$target_conf"
   run_as_root ln -sfn "$target_conf" "$target_link"
   rm -f "$rendered_conf"
+}
+
+start_nginx_service() {
+  if ! command -v nginx >/dev/null 2>&1; then
+    return
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    if ! run_as_root nginx -t >/dev/null 2>&1; then
+      log "Skipping NGINX service enable/start because nginx -t failed."
+      log "Review /etc/nginx/sites-available/complianceapp.conf to fix configuration issues."
+      return
+    fi
+
+    run_as_root systemctl enable nginx || run_as_root systemctl enable nginx.service
+    run_as_root systemctl restart nginx || run_as_root systemctl start nginx
+    if ! run_as_root systemctl is-active --quiet nginx; then
+      echo "NGINX service failed to start." >&2
+      echo "Inspect with: sudo journalctl -u nginx --no-pager -n 100" >&2
+      exit 1
+    fi
+    return
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    brew services start nginx || true
+  fi
 }
 
 prompt_for_nginx_server_name() {
@@ -270,15 +380,112 @@ prompt_for_nginx_server_name() {
   fi
 }
 
+prompt_for_self_signed_cert_choice() {
+  local input=""
+
+  if [ -n "${LOCAL_SETUP_CREATE_SELF_SIGNED_CERT:-}" ]; then
+    if is_truthy "${LOCAL_SETUP_CREATE_SELF_SIGNED_CERT}"; then
+      CREATE_SELF_SIGNED_CERT="true"
+      log "Self-signed certificate creation enabled via LOCAL_SETUP_CREATE_SELF_SIGNED_CERT."
+    else
+      CREATE_SELF_SIGNED_CERT="false"
+      log "Self-signed certificate creation disabled via LOCAL_SETUP_CREATE_SELF_SIGNED_CERT."
+    fi
+    return
+  fi
+
+  if [ ! -t 0 ]; then
+    CREATE_SELF_SIGNED_CERT="false"
+    log "No interactive terminal detected; skipping self-signed certificate creation."
+    return
+  fi
+
+  while true; do
+    read -r -p "Create a self-signed TLS certificate for NGINX now? [y/N]: " input
+    input="${input#"${input%%[![:space:]]*}"}"
+    input="${input%"${input##*[![:space:]]}"}"
+    case "${input,,}" in
+      y|yes)
+        CREATE_SELF_SIGNED_CERT="true"
+        return
+        ;;
+      ""|n|no)
+        CREATE_SELF_SIGNED_CERT="false"
+        return
+        ;;
+      *)
+        echo "Please answer yes or no."
+        ;;
+    esac
+  done
+}
+
+create_self_signed_nginx_cert() {
+  if [ "$CREATE_SELF_SIGNED_CERT" != "true" ]; then
+    return
+  fi
+
+  if [ -z "$NGINX_SSL_CERT_PATH" ] || [ -z "$NGINX_SSL_KEY_PATH" ]; then
+    echo "Cannot create self-signed cert: NGINX SSL paths are not initialized." >&2
+    exit 1
+  fi
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    log "Installing OpenSSL for self-signed certificate generation"
+    run_as_root apt-get update
+    run_as_root apt-get install -y openssl
+  fi
+
+  local cert_dir
+  cert_dir="$(dirname "$NGINX_SSL_CERT_PATH")"
+  local san_entries="DNS:localhost,IP:127.0.0.1"
+  local host_name=""
+
+  for host_name in $NGINX_SERVER_NAME; do
+    if [ -z "$host_name" ]; then
+      continue
+    fi
+    if [[ "$host_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      san_entries="$san_entries,IP:$host_name"
+    else
+      san_entries="$san_entries,DNS:$host_name"
+    fi
+  done
+
+  if [ -f "$NGINX_SSL_CERT_PATH" ] && [ -f "$NGINX_SSL_KEY_PATH" ]; then
+    log "Reusing existing TLS certificate and key at $cert_dir"
+    return
+  fi
+
+  log "Creating self-signed TLS certificate for $NGINX_PRIMARY_SERVER_NAME at $cert_dir"
+  run_as_root mkdir -p "$cert_dir"
+  run_as_root openssl req \
+    -x509 \
+    -nodes \
+    -newkey rsa:2048 \
+    -days "${LOCAL_SETUP_SELF_SIGNED_CERT_DAYS:-825}" \
+    -keyout "$NGINX_SSL_KEY_PATH" \
+    -out "$NGINX_SSL_CERT_PATH" \
+    -subj "/CN=$NGINX_PRIMARY_SERVER_NAME" \
+    -addext "subjectAltName=$san_entries"
+  run_as_root chmod 600 "$NGINX_SSL_KEY_PATH"
+  run_as_root chmod 644 "$NGINX_SSL_CERT_PATH"
+}
+
 setup_gunicorn_systemd_service() {
-  local service_name="${LOCAL_SETUP_GUNICORN_SERVICE_NAME:-$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')-gunicorn}"
-  local service_unit="${service_name}.service"
-  local service_path="/etc/systemd/system/$service_unit"
+  local default_service_name
+  local service_names_raw
+  local raw_service_name=""
+  local service_name=""
+  local service_unit=""
+  local service_path=""
   local service_user="${LOCAL_SETUP_GUNICORN_USER:-${SUDO_USER:-$(id -un)}}"
   local service_group="${LOCAL_SETUP_GUNICORN_GROUP:-}"
   local service_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
   local service_workers="${LOCAL_SETUP_GUNICORN_WORKERS:-3}"
   local tmp_file=""
+  local -a parsed_names=()
+  local -a service_units=()
 
   if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
     log "Skipping Gunicorn systemd service setup because systemd is unavailable."
@@ -303,10 +510,29 @@ setup_gunicorn_systemd_service() {
     exit 1
   fi
 
-  tmp_file="$(mktemp)"
-  cat > "$tmp_file" <<EOF
+  default_service_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')-gunicorn"
+  service_names_raw="${LOCAL_SETUP_GUNICORN_SERVICE_NAMES:-${LOCAL_SETUP_GUNICORN_SERVICE_NAME:-$default_service_name}}"
+  IFS=',' read -r -a parsed_names <<< "$service_names_raw"
+
+  for raw_service_name in "${parsed_names[@]}"; do
+    service_name="$raw_service_name"
+    service_name="${service_name#"${service_name%%[![:space:]]*}"}"
+    service_name="${service_name%"${service_name##*[![:space:]]}"}"
+    if [ -z "$service_name" ]; then
+      continue
+    fi
+    if [[ ! "$service_name" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
+      echo "Invalid Gunicorn service name '$service_name'." >&2
+      echo "Allowed characters: letters, numbers, underscore, dot, at-sign, and dash." >&2
+      exit 1
+    fi
+
+    service_unit="${service_name}.service"
+    service_path="/etc/systemd/system/$service_unit"
+    tmp_file="$(mktemp)"
+    cat > "$tmp_file" <<EOF
 [Unit]
-Description=$(basename "$ROOT_DIR") Gunicorn service
+Description=$service_name Gunicorn service
 After=network.target
 
 [Service]
@@ -323,12 +549,31 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-  log "Installing Gunicorn systemd service at $service_path"
-  run_as_root install -m 0644 "$tmp_file" "$service_path"
-  rm -f "$tmp_file"
+    log "Installing Gunicorn systemd service at $service_path"
+    run_as_root install -m 0644 "$tmp_file" "$service_path"
+    rm -f "$tmp_file"
+    service_units+=("$service_unit")
+  done
+
+  if [ "${#service_units[@]}" -eq 0 ]; then
+    echo "No valid Gunicorn service names provided." >&2
+    echo "Set LOCAL_SETUP_GUNICORN_SERVICE_NAME or LOCAL_SETUP_GUNICORN_SERVICE_NAMES." >&2
+    exit 1
+  fi
 
   run_as_root systemctl daemon-reload
-  run_as_root systemctl enable --now "$service_unit"
+  for service_unit in "${service_units[@]}"; do
+    log "Enabling $service_unit so Gunicorn starts automatically after reboot"
+    run_as_root systemctl enable "$service_unit"
+    run_as_root systemctl restart "$service_unit" || run_as_root systemctl start "$service_unit"
+    if ! run_as_root systemctl is-active --quiet "$service_unit"; then
+      echo "Gunicorn service failed to start: $service_unit" >&2
+      echo "Inspect with: sudo journalctl -u $service_unit --no-pager -n 100" >&2
+      exit 1
+    fi
+  done
+
+  GUNICORN_SERVICE_UNITS="${service_units[*]}"
 }
 
 ensure_python_venv() {
@@ -584,11 +829,77 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db_name')
 SQL
 }
 
+collect_static_assets() {
+  log "Collecting static assets"
+  python "$ROOT_DIR/manage.py" collectstatic --noinput
+}
+
+verify_app_readiness() {
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    log "Skipping readiness check because systemd is unavailable."
+    return
+  fi
+
+  local service_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
+  local healthcheck_url="${LOCAL_SETUP_HEALTHCHECK_URL:-}"
+
+  if [ -z "$healthcheck_url" ]; then
+    if [[ "$service_bind" != *:* ]]; then
+      log "Skipping readiness check because LOCAL_SETUP_GUNICORN_BIND is not host:port."
+      return
+    fi
+
+    local bind_host="${service_bind%:*}"
+    local bind_port="${service_bind##*:}"
+    if [ "$bind_host" = "0.0.0.0" ] || [ "$bind_host" = "::" ]; then
+      bind_host="127.0.0.1"
+    fi
+    healthcheck_url="http://$bind_host:$bind_port/login/"
+  fi
+
+  APP_HEALTHCHECK_URL="$healthcheck_url"
+  log "Verifying app readiness at $healthcheck_url"
+  if ! python - "$healthcheck_url" <<'PY'
+from urllib import error, request
+import sys
+import time
+
+url = sys.argv[1]
+deadline = time.time() + 45
+last_error = ""
+
+while time.time() < deadline:
+    try:
+        with request.urlopen(url, timeout=5) as response:
+            status = getattr(response, "status", 0) or response.getcode()
+            if 200 <= status < 500:
+                raise SystemExit(0)
+    except error.HTTPError as exc:
+        if 200 <= exc.code < 500:
+            raise SystemExit(0)
+        last_error = f"HTTP {exc.code}"
+    except Exception as exc:  # noqa: BLE001
+        last_error = str(exc)
+    time.sleep(1)
+
+if last_error:
+    print(last_error, file=sys.stderr)
+raise SystemExit(1)
+PY
+  then
+    echo "Application readiness check failed at $healthcheck_url." >&2
+    exit 1
+  fi
+}
+
+ensure_supported_platform
 ensure_python_runtime
 ensure_python_venv
 install_nginx
 prompt_for_nginx_server_name
 configure_nginx_site_link
+prompt_for_self_signed_cert_choice
+create_self_signed_nginx_cert
 
 if [ ! -d "$VENV_DIR" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
@@ -685,10 +996,22 @@ else
 fi
 
 python "$ROOT_DIR/manage.py" migrate
+collect_static_assets
 setup_gunicorn_systemd_service
+verify_app_readiness
+start_nginx_service
 
 echo
 echo "Local setup complete."
 echo "Activate the environment with: source \"$VENV_DIR/bin/activate\""
-echo "Start the app with: python manage.py runserver"
+echo "Gunicorn service units: ${GUNICORN_SERVICE_UNITS:-none}"
+if [ -n "$APP_HEALTHCHECK_URL" ]; then
+  echo "Application readiness URL: $APP_HEALTHCHECK_URL"
+fi
+if [ "$CREATE_SELF_SIGNED_CERT" = "true" ] && [ -n "$NGINX_SSL_CERT_PATH" ] && [ -n "$NGINX_SSL_KEY_PATH" ]; then
+  echo "Self-signed cert: $NGINX_SSL_CERT_PATH"
+  echo "Self-signed key:  $NGINX_SSL_KEY_PATH"
+fi
+echo "Self-signed TLS cert creation is prompted during setup (yes/no)."
+echo "Non-interactive override: LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=true|false"
 echo "Database URL: $DATABASE_URL"

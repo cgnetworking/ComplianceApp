@@ -46,12 +46,16 @@ The default settings also enable per-backend domain and email allowlists, requir
 
 ## Local setup
 
-1. Run `./scripts/local_setup.sh`.
-2. Activate the virtual environment with `source .venv/bin/activate`.
-3. Run `python manage.py createsuperuser` if you want Django admin access.
-4. Run `python manage.py runserver`.
+`scripts/local_setup.sh` is designed for Ubuntu 24.04+.
 
-The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, and runs migrations. The Django entrypoints load `.env` automatically for local commands.
+1. Run `./scripts/local_setup.sh`.
+2. Run `python manage.py createsuperuser` if you want Django admin access.
+
+The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, creates/enables/starts Gunicorn systemd services, and validates app readiness.
+
+During setup, the script asks a yes/no question about generating a local self-signed TLS cert. If you answer yes, it creates the cert at the exact `ssl_certificate` and `ssl_certificate_key` paths rendered into `deploy/nginx/complianceapp.conf`.
+
+For non-interactive runs, set `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=true` or `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=false`.
 
 The portal pages will be available at:
 
