@@ -9,7 +9,9 @@ ENV_FILE="$ROOT_DIR/.env"
 DEFAULT_DATABASE_URL="${LOCAL_SETUP_DATABASE_URL:-postgresql://localhost:5432/complianceapp}"
 DEFAULT_DATABASE_USER="${LOCAL_SETUP_DATABASE_USER:-postgres}"
 DEFAULT_NGINX_SERVER_NAME="${LOCAL_SETUP_NGINX_SERVER_NAME:-localhost}"
+DEFAULT_NGINX_STATIC_ROOT="${LOCAL_SETUP_NGINX_STATIC_ROOT:-/var/www/complianceapp/staticfiles}"
 NGINX_SERVER_NAME="$DEFAULT_NGINX_SERVER_NAME"
+NGINX_STATIC_ROOT="$DEFAULT_NGINX_STATIC_ROOT"
 NGINX_PRIMARY_SERVER_NAME=""
 NGINX_SSL_CERT_PATH=""
 NGINX_SSL_KEY_PATH=""
@@ -249,7 +251,7 @@ configure_nginx_site_link() {
   local target_conf="$available_dir/complianceapp.conf"
   local target_link="$enabled_dir/complianceapp.conf"
   local nginx_upstream_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
-  local nginx_static_root="${LOCAL_SETUP_NGINX_STATIC_ROOT:-$ROOT_DIR/staticfiles}"
+  local nginx_static_root="$NGINX_STATIC_ROOT"
   local primary_server_name=""
   local tls_cert_path=""
   local tls_key_path=""
@@ -329,6 +331,27 @@ PY
   run_as_root install -m 0644 "$rendered_conf" "$target_conf"
   run_as_root ln -sfn "$target_conf" "$target_link"
   rm -f "$rendered_conf"
+}
+
+sync_static_assets_for_nginx() {
+  local collected_static_root="$ROOT_DIR/staticfiles"
+
+  if [ ! -d "$collected_static_root" ]; then
+    echo "Collected static directory not found at $collected_static_root." >&2
+    echo "Run collectstatic before syncing NGINX static assets." >&2
+    exit 1
+  fi
+
+  log "Syncing static assets to $NGINX_STATIC_ROOT"
+  run_as_root mkdir -p "$NGINX_STATIC_ROOT"
+  if command -v rsync >/dev/null 2>&1; then
+    run_as_root rsync -a --delete "$collected_static_root"/ "$NGINX_STATIC_ROOT"/
+  else
+    run_as_root cp -a "$collected_static_root"/. "$NGINX_STATIC_ROOT"/
+  fi
+
+  run_as_root find "$NGINX_STATIC_ROOT" -type d -exec chmod 755 {} \;
+  run_as_root find "$NGINX_STATIC_ROOT" -type f -exec chmod 644 {} \;
 }
 
 start_nginx_service() {
@@ -999,6 +1022,7 @@ fi
 
 python "$ROOT_DIR/manage.py" migrate
 collect_static_assets
+sync_static_assets_for_nginx
 setup_gunicorn_systemd_service
 verify_app_readiness
 start_nginx_service
@@ -1010,6 +1034,7 @@ echo "Gunicorn service units: ${GUNICORN_SERVICE_UNITS:-none}"
 if [ -n "$APP_HEALTHCHECK_URL" ]; then
   echo "Application readiness URL: $APP_HEALTHCHECK_URL"
 fi
+echo "NGINX static root: $NGINX_STATIC_ROOT"
 if [ "$CREATE_SELF_SIGNED_CERT" = "true" ] && [ -n "$NGINX_SSL_CERT_PATH" ] && [ -n "$NGINX_SSL_KEY_PATH" ]; then
   echo "Self-signed cert: $NGINX_SSL_CERT_PATH"
   echo "Self-signed key:  $NGINX_SSL_KEY_PATH"
