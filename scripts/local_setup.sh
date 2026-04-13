@@ -157,6 +157,47 @@ install_postgresql() {
   fi
 }
 
+install_nginx() {
+  if command -v nginx >/dev/null 2>&1; then
+    return
+  fi
+
+  local manager
+  manager="$(detect_package_manager)"
+  case "$manager" in
+    brew)
+      log "Installing NGINX with Homebrew"
+      brew install nginx
+      ;;
+    apt)
+      log "Installing NGINX with apt-get"
+      run_as_root apt-get update
+      run_as_root apt-get install -y nginx
+      ;;
+    dnf)
+      log "Installing NGINX with dnf"
+      run_as_root dnf install -y nginx
+      ;;
+    yum)
+      log "Installing NGINX with yum"
+      run_as_root yum install -y nginx
+      ;;
+    pacman)
+      log "Installing NGINX with pacman"
+      run_as_root pacman -Sy --noconfirm nginx
+      ;;
+    *)
+      echo "Unable to install NGINX automatically. Install NGINX manually and rerun this script." >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v nginx >/dev/null 2>&1; then
+    echo "NGINX installation did not provide the nginx command." >&2
+    exit 1
+  fi
+}
+
 ensure_python_venv() {
   if "$PYTHON_BIN" -c "import venv" >/dev/null 2>&1; then
     return
@@ -412,6 +453,7 @@ SQL
 
 ensure_python_runtime
 ensure_python_venv
+install_nginx
 
 if [ ! -d "$VENV_DIR" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
