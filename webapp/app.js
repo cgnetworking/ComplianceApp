@@ -353,6 +353,16 @@
       });
     }
 
+    if (els.documentViewer) {
+      els.documentViewer.addEventListener("click", async (event) => {
+        const removeButton = event.target.closest("[data-delete-policy]");
+        if (!removeButton) {
+          return;
+        }
+        await handlePolicyDelete(removeButton.dataset.deletePolicy);
+      });
+    }
+
     if (els.policyUploadTrigger && els.policyUploadInput) {
       els.policyUploadTrigger.addEventListener("click", () => {
         els.policyUploadInput.click();
@@ -913,6 +923,56 @@
       documents: Array.isArray(payload.documents) ? payload.documents : [],
       messages: Array.isArray(payload.messages) ? payload.messages : [],
     };
+  }
+
+  async function deletePolicyFromApi(documentId) {
+    return apiRequest(`/policies/${encodeURIComponent(documentId)}/`, {
+      method: "DELETE",
+    });
+  }
+
+  async function handlePolicyDelete(documentId) {
+    const selectedDocumentId = String(documentId || "").trim();
+    if (!selectedDocumentId) {
+      setPolicyUploadStatus("A policy id is required to delete a policy.", "error");
+      return;
+    }
+
+    const documentItem = uploadedDocuments.find((item) => item.id === selectedDocumentId);
+    if (!documentItem) {
+      setPolicyUploadStatus("Only uploaded policies can be deleted from this page.", "error");
+      return;
+    }
+
+    const shouldDelete = window.confirm(`Delete ${documentItem.id} / ${documentItem.title}? This cannot be undone.`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setPolicyUploadStatus(`Deleting ${documentItem.id}...`, "info");
+
+    try {
+      if (isApiPersistence()) {
+        await deletePolicyFromApi(selectedDocumentId);
+      }
+
+      const nextUploadedDocuments = uploadedDocuments.filter((item) => item.id !== selectedDocumentId);
+      if (!isApiPersistence()) {
+        await saveUploadedPolicies(nextUploadedDocuments);
+      }
+      uploadedDocuments = nextUploadedDocuments;
+      refreshDocumentsIndex();
+
+      if (state.activeDocumentId === selectedDocumentId) {
+        state.activeDocumentId = "";
+      }
+      initializePolicySelection();
+      syncUrl();
+      renderPoliciesPage();
+      setPolicyUploadStatus(`Deleted ${documentItem.id} / ${documentItem.title}.`, "success");
+    } catch (error) {
+      setPolicyUploadStatus(error.message || "Unable to delete the selected policy.", "error");
+    }
   }
 
   function buildUploadedPolicyDocument(file, rawContent, number) {
@@ -1687,6 +1747,9 @@
     if (documentItem.isUploaded && documentItem.uploadedAt) {
       documentMeta.push(`Uploaded: ${escapeHtml(formatDateTime(documentItem.uploadedAt))}`);
     }
+    const documentActions = documentItem.isUploaded
+      ? `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
+      : "";
 
     els.documentViewer.innerHTML = `
       <div class="document-heading">
@@ -1704,6 +1767,7 @@
           ${documentMeta.map((item) => `<span>${item}</span>`).join("")}
         </div>
         <div class="chip-row">${relatedControls || '<span class="chip">Not mapped to controls</span>'}</div>
+        ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}
       </div>
       <div class="content-frame">${documentItem.contentHtml}</div>
     `;
@@ -3241,11 +3305,7 @@
     }
 
     if (payload.mapping && typeof payload.mapping === "object") {
-      const remoteHasMapping = mappingHasContent(payload.mapping);
-      const localHasMapping = mappingHasContent(data);
-      if (remoteHasMapping || !localHasMapping) {
-        applyMappingPayload(payload.mapping);
-      }
+      applyMappingPayload(payload.mapping);
     }
     if (Array.isArray(payload.uploadedDocuments)) {
       uploadedDocuments = payload.uploadedDocuments;
@@ -3272,21 +3332,6 @@
     refreshControlsIndex();
     refreshDocumentsIndex();
     pruneControlState();
-  }
-
-  function mappingHasContent(payload) {
-    if (!payload || typeof payload !== "object") {
-      return false;
-    }
-
-    const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
-    const summaryControlCount = Number(summary.controlCount || 0);
-    return summaryControlCount > 0
-      || (Array.isArray(payload.controls) && payload.controls.length > 0)
-      || (Array.isArray(payload.documents) && payload.documents.length > 0)
-      || (Array.isArray(payload.activities) && payload.activities.length > 0)
-      || (Array.isArray(payload.checklist) && payload.checklist.length > 0)
-      || (Array.isArray(payload.policyCoverage) && payload.policyCoverage.length > 0);
   }
 
   async function apiRequest(path, options) {

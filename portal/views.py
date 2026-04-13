@@ -19,6 +19,7 @@ from .services import (
     create_review_checklist_item,
     create_uploaded_policies,
     create_vendor_responses,
+    delete_uploaded_policy,
     get_bootstrap_payload,
     get_mapping_payload,
     list_review_checklist_items,
@@ -185,6 +186,17 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": str(error)}, status=400)
 
     return JsonResponse({"documents": documents, "messages": messages})
+
+
+@api_login_required
+@require_http_methods(["DELETE"])
+def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
+    try:
+        deleted_document = delete_uploaded_policy(document_id)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=404)
+
+    return JsonResponse({"deletedDocument": deleted_document})
 
 
 @api_login_required

@@ -546,6 +546,21 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
     return [item.to_portal_dict() for item in created_items], messages
 
 
+def delete_uploaded_policy(document_id: str) -> dict[str, object]:
+    normalized_id = normalize_string(document_id)
+    if not normalized_id:
+        raise ValidationError("Policy id is required.")
+
+    try:
+        policy = UploadedPolicy.objects.get(document_id=normalized_id)
+    except UploadedPolicy.DoesNotExist as error:
+        raise ValidationError("Uploaded policy was not found.") from error
+
+    deleted_payload = policy.to_portal_dict()
+    policy.delete()
+    return deleted_payload
+
+
 def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]]:
     created_items: list[VendorResponse] = []
 

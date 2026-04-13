@@ -7,6 +7,7 @@ urlpatterns = [
     path("state/", views.bootstrap_state, name="api-state"),
     path("mapping/uploads/", views.upload_mapping, name="api-mapping-uploads"),
     path("policies/uploads/", views.upload_policies, name="api-policy-uploads"),
+    path("policies/<str:document_id>/", views.policy_document, name="api-policy-document"),
     path("vendors/uploads/", views.upload_vendors, name="api-vendor-uploads"),
     path("risks/", views.risk_register, name="api-risks"),
     path("checklist/", views.checklist_items, name="api-checklist-items"),
