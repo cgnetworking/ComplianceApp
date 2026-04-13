@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ISMS Policies</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="policies">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">I</div>
+        <div>
+          <p class="brand-label">ISMS</p>
+          <strong class="brand-name">Command Center</strong>
+        </div>
+      </div>
+
+      <label class="sidebar-search">
+        <span class="search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="11" cy="11" r="6.5"></circle>
+            <path d="M16 16l5 5"></path>
+          </svg>
+        </span>
+        <input id="search-input" type="search" placeholder="Search mapped policies">
+      </label>
+
+      <nav class="sidebar-nav">
+        <a class="nav-link" href="./index.html">Home</a>
+        <a class="nav-link" href="./controls.html">Controls</a>
+        <a class="nav-link" href="./reports.html">Reports</a>
+        <a class="nav-link" href="./reviews.html">Reviews</a>
+        <a class="nav-link is-active" href="./policies.html">Policies</a>
+      </nav>
+
+      <div class="sidebar-group">
+        <p class="sidebar-heading">Framework</p>
+        <div class="sidebar-chip">ISO 27001:2022</div>
+      </div>
+
+      <div class="sidebar-group">
+        <p class="sidebar-heading">Snapshot</p>
+        <div class="sidebar-meta">
+          <span class="sidebar-meta-label">Mode</span>
+          <strong id="runtime-mode">Embedded snapshot</strong>
+        </div>
+        <div class="sidebar-meta">
+          <span class="sidebar-meta-label">Built</span>
+          <strong id="generated-at">-</strong>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="workspace-switcher">
+          <div class="workspace-icon">A</div>
+          <div>
+            <p class="workspace-label">Workspace</p>
+            <strong>Acme Co / ISO Program</strong>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="avatar">IT</div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="report-header">
+          <p class="section-kicker">Policies</p>
+          <h1>Mapped policy library</h1>
+          <p class="report-copy">
+            Open the embedded policy content directly. If you arrived from a control number, the selected control mapping is shown at the top of the page.
+          </p>
+        </section>
+
+        <section class="banner-panel" id="selected-control-banner"></section>
+
+        <section class="page-grid page-grid-policies">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Policy coverage</p>
+                <h2>Mapped documents</h2>
+              </div>
+            </div>
+            <div id="policy-coverage"></div>
+          </article>
+
+          <article class="panel">
+            <div id="document-viewer"></div>
+          </article>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
