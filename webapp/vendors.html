@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISMS Policies</title>
+  <title>ISMS Vendors</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
-<body data-page="policies">
+<body data-page="vendors">
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand-row">
@@ -24,7 +24,7 @@
             <path d="M16 16l5 5"></path>
           </svg>
         </span>
-        <input id="search-input" type="search" placeholder="Search policy library">
+        <input id="search-input" type="search" placeholder="Search imported vendor responses">
       </label>
 
       <nav class="sidebar-nav">
@@ -32,9 +32,9 @@
         <a class="nav-link" href="./controls.html">Controls</a>
         <a class="nav-link" href="./reports.html">Reports</a>
         <a class="nav-link" href="./reviews.html">Reviews</a>
-        <a class="nav-link is-active" href="./policies.html">Policies</a>
+        <a class="nav-link" href="./policies.html">Policies</a>
         <a class="nav-link" href="./risks.html">Risk Register</a>
-        <a class="nav-link" href="./vendors.html">Vendors</a>
+        <a class="nav-link is-active" href="./vendors.html">Vendors</a>
       </nav>
 
       <div class="sidebar-group">
@@ -72,36 +72,36 @@
       <main class="content">
         <section class="report-header report-header-split">
           <div>
-            <p class="section-kicker">Policies</p>
-            <h1>Policy Library</h1>
+            <p class="section-kicker">Vendors</p>
+            <h1>Vendor due diligence intake</h1>
             <p class="report-copy">
-              Open the embedded policy content directly. If you arrived from a control number, the selected control mapping is shown at the top of the page.
+              Import vendor due diligence survey responses into this browser workspace, review extracted previews, and stage supplier evidence for follow-up.
             </p>
           </div>
           <div class="report-actions">
-            <input id="policy-upload-input" type="file" accept=".md,.markdown,.txt,.html,.htm" multiple hidden>
-            <button class="ghost-button" id="policy-upload-trigger" type="button">Upload Policy</button>
-            <p class="helper-note upload-status" id="policy-upload-status">
-              Add markdown, text, or HTML policy files to this browser's library.
+            <input id="vendor-upload-input" type="file" accept=".csv,.json,.txt,.md,.markdown,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
+            <button class="ghost-button" id="vendor-upload-trigger" type="button">Import Responses</button>
+            <p class="helper-note upload-status" id="vendor-upload-status">
+              Upload completed questionnaires, spreadsheets, or exported response files. Text-based files generate inline previews.
             </p>
           </div>
         </section>
 
-        <section class="banner-panel" id="selected-control-banner"></section>
+        <section class="overview" id="vendor-overview"></section>
 
-        <section class="page-grid page-grid-policies">
+        <section class="page-grid page-grid-vendors">
           <article class="panel">
             <div class="panel-head">
               <div>
-                <p class="panel-kicker">Policy library</p>
-                <h2>Policy documents</h2>
+                <p class="panel-kicker">Import queue</p>
+                <h2>Vendor survey responses</h2>
               </div>
             </div>
-            <div id="policy-coverage"></div>
+            <div id="vendor-responses"></div>
           </article>
 
           <article class="panel">
-            <div id="document-viewer"></div>
+            <div id="vendor-detail"></div>
           </article>
         </section>
       </main>

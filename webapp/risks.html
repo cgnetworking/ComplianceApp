@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ISMS Risk Register</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="risks">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">I</div>
+        <div>
+          <p class="brand-label">ISMS</p>
+          <strong class="brand-name">Command Center</strong>
+        </div>
+      </div>
+
+      <label class="sidebar-search">
+        <span class="search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="11" cy="11" r="6.5"></circle>
+            <path d="M16 16l5 5"></path>
+          </svg>
+        </span>
+        <input id="search-input" type="search" placeholder="Search risks or owners">
+      </label>
+
+      <nav class="sidebar-nav">
+        <a class="nav-link" href="./index.html">Home</a>
+        <a class="nav-link" href="./controls.html">Controls</a>
+        <a class="nav-link" href="./reports.html">Reports</a>
+        <a class="nav-link" href="./reviews.html">Reviews</a>
+        <a class="nav-link" href="./policies.html">Policies</a>
+        <a class="nav-link is-active" href="./risks.html">Risk Register</a>
+        <a class="nav-link" href="./vendors.html">Vendors</a>
+      </nav>
+
+      <div class="sidebar-group">
+        <p class="sidebar-heading">Framework</p>
+        <div class="sidebar-chip">ISO 27001:2022</div>
+      </div>
+
+      <div class="sidebar-group">
+        <p class="sidebar-heading">Snapshot</p>
+        <div class="sidebar-meta">
+          <span class="sidebar-meta-label">Mode</span>
+          <strong id="runtime-mode">Embedded snapshot</strong>
+        </div>
+        <div class="sidebar-meta">
+          <span class="sidebar-meta-label">Built</span>
+          <strong id="generated-at">-</strong>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="workspace-switcher">
+          <div class="workspace-icon">A</div>
+          <div>
+            <p class="workspace-label">Workspace</p>
+            <strong>Acme Co / ISO Program</strong>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="avatar">IT</div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="report-header">
+          <p class="section-kicker">Risk Register</p>
+          <h1>Business risk register</h1>
+          <p class="report-copy">
+            Track business risks in one place, assign owners, and record the initial risk level and closure date for each entry.
+          </p>
+        </section>
+
+        <section class="overview" id="overview"></section>
+
+        <section class="page-grid page-grid-risks">
+          <article class="panel">
+            <div class="panel-head panel-head-actions">
+              <div>
+                <p class="panel-kicker">Risk log</p>
+                <h2>Tracked business risks</h2>
+              </div>
+              <button class="ghost-button" id="add-risk-trigger" type="button">Add New Risk</button>
+            </div>
+            <div id="risk-list"></div>
+          </article>
+
+          <article class="panel">
+            <form class="risk-form" id="risk-form">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker" id="risk-form-kicker">New risk</p>
+                  <h2 id="risk-form-title">Capture a new risk</h2>
+                </div>
+              </div>
+
+              <p class="helper-note risk-form-copy" id="risk-form-copy">
+                Risk entries are stored locally in this browser.
+              </p>
+
+              <label class="form-field" for="risk-name">
+                <span>Risk</span>
+                <textarea id="risk-name" name="risk" rows="5" placeholder="Describe the business risk." required></textarea>
+              </label>
+
+              <fieldset class="risk-level-field">
+                <legend>Initial Risk Level</legend>
+                <div class="risk-level-grid">
+                  <label class="risk-level-option level-1">
+                    <input type="radio" name="initial-risk-level" value="1">
+                    <span>1</span>
+                  </label>
+                  <label class="risk-level-option level-2">
+                    <input type="radio" name="initial-risk-level" value="2">
+                    <span>2</span>
+                  </label>
+                  <label class="risk-level-option level-3">
+                    <input type="radio" name="initial-risk-level" value="3" checked>
+                    <span>3</span>
+                  </label>
+                  <label class="risk-level-option level-4">
+                    <input type="radio" name="initial-risk-level" value="4">
+                    <span>4</span>
+                  </label>
+                  <label class="risk-level-option level-5">
+                    <input type="radio" name="initial-risk-level" value="5">
+                    <span>5</span>
+                  </label>
+                </div>
+                <p class="helper-note">1 is the lowest risk level and 5 is the highest.</p>
+              </fieldset>
+
+              <div class="form-grid">
+                <label class="form-field" for="risk-date">
+                  <span>Date</span>
+                  <input id="risk-date" name="risk-date" type="date" required>
+                </label>
+
+                <label class="form-field" for="risk-owner">
+                  <span>Risk Owner</span>
+                  <input id="risk-owner" name="risk-owner" type="text" placeholder="Assign an owner" required>
+                </label>
+              </div>
+
+              <label class="form-field" for="risk-closed-date">
+                <span>Risk Closed Date</span>
+                <input id="risk-closed-date" name="risk-closed-date" type="date">
+              </label>
+
+              <div class="form-actions">
+                <button class="ghost-button primary-button" id="risk-submit-button" type="submit">Save Risk</button>
+              </div>
+
+              <p class="helper-note risk-form-status" id="risk-form-status">Risk entries are stored locally in this browser.</p>
+            </form>
+          </article>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
