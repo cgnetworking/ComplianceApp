@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${COMPOSE_POSTGRES_DB:-iso27001}
+      POSTGRES_USER: ${COMPOSE_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_SECRET_KEY: ${COMPOSE_DJANGO_SECRET_KEY:-unsafe-dev-container-secret}
+      DJANGO_DEBUG: ${COMPOSE_DJANGO_DEBUG:-false}
+      ALLOWED_HOSTS: ${COMPOSE_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ${COMPOSE_CSRF_TRUSTED_ORIGINS:-http://localhost:8000}
+      TIME_ZONE: ${COMPOSE_TIME_ZONE:-America/New_York}
+      DATABASE_URL: postgresql://db:5432/${COMPOSE_POSTGRES_DB:-iso27001}
+      DATABASE_USER: ${COMPOSE_POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-postgres}
+      COLLECTSTATIC_ON_START: ${COMPOSE_COLLECTSTATIC_ON_START:-true}
+      GUNICORN_WORKERS: ${COMPOSE_GUNICORN_WORKERS:-3}
+    ports:
+      - "${COMPOSE_WEB_PORT:-8000}:8000"
+
+volumes:
+  postgres_data:

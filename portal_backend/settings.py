@@ -25,12 +25,16 @@ def parse_database_url(database_url: str) -> dict[str, object]:
     scheme = parsed.scheme.lower()
     if scheme not in {"postgres", "postgresql", "pgsql"}:
         raise ValueError(f"Unsupported database scheme: {parsed.scheme}")
+    if parsed.username or parsed.password:
+        raise ValueError("DATABASE_URL must not include credentials. Use DATABASE_USER and DATABASE_PASSWORD.")
+
+    database_name = unquote(parsed.path.lstrip("/"))
+    if not database_name:
+        raise ValueError("DATABASE_URL must include a database name.")
 
     options = {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": unquote(parsed.path.lstrip("/")),
-        "USER": unquote(parsed.username or ""),
-        "PASSWORD": unquote(parsed.password or ""),
+        "NAME": database_name,
         "HOST": parsed.hostname or "",
         "PORT": str(parsed.port or ""),
     }
@@ -44,13 +48,21 @@ def parse_database_url(database_url: str) -> dict[str, object]:
 
 def resolve_database() -> dict[str, object]:
     database_url = os.environ.get("DATABASE_URL", "").strip()
-    if database_url:
-        return parse_database_url(database_url)
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required. SQLite is not supported in this project.")
 
-    return {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    database_user = os.environ.get("DATABASE_USER", "").strip()
+    if not database_user:
+        raise RuntimeError("DATABASE_USER is required.")
+
+    database_password = os.environ.get("DATABASE_PASSWORD")
+    if database_password is None:
+        raise RuntimeError("DATABASE_PASSWORD is required (can be blank).")
+
+    options = parse_database_url(database_url)
+    options["USER"] = database_user
+    options["PASSWORD"] = database_password
+    return options
 
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "unsafe-local-dev-secret-key")

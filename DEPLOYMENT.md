@@ -43,7 +43,7 @@ The default settings also enable per-backend domain and email allowlists, requir
 3. Run `python manage.py createsuperuser` if you want Django admin access.
 4. Run `python manage.py runserver`.
 
-The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, and runs migrations. The Django entrypoints load `.env` automatically for local commands.
+The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, and runs migrations. The Django entrypoints load `.env` automatically for local commands.
 
 The portal pages will be available at:
 
@@ -56,19 +56,86 @@ The portal pages will be available at:
 - `http://localhost:8000/risks.html`
 - `http://localhost:8000/vendors.html`
 
+## Containers
+
+This repo includes a containerized runtime with Django + PostgreSQL.
+
+1. Build and start services:
+
+`docker compose up --build -d`
+
+2. Watch logs:
+
+`docker compose logs -f web`
+
+3. Create an admin user:
+
+`docker compose exec web python manage.py createsuperuser`
+
+4. Open the app:
+
+`http://localhost:8000/`
+
+Container files:
+
+- [Dockerfile](/Users/coreygeorge/Documents/ISO27001/Dockerfile)
+- [docker-compose.yml](/Users/coreygeorge/Documents/ISO27001/docker-compose.yml)
+- [scripts/docker_start.sh](/Users/coreygeorge/Documents/ISO27001/scripts/docker_start.sh)
+
+Useful compose variables (set in your shell or a compose env file):
+
+- `COMPOSE_POSTGRES_DB` (default `iso27001`)
+- `COMPOSE_POSTGRES_USER` (default `postgres`)
+- `COMPOSE_POSTGRES_PASSWORD` (default `postgres`)
+- `COMPOSE_DJANGO_SECRET_KEY`
+- `COMPOSE_DJANGO_DEBUG`
+- `COMPOSE_WEB_PORT` (default `8000`)
+
+Stop and remove containers:
+
+`docker compose down`
+
+Stop and remove containers + database volume:
+
+`docker compose down -v`
+
 ## PostgreSQL
 
-Set `DATABASE_URL` in `.env` to a PostgreSQL connection string, for example:
+PostgreSQL is required for both local development and hosting. Set `DATABASE_URL` in `.env` to a PostgreSQL connection string, for example:
 
-`postgresql://postgres:postgres@localhost:5432/iso27001`
+`postgresql://localhost:5432/iso27001`
 
-If `DATABASE_URL` is not set, Django falls back to SQLite for local development.
-The generated local `.env` leaves PostgreSQL disabled by default so a new machine can boot with SQLite immediately.
+Set credentials separately:
+
+- `DATABASE_USER=postgres`
+- `DATABASE_PASSWORD=<your-password>`
+
+`DATABASE_URL` should not include username or password.
+
+If you want a different local connection string or user, run the setup script with:
+
+- `LOCAL_SETUP_DATABASE_URL=postgresql://localhost:5432/customdb ./scripts/local_setup.sh`
+- `LOCAL_SETUP_DATABASE_USER=customuser ./scripts/local_setup.sh`
+
+## Nginx
+
+Deployment includes Nginx as the reverse proxy in front of Gunicorn.
+
+1. Install Nginx on the host (for example, `sudo apt-get install -y nginx` on Ubuntu).
+2. Copy [deploy/nginx/iso27001.conf](/Users/coreygeorge/Documents/ISO27001/deploy/nginx/iso27001.conf) to `/etc/nginx/sites-available/iso27001.conf`.
+3. Update `server_name`, TLS certificate paths, the static assets path, and Gunicorn port to match your environment.
+4. Enable the site and reload Nginx.
+
+Example on Ubuntu:
+
+`sudo ln -sf /etc/nginx/sites-available/iso27001.conf /etc/nginx/sites-enabled/iso27001.conf`
+
+`sudo nginx -t && sudo systemctl reload nginx`
 
 ## Hosting notes
 
 - `gunicorn portal_backend.wsgi:application` is the production entrypoint.
-- Static assets are served through WhiteNoise after `python manage.py collectstatic`.
+- Collect static assets with `python manage.py collectstatic` before enabling Nginx static routing.
 - The current implementation keeps uploaded content in PostgreSQL-backed records, but does not expose raw file downloads. That avoids adding object storage as a hard dependency for the first hosted version.
 - If you later want to retain original uploaded files, add S3-compatible media storage rather than relying on an ephemeral app filesystem.
 - Put the Django app and the HTML frontend on the same domain so CSRF protection works without extra CORS setup.
