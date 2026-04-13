@@ -23,6 +23,7 @@ from .services import (
     get_bootstrap_payload,
     get_mapping_payload,
     list_review_checklist_items,
+    list_review_checklist_recommendations,
     normalize_control_state,
     normalize_mapping_payload,
     normalize_review_state,
@@ -262,6 +263,12 @@ def checklist_items(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": str(error)}, status=400)
 
     return JsonResponse({"checklistItem": checklist_item}, status=201)
+
+
+@api_login_required
+@require_GET
+def checklist_recommendations(request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"recommendedChecklistItems": list_review_checklist_recommendations()})
 
 
 @api_login_required

@@ -131,6 +131,31 @@ class ReviewChecklistItem(models.Model):
         }
 
 
+class ReviewChecklistRecommendation(models.Model):
+    external_id = models.CharField(max_length=64, unique=True)
+    category = models.CharField(max_length=120, default="Custom")
+    item = models.TextField()
+    frequency = models.CharField(max_length=120, default="Annual")
+    owner = models.CharField(max_length=255, default="Shared portal")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["category", "created_at", "external_id"]
+
+    def __str__(self) -> str:
+        return self.external_id
+
+    def to_portal_dict(self) -> dict[str, str]:
+        return {
+            "id": self.external_id,
+            "category": self.category,
+            "item": self.item,
+            "frequency": self.frequency,
+            "owner": self.owner,
+        }
+
+
 class PortalState(models.Model):
     key = models.CharField(max_length=64, unique=True)
     payload = models.JSONField(default=dict, blank=True)

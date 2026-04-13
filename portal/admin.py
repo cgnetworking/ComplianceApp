@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import PortalState, ReviewChecklistItem, RiskRecord, UploadedPolicy, VendorResponse
+from .models import (
+    PortalState,
+    ReviewChecklistItem,
+    ReviewChecklistRecommendation,
+    RiskRecord,
+    UploadedPolicy,
+    VendorResponse,
+)
 
 
 @admin.register(UploadedPolicy)
@@ -23,6 +30,12 @@ class RiskRecordAdmin(admin.ModelAdmin):
 
 @admin.register(ReviewChecklistItem)
 class ReviewChecklistItemAdmin(admin.ModelAdmin):
+    list_display = ("external_id", "category", "frequency", "owner", "updated_at")
+    search_fields = ("external_id", "category", "item", "frequency", "owner")
+
+
+@admin.register(ReviewChecklistRecommendation)
+class ReviewChecklistRecommendationAdmin(admin.ModelAdmin):
     list_display = ("external_id", "category", "frequency", "owner", "updated_at")
     search_fields = ("external_id", "category", "item", "frequency", "owner")
 

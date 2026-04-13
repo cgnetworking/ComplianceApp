@@ -75,7 +75,7 @@
           <p class="section-kicker">Reviews</p>
           <h1>Review tracker</h1>
           <p class="report-copy">
-            Work through the annual review schedule and recurring review checklist from a dedicated page. Checklist content and completion state are stored in the shared database.
+            Work through the annual review schedule and recurring review checklist from a dedicated page. Review checklist tasks, monthly program items, and completion state are stored in the shared database.
           </p>
         </section>
 
@@ -105,6 +105,16 @@
             </div>
             <div class="mini-stats" id="checklist-summary"></div>
             <form class="risk-form" id="checklist-add-form" hidden>
+              <div class="quick-add-row">
+                <label class="form-field" for="checklist-recommendation-select">
+                  <span>Recommended task</span>
+                  <select id="checklist-recommendation-select">
+                    <option value="">Select a recommended task</option>
+                  </select>
+                </label>
+                <button class="ghost-button" type="button" id="checklist-recommendation-add">Quick add selected task</button>
+              </div>
+
               <div class="form-grid">
                 <label class="form-field" for="checklist-add-category">
                   <span>Category</span>

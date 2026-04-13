@@ -13,7 +13,14 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 
-from .models import PortalState, ReviewChecklistItem, RiskRecord, UploadedPolicy, VendorResponse
+from .models import (
+    PortalState,
+    ReviewChecklistItem,
+    ReviewChecklistRecommendation,
+    RiskRecord,
+    UploadedPolicy,
+    VendorResponse,
+)
 
 
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
@@ -421,8 +428,12 @@ def list_review_checklist_items() -> list[dict[str, str]]:
     return [item.to_portal_dict() for item in ReviewChecklistItem.objects.all()]
 
 
-def ensure_review_checklist_seeded() -> None:
-    if ReviewChecklistItem.objects.exists():
+def list_review_checklist_recommendations() -> list[dict[str, str]]:
+    return [item.to_portal_dict() for item in ReviewChecklistRecommendation.objects.all()]
+
+
+def ensure_review_checklist_recommendations_seeded() -> None:
+    if ReviewChecklistRecommendation.objects.exists():
         return
 
     mapping_payload = get_mapping_payload()
@@ -433,7 +444,7 @@ def ensure_review_checklist_seeded() -> None:
         return
 
     seen_ids: set[str] = set()
-    to_create: list[ReviewChecklistItem] = []
+    to_create: list[ReviewChecklistRecommendation] = []
     for item in checklist_items:
         item_id = normalize_string(item.get("id"))
         item_text = normalize_string(item.get("item"))
@@ -441,7 +452,7 @@ def ensure_review_checklist_seeded() -> None:
             continue
         seen_ids.add(item_id)
         to_create.append(
-            ReviewChecklistItem(
+            ReviewChecklistRecommendation(
                 external_id=item_id,
                 category=normalize_string(item.get("category"), "Custom"),
                 item=item_text,
@@ -451,7 +462,7 @@ def ensure_review_checklist_seeded() -> None:
         )
 
     if to_create:
-        ReviewChecklistItem.objects.bulk_create(to_create, ignore_conflicts=True)
+        ReviewChecklistRecommendation.objects.bulk_create(to_create, ignore_conflicts=True)
 
 
 def create_review_checklist_item(payload: object) -> dict[str, str]:
@@ -482,11 +493,12 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
 
 
 def get_bootstrap_payload() -> dict[str, object]:
-    ensure_review_checklist_seeded()
+    ensure_review_checklist_recommendations_seeded()
     return {
         "persistenceMode": "api",
         "mapping": get_mapping_payload(),
         "checklistItems": list_review_checklist_items(),
+        "recommendedChecklistItems": list_review_checklist_recommendations(),
         "uploadedDocuments": [item.to_portal_dict() for item in UploadedPolicy.objects.all()],
         "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
         "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],
