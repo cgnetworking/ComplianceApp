@@ -280,7 +280,7 @@ configure_nginx_site_link() {
   NGINX_SSL_KEY_PATH="$tls_key_path"
 
   rendered_conf="$(mktemp)"
-  python - "$source_conf" "$NGINX_SERVER_NAME" "$nginx_upstream_bind" "$nginx_static_root" "$tls_cert_path" "$tls_key_path" "$rendered_conf" <<'PY'
+  "$PYTHON_BIN" - "$source_conf" "$NGINX_SERVER_NAME" "$nginx_upstream_bind" "$nginx_static_root" "$tls_cert_path" "$tls_key_path" "$rendered_conf" <<'PY'
 from pathlib import Path
 import sys
 

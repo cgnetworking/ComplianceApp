@@ -48,25 +48,34 @@ The default settings also enable per-backend domain and email allowlists, requir
 
 `scripts/local_setup.sh` is designed for Ubuntu 24.04+.
 
-1. Run `./scripts/local_setup.sh`.
+1. Run `./scripts/local_setup.sh` from the repository root.
 2. Run `python manage.py createsuperuser` if you want Django admin access.
 
-The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, creates/enables/starts Gunicorn systemd services, and validates app readiness.
+The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, renders and installs NGINX site config, creates/enables/starts Gunicorn systemd service units, validates app readiness, and starts/enables NGINX when config validation passes.
 
 During setup, the script asks a yes/no question about generating a local self-signed TLS cert. If you answer yes, it creates the cert at the exact `ssl_certificate` and `ssl_certificate_key` paths rendered into `deploy/nginx/complianceapp.conf`.
 
 For non-interactive runs, set `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=true` or `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=false`.
 
+Useful local setup overrides:
+
+- `LOCAL_SETUP_DATABASE_URL`
+- `LOCAL_SETUP_DATABASE_USER`
+- `LOCAL_SETUP_NGINX_SERVER_NAME`
+- `LOCAL_SETUP_NGINX_STATIC_ROOT`
+- `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT`
+- `LOCAL_SETUP_SELF_SIGNED_CERT_DAYS`
+- `LOCAL_SETUP_GUNICORN_BIND`
+- `LOCAL_SETUP_GUNICORN_WORKERS`
+- `LOCAL_SETUP_GUNICORN_SERVICE_NAME`
+- `LOCAL_SETUP_GUNICORN_SERVICE_NAMES` (comma-separated)
+- `LOCAL_SETUP_HEALTHCHECK_URL`
+
 The portal pages will be available at:
 
-- `http://localhost:8000/`
-- `http://localhost:8000/index.html`
-- `http://localhost:8000/controls.html`
-- `http://localhost:8000/reports.html`
-- `http://localhost:8000/reviews.html`
-- `http://localhost:8000/policies.html`
-- `http://localhost:8000/risks.html`
-- `http://localhost:8000/vendors.html`
+- `http://127.0.0.1:8000/` (direct Gunicorn bind, default)
+- `https://localhost/` via NGINX when `LOCAL_SETUP_NGINX_SERVER_NAME` is default and TLS is configured
+- `http://localhost/` redirects to `https://localhost/` in the default NGINX config
 
 ## PostgreSQL
 
@@ -90,21 +99,24 @@ If you want a different local connection string or user, run the setup script wi
 
 Deployment includes Nginx as the reverse proxy in front of Gunicorn.
 
-1. Install Nginx on the host (for example, `sudo apt-get install -y nginx` on Ubuntu).
-2. Copy [deploy/nginx/complianceapp.conf](/Users/coreygeorge/Documents/ISO27001/deploy/nginx/complianceapp.conf) to `/etc/nginx/sites-available/complianceapp.conf`.
-3. Update `server_name`, TLS certificate paths, the static assets path, and Gunicorn port to match your environment.
-4. Enable the site and reload Nginx.
+For local Ubuntu 24.04+ setup, `./scripts/local_setup.sh` handles NGINX automatically:
 
-Example on Ubuntu:
+- Installs NGINX when missing
+- Renders `server_name`, Gunicorn upstream bind, static alias path, and TLS cert/key paths
+- Installs `/etc/nginx/sites-available/complianceapp.conf`
+- Creates `/etc/nginx/sites-enabled/complianceapp.conf` symlink
+- Validates config and starts/enables `nginx` if valid
 
-`sudo ln -sf /etc/nginx/sites-available/complianceapp.conf /etc/nginx/sites-enabled/`
+For manual/custom deployment, use [deploy/nginx/complianceapp.conf](/Users/coreygeorge/Documents/ISO27001/deploy/nginx/complianceapp.conf) as the template and apply your environment-specific values.
+
+Example manual reload on Ubuntu:
 
 `sudo nginx -t && sudo systemctl reload nginx`
 
 ## Hosting notes
 
 - `gunicorn portal_backend.wsgi:application` is the production entrypoint.
-- Collect static assets with `python manage.py collectstatic` before enabling Nginx static routing.
+- `scripts/local_setup.sh` already runs `python manage.py collectstatic --noinput`.
 - The current implementation keeps uploaded content in PostgreSQL-backed records, but does not expose raw file downloads. That avoids adding object storage as a hard dependency for the first hosted version.
 - If you later want to retain original uploaded files, add S3-compatible media storage rather than relying on an ephemeral app filesystem.
 - Put the Django app and the HTML frontend on the same domain so CSRF protection works without extra CORS setup.
