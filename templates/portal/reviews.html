@@ -99,8 +99,39 @@
                 <p class="panel-kicker">Recurring checks</p>
                 <h2>Review checklist</h2>
               </div>
+              <div class="panel-head-actions">
+                <button class="ghost-button" type="button" id="checklist-add-trigger">Add Checklist Item</button>
+              </div>
             </div>
             <div class="mini-stats" id="checklist-summary"></div>
+            <form class="risk-form" id="checklist-add-form" hidden>
+              <div class="form-grid">
+                <label class="form-field" for="checklist-add-category">
+                  <span>Category</span>
+                  <input id="checklist-add-category" type="text" placeholder="Governance">
+                </label>
+                <label class="form-field" for="checklist-add-frequency">
+                  <span>Frequency</span>
+                  <input id="checklist-add-frequency" type="text" placeholder="Quarterly">
+                </label>
+              </div>
+
+              <label class="form-field" for="checklist-add-item">
+                <span>Checklist item</span>
+                <textarea id="checklist-add-item" placeholder="Describe the review check to perform." required></textarea>
+              </label>
+
+              <label class="form-field" for="checklist-add-owner">
+                <span>Owner</span>
+                <input id="checklist-add-owner" type="text" placeholder="Head of IT">
+              </label>
+
+              <div class="form-actions">
+                <button class="ghost-button primary-button" type="submit">Save checklist item</button>
+                <button class="ghost-button" type="button" id="checklist-add-cancel">Cancel</button>
+              </div>
+              <p class="helper-note" id="checklist-add-status"></p>
+            </form>
             <div id="checklist"></div>
           </article>
         </section>

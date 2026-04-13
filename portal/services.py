@@ -520,14 +520,46 @@ def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
     return [item.to_portal_dict() for item in RiskRecord.objects.all()]
 
 
+def normalize_custom_checklist_items(payload: object) -> list[dict[str, str]]:
+    if not isinstance(payload, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+
+        item_id = str(item.get("id") or "").strip()
+        checklist_item = str(item.get("item") or "").strip()
+        if not item_id or not checklist_item or item_id in seen_ids:
+            continue
+
+        seen_ids.add(item_id)
+        normalized.append(
+            {
+                "id": item_id,
+                "category": str(item.get("category") or "").strip() or "Custom",
+                "item": checklist_item,
+                "frequency": str(item.get("frequency") or "").strip() or "Annual",
+                "owner": str(item.get("owner") or "").strip() or "Shared portal",
+            }
+        )
+
+    return normalized
+
+
 def normalize_review_state(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
-        return {"activities": {}, "checklist": {}}
+        return {"activities": {}, "checklist": {}, "customChecklist": []}
     activities = payload.get("activities") if isinstance(payload.get("activities"), dict) else {}
     checklist = payload.get("checklist") if isinstance(payload.get("checklist"), dict) else {}
+    custom_checklist = normalize_custom_checklist_items(payload.get("customChecklist"))
     return {
         "activities": {str(key): bool(value) for key, value in activities.items()},
         "checklist": {str(key): bool(value) for key, value in checklist.items()},
+        "customChecklist": custom_checklist,
     }
 
 
@@ -541,8 +573,12 @@ def normalize_control_state(payload: object) -> dict[str, object]:
             continue
         excluded = bool(value.get("excluded"))
         reason = str(value.get("reason") or "")
-        if excluded or reason:
-            normalized[key] = {"excluded": excluded, "reason": reason}
+        applicability = str(value.get("applicability") or "").strip()
+        if excluded or reason or applicability:
+            entry: dict[str, object] = {"excluded": excluded, "reason": reason}
+            if applicability:
+                entry["applicability"] = applicability
+            normalized[key] = entry
     return normalized
 
 

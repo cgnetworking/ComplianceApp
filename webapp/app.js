@@ -99,6 +99,14 @@
     activities: document.getElementById("activities"),
     checklistSummary: document.getElementById("checklist-summary"),
     checklist: document.getElementById("checklist"),
+    checklistAddTrigger: document.getElementById("checklist-add-trigger"),
+    checklistAddForm: document.getElementById("checklist-add-form"),
+    checklistAddCancel: document.getElementById("checklist-add-cancel"),
+    checklistAddStatus: document.getElementById("checklist-add-status"),
+    checklistAddCategory: document.getElementById("checklist-add-category"),
+    checklistAddItem: document.getElementById("checklist-add-item"),
+    checklistAddFrequency: document.getElementById("checklist-add-frequency"),
+    checklistAddOwner: document.getElementById("checklist-add-owner"),
     homeUpcoming: document.getElementById("home-upcoming"),
     homeDomains: document.getElementById("home-domains"),
     homePolicies: document.getElementById("home-policies"),
@@ -406,6 +414,22 @@
         saveReviewState();
         renderReviewsPage();
       });
+    }
+
+    if (els.checklistAddTrigger) {
+      els.checklistAddTrigger.addEventListener("click", () => {
+        toggleChecklistAddForm(true);
+      });
+    }
+
+    if (els.checklistAddCancel) {
+      els.checklistAddCancel.addEventListener("click", () => {
+        toggleChecklistAddForm(false);
+      });
+    }
+
+    if (els.checklistAddForm) {
+      els.checklistAddForm.addEventListener("submit", handleChecklistAddSubmit);
     }
 
     if (els.addRiskTrigger) {
@@ -1082,7 +1106,8 @@
       return;
     }
 
-    const checklistDone = data.checklist.filter((item) => state.reviewState.checklist[item.id]).length;
+    const checklistItems = getAllChecklistItems();
+    const checklistDone = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
     const activityDone = options.currentMonthActivities.filter((item) => state.reviewState.activities[item.id]).length;
     const mappedPolicies = new Set(controls.flatMap((control) => control.policyDocumentIds)).size;
 
@@ -1127,7 +1152,7 @@
           },
           {
             label: "Checklist progress",
-            value: `${checklistDone}/${data.checklist.length}`,
+            value: `${checklistDone}/${checklistItems.length}`,
             note: "Recurring review checks marked complete.",
           },
         ];
@@ -1148,7 +1173,8 @@
 
     const monthItems = monthlyActivities(state.monthIndex);
     const completedMonthItems = monthItems.filter((item) => state.reviewState.activities[item.id]).length;
-    const completedChecklist = data.checklist.filter((item) => state.reviewState.checklist[item.id]).length;
+    const checklistItems = getAllChecklistItems();
+    const completedChecklist = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
 
     const cards = [
       {
@@ -1163,12 +1189,12 @@
       },
       {
         label: "Checklist progress",
-        value: `${completedChecklist}/${data.checklist.length}`,
+        value: `${completedChecklist}/${checklistItems.length}`,
         note: "Recurring checks completed in this browser.",
       },
       {
         label: "Quarterly checks",
-        value: data.checklist.filter((item) => item.frequency === "Quarterly").length,
+        value: checklistItems.filter((item) => item.frequency === "Quarterly").length,
         note: "Recurring quarterly checks in the embedded checklist.",
       },
     ];
@@ -1893,12 +1919,18 @@
       return;
     }
 
-    const completedCount = data.checklist.filter((item) => state.reviewState.checklist[item.id]).length;
-    const grouped = groupBy(data.checklist, "category");
+    const checklistItems = getAllChecklistItems();
+    const completedCount = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
+    const grouped = groupBy(checklistItems, "category");
+    const frequencyCounts = checklistItems.reduce((counts, item) => {
+      const frequency = item.frequency || "Not scheduled";
+      counts[frequency] = (counts[frequency] || 0) + 1;
+      return counts;
+    }, {});
 
     els.checklistSummary.innerHTML = [
-      `<span class="chip">${completedCount}/${data.checklist.length} complete</span>`,
-      ...Object.entries(data.summary.checklistFrequencies).map(([frequency, count]) => `<span class="chip">${escapeHtml(frequency)} / ${count}</span>`),
+      `<span class="chip">${completedCount}/${checklistItems.length} complete</span>`,
+      ...Object.entries(frequencyCounts).map(([frequency, count]) => `<span class="chip">${escapeHtml(frequency)} / ${count}</span>`),
     ].join("");
 
     els.checklist.innerHTML = Object.entries(grouped).map(([category, items]) => `
@@ -1911,7 +1943,7 @@
               <div class="check-top">
                 <div>
                   <strong>${escapeHtml(item.item)}</strong>
-                  <div class="mini-copy">${escapeHtml(item.frequency)} / ${escapeHtml(item.owner)}</div>
+                  <div class="mini-copy">${escapeHtml(item.frequency)} / ${escapeHtml(item.owner)}${item.isCustom ? " / Custom" : ""}</div>
                 </div>
                 <span class="status-pill ${isDone ? "is-success" : ""}">${isDone ? "Done" : "Track"}</span>
               </div>
@@ -1926,6 +1958,105 @@
     `).join("");
   }
 
+  function getAllChecklistItems() {
+    const customChecklist = normalizeCustomChecklistItems(state.reviewState.customChecklist);
+    return data.checklist
+      .map((item) => ({ ...item, isCustom: false }))
+      .concat(customChecklist.map((item) => ({ ...item, isCustom: true })));
+  }
+
+  function normalizeCustomChecklistItems(items) {
+    if (!Array.isArray(items)) {
+      return [];
+    }
+
+    const seenIds = new Set();
+    return items
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+        const id = typeof item.id === "string" ? item.id.trim() : "";
+        const checklistItem = typeof item.item === "string" ? item.item.trim() : "";
+        if (!id || !checklistItem || seenIds.has(id)) {
+          return null;
+        }
+        seenIds.add(id);
+        return {
+          id,
+          category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Custom",
+          item: checklistItem,
+          frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
+          owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function toggleChecklistAddForm(visible) {
+    if (!els.checklistAddForm) {
+      return;
+    }
+
+    els.checklistAddForm.hidden = !visible;
+    if (!visible) {
+      els.checklistAddForm.reset();
+      setUploadStatus(els.checklistAddStatus, "", "");
+      if (els.checklistAddFrequency) {
+        els.checklistAddFrequency.value = "";
+      }
+      return;
+    }
+
+    if (els.checklistAddFrequency && !els.checklistAddFrequency.value.trim()) {
+      els.checklistAddFrequency.value = "Annual";
+    }
+    if (els.checklistAddOwner && !els.checklistAddOwner.value.trim()) {
+      els.checklistAddOwner.value = "Head of IT";
+    }
+    if (els.checklistAddItem) {
+      els.checklistAddItem.focus();
+    }
+  }
+
+  function createChecklistItemId() {
+    return `custom-check-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function handleChecklistAddSubmit(event) {
+    event.preventDefault();
+    if (!els.checklistAddForm || !els.checklistAddItem) {
+      return;
+    }
+
+    const itemText = els.checklistAddItem.value.trim();
+    const category = els.checklistAddCategory ? els.checklistAddCategory.value.trim() : "";
+    const frequency = els.checklistAddFrequency ? els.checklistAddFrequency.value.trim() : "";
+    const owner = els.checklistAddOwner ? els.checklistAddOwner.value.trim() : "";
+
+    if (!itemText) {
+      setUploadStatus(els.checklistAddStatus, "Checklist item text is required.", "error");
+      return;
+    }
+
+    const entry = {
+      id: createChecklistItemId(),
+      category: category || "Custom",
+      item: itemText,
+      frequency: frequency || "Annual",
+      owner: owner || "Head of IT",
+    };
+
+    const existing = normalizeCustomChecklistItems(state.reviewState.customChecklist);
+    state.reviewState.customChecklist = existing.concat(entry);
+    state.reviewState.checklist[entry.id] = false;
+    saveReviewState();
+
+    setUploadStatus(els.checklistAddStatus, "Checklist item added.", "success");
+    renderReviewsPage();
+    toggleChecklistAddForm(false);
+  }
+
   function getAllControlViews() {
     return data.controls.map((control) => getControlView(control)).filter(Boolean);
   }
@@ -1936,17 +2067,23 @@
       return null;
     }
     const stored = state.controlState[control.id] || {};
+    const storedApplicability = typeof stored.applicability === "string" && stored.applicability.trim()
+      ? stored.applicability.trim()
+      : control.applicability;
     const baseExcluded = isBaseExcluded(control);
-    const localExcluded = Boolean(stored.excluded) && !baseExcluded;
-    const effectiveExcluded = baseExcluded || localExcluded;
+    const applicabilityExcluded = storedApplicability === "Excluded";
+    const localExcluded = Boolean(stored.excluded) && !baseExcluded && !applicabilityExcluded;
+    const effectiveExcluded = baseExcluded || applicabilityExcluded || localExcluded;
     return {
       ...control,
       isBaseExcluded: baseExcluded,
       isLocallyExcluded: localExcluded,
       isExcluded: effectiveExcluded,
-      effectiveApplicability: effectiveExcluded ? "Excluded" : control.applicability,
+      effectiveApplicability: effectiveExcluded ? "Excluded" : storedApplicability,
       effectiveImplementationModel: effectiveExcluded ? "Excluded" : control.implementationModel,
-      exclusionReason: localExcluded ? (stored.reason || "") : (baseExcluded ? control.rationale : ""),
+      exclusionReason: (localExcluded || applicabilityExcluded)
+        ? (stored.reason || "")
+        : (baseExcluded ? control.rationale : ""),
     };
   }
 
@@ -1960,14 +2097,23 @@
       return;
     }
 
+    const existing = state.controlState[controlId] || {};
     if (excluded) {
-      const existing = state.controlState[controlId] || {};
       state.controlState[controlId] = {
+        ...existing,
         excluded: true,
         reason: existing.reason || "",
       };
     } else {
-      delete state.controlState[controlId];
+      const nextState = {
+        ...existing,
+        excluded: false,
+      };
+      if (!nextState.reason && !nextState.applicability) {
+        delete state.controlState[controlId];
+      } else {
+        state.controlState[controlId] = nextState;
+      }
     }
     saveControlState();
   }
@@ -1978,10 +2124,16 @@
       return;
     }
     const existing = state.controlState[controlId] || { excluded: true, reason: "" };
-    state.controlState[controlId] = {
+    const nextState = {
+      ...existing,
       excluded: existing.excluded !== false,
       reason,
     };
+    if (!nextState.excluded && !nextState.reason && !nextState.applicability) {
+      delete state.controlState[controlId];
+    } else {
+      state.controlState[controlId] = nextState;
+    }
     saveControlState();
   }
 
@@ -2432,13 +2584,15 @@
       return {
         activities: saved.activities || {},
         checklist: saved.checklist || {},
+        customChecklist: normalizeCustomChecklistItems(saved.customChecklist),
       };
     } catch (error) {
-      return { activities: {}, checklist: {} };
+      return { activities: {}, checklist: {}, customChecklist: [] };
     }
   }
 
   function saveReviewState() {
+    state.reviewState.customChecklist = normalizeCustomChecklistItems(state.reviewState.customChecklist);
     if (!isApiPersistence()) {
       window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
       return;
@@ -3007,7 +3161,11 @@
     }
 
     if (payload.mapping && typeof payload.mapping === "object") {
-      applyMappingPayload(payload.mapping);
+      const remoteHasMapping = mappingHasContent(payload.mapping);
+      const localHasMapping = mappingHasContent(data);
+      if (remoteHasMapping || !localHasMapping) {
+        applyMappingPayload(payload.mapping);
+      }
     }
     if (Array.isArray(payload.uploadedDocuments)) {
       uploadedDocuments = payload.uploadedDocuments;
@@ -3022,6 +3180,7 @@
       state.reviewState = {
         activities: payload.reviewState.activities || {},
         checklist: payload.reviewState.checklist || {},
+        customChecklist: normalizeCustomChecklistItems(payload.reviewState.customChecklist),
       };
     }
     if (payload.controlState && typeof payload.controlState === "object") {
@@ -3031,6 +3190,21 @@
     refreshControlsIndex();
     refreshDocumentsIndex();
     pruneControlState();
+  }
+
+  function mappingHasContent(payload) {
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
+
+    const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
+    const summaryControlCount = Number(summary.controlCount || 0);
+    return summaryControlCount > 0
+      || (Array.isArray(payload.controls) && payload.controls.length > 0)
+      || (Array.isArray(payload.documents) && payload.documents.length > 0)
+      || (Array.isArray(payload.activities) && payload.activities.length > 0)
+      || (Array.isArray(payload.checklist) && payload.checklist.length > 0)
+      || (Array.isArray(payload.policyCoverage) && payload.policyCoverage.length > 0);
   }
 
   async function apiRequest(path, options) {
