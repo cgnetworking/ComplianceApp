@@ -111,9 +111,9 @@ ensure_python_runtime() {
       brew install python
       ;;
     apt)
-      log "Installing Python runtime and venv support with apt-get"
+      log "Installing Python runtime and Python 3.12 venv support with apt-get"
       run_as_root apt-get update
-      run_as_root apt-get install -y python3 python3-pip python3-venv
+      run_as_root apt-get install -y python3 python3-pip python3.12-venv
       ;;
     dnf)
       log "Installing Python runtime with dnf"
@@ -577,34 +577,17 @@ EOF
 }
 
 ensure_python_venv() {
-  if "$PYTHON_BIN" -c "import venv" >/dev/null 2>&1; then
+  if "$PYTHON_BIN" -c "import venv, ensurepip" >/dev/null 2>&1; then
     return
   fi
 
-  local manager
-  manager="$(detect_package_manager)"
-  case "$manager" in
-    apt)
-      log "Installing python3-venv for virtual environment support"
-      run_as_root apt-get update
-      run_as_root apt-get install -y python3-venv
-      ;;
-    dnf)
-      log "Installing python3-venv for virtual environment support"
-      run_as_root dnf install -y python3-venv || run_as_root dnf install -y python3
-      ;;
-    yum)
-      log "Installing python3-venv for virtual environment support"
-      run_as_root yum install -y python3-venv || run_as_root yum install -y python3
-      ;;
-    *)
-      echo "Python venv module is missing. Install python3-venv (or equivalent) and rerun." >&2
-      exit 1
-      ;;
-  esac
+  log "Installing python3.12-venv for virtual environment support"
+  run_as_root apt-get update
+  run_as_root apt-get install -y python3.12-venv
 
-  if ! "$PYTHON_BIN" -c "import venv" >/dev/null 2>&1; then
-    echo "Python venv module is still unavailable after installation attempt." >&2
+  if ! "$PYTHON_BIN" -c "import venv, ensurepip" >/dev/null 2>&1; then
+    echo "Python virtual environment support is still unavailable after installing python3.12-venv." >&2
+    echo "Ensure PYTHON_BIN points to the system Python interpreter and rerun." >&2
     exit 1
   fi
 }
@@ -902,7 +885,11 @@ prompt_for_self_signed_cert_choice
 create_self_signed_nginx_cert
 
 if [ ! -d "$VENV_DIR" ]; then
-  "$PYTHON_BIN" -m venv "$VENV_DIR"
+  if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
+    echo "Failed to create virtual environment at $VENV_DIR." >&2
+    echo "Install python3.12-venv and rerun: sudo apt-get install -y python3.12-venv" >&2
+    exit 1
+  fi
 fi
 
 # shellcheck disable=SC1091
