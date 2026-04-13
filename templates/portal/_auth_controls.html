@@ -1,0 +1,14 @@
+<div class="auth-user-block">
+  <div class="avatar">{{ request.user.username|slice:":2"|upper }}</div>
+  <div class="auth-copy">
+    <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>
+    <span>{{ request.user.email|default:"Authenticated session" }}</span>
+  </div>
+</div>
+{% if request.user.is_staff %}
+  <a class="ghost-button" href="/admin/">Admin</a>
+{% endif %}
+<form class="logout-form" method="post" action="{% url 'portal-logout' %}">
+  {% csrf_token %}
+  <button class="ghost-button" type="submit">Sign Out</button>
+</form>

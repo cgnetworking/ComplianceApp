@@ -32,11 +32,14 @@
     PR: 2,
     UPL: 3,
   };
+  const apiBaseUrl = resolveApiBaseUrl();
+  const loginUrl = resolveLoginUrl();
   const storageKey = "isms-policy-portal-review-state-v1";
   const controlStateKey = "isms-policy-portal-control-state-v1";
   const uploadedPolicyKey = "isms-policy-portal-uploaded-policies-v1";
   const vendorSurveyKey = "isms-policy-portal-vendor-surveys-v1";
   const riskRegisterKey = "isms-policy-portal-risk-register-v1";
+  let persistenceMode = "local";
   const controlsById = new Map(data.controls.map((control) => [control.id, control]));
   let uploadedDocuments = loadUploadedPolicies();
   let vendorSurveyResponses = loadVendorResponses();
@@ -111,12 +114,12 @@
     riskLevelInputs: Array.from(document.querySelectorAll('input[name="initial-risk-level"]')),
   };
 
-  init();
+  void init();
 
-  function init() {
-    if (els.runtimeMode) {
-      els.runtimeMode.textContent = data.sourceSnapshot.runtimeDependency ? "Workbook dependent" : "Embedded snapshot";
-    }
+  async function init() {
+    await loadRemoteState();
+    updateRuntimeMode();
+    updatePersistenceCopy();
     if (els.generatedAt) {
       els.generatedAt.textContent = formatDateTime(data.generatedAt);
     }
@@ -520,7 +523,7 @@
       {
         label: "Total risks",
         value: state.riskRegister.length,
-        note: state.riskRegister.length ? "Business risks currently stored in this browser register." : "No business risks have been captured yet.",
+        note: state.riskRegister.length ? `Business risks currently stored in the ${riskRegisterLabel()}.` : "No business risks have been captured yet.",
       },
       {
         label: "Open risks",
@@ -613,8 +616,8 @@
     }
     if (els.riskFormCopy) {
       els.riskFormCopy.textContent = isEditing
-        ? "Update the selected risk and save changes to keep the register current."
-        : "Use this form to add a new risk entry to the business register.";
+        ? `Update the selected risk and save changes to keep the ${riskRegisterLabel()} current.`
+        : `Use this form to add a new risk entry to the ${riskRegisterLabel()}.`;
     }
     if (els.riskNameInput) {
       els.riskNameInput.value = isEditing ? selectedRisk.risk : "";
@@ -642,7 +645,7 @@
     }
 
     const { message, tone } = state.riskFormStatus;
-    els.riskFormStatus.textContent = message || "Risk entries are stored locally in this browser.";
+    els.riskFormStatus.textContent = message || `Risk entries are ${storageSentence()}`;
     els.riskFormStatus.className = "helper-note risk-form-status";
     if (tone === "success") {
       els.riskFormStatus.classList.add("is-success");
@@ -652,7 +655,7 @@
     }
   }
 
-  function handleRiskFormSubmit(event) {
+  async function handleRiskFormSubmit(event) {
     event.preventDefault();
 
     const formData = new FormData(event.currentTarget);
@@ -689,14 +692,26 @@
       updatedAt: now,
     };
 
+    const previousRiskRegister = state.riskRegister.slice();
     state.riskRegister = isEditing
       ? state.riskRegister.map((risk) => (risk.id === riskId ? nextRisk : risk))
       : [nextRisk].concat(state.riskRegister);
 
-    saveRiskRegister();
+    try {
+      await saveRiskRegister();
+    } catch (error) {
+      state.riskRegister = previousRiskRegister;
+      setRiskFormStatus(error.message || "Unable to save the risk register entry.", "error");
+      renderRiskFormStatus();
+      return;
+    }
+
     state.selectedRiskId = riskId;
     state.isAddingRisk = false;
-    setRiskFormStatus(isEditing ? "Risk updated in the register." : "Risk added to the register.", "success");
+    setRiskFormStatus(
+      isEditing ? `Risk updated in the ${riskRegisterLabel()}.` : `Risk added to the ${riskRegisterLabel()}.`,
+      "success"
+    );
     syncUrl();
     renderRisksPage();
   }
@@ -735,18 +750,16 @@
     );
 
     try {
-      const result = await createUploadedDocuments(files);
+      const result = isApiPersistence() ? await uploadPoliciesToApi(files) : await createUploadedDocuments(files);
       if (!result.documents.length) {
         setPolicyUploadStatus(result.messages[0] || "No supported policy files were selected.", "error");
         return;
       }
 
       const nextUploadedDocuments = uploadedDocuments.concat(result.documents);
-      saveUploadedPolicies(nextUploadedDocuments);
+      await saveUploadedPolicies(nextUploadedDocuments);
       uploadedDocuments = nextUploadedDocuments;
-      result.documents.forEach((documentItem) => {
-        documentsById.set(documentItem.id, documentItem);
-      });
+      refreshDocumentsIndex();
 
       state.policyContextControlId = "";
       state.search = "";
@@ -784,6 +797,23 @@
     }
 
     return { documents, messages };
+  }
+
+  async function uploadPoliciesToApi(files) {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    const payload = await apiRequest("/policies/uploads/", {
+      method: "POST",
+      body: formData,
+    });
+
+    return {
+      documents: Array.isArray(payload.documents) ? payload.documents : [],
+      messages: Array.isArray(payload.messages) ? payload.messages : [],
+    };
   }
 
   function buildUploadedPolicyDocument(file, rawContent, number) {
@@ -1591,7 +1621,7 @@
       {
         label: "Responses staged",
         value: responses.length,
-        note: "Files stored in this browser workspace for follow-up review.",
+        note: `Files stored in the ${portalWorkspaceLabel()} for follow-up review.`,
       },
       {
         label: "Preview ready",
@@ -1671,7 +1701,7 @@
               <h3>Stage supplier responses for review</h3>
             </div>
             <p class="detail-subline">
-              Import completed due diligence questionnaires, spreadsheets, or exported response files. Text-based uploads create searchable previews in this queue.
+              Import completed due diligence questionnaires, spreadsheets, or exported response files into the ${escapeHtml(portalWorkspaceLabel())}. Text-based uploads create searchable previews in this queue.
             </p>
           </div>
           <div class="detail-grid">
@@ -2328,7 +2358,10 @@
     }
   }
 
-  function saveUploadedPolicies(items) {
+  async function saveUploadedPolicies(items) {
+    if (isApiPersistence()) {
+      return;
+    }
     window.localStorage.setItem(uploadedPolicyKey, JSON.stringify(items));
   }
 
@@ -2345,7 +2378,17 @@
   }
 
   function saveReviewState() {
-    window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
+    if (!isApiPersistence()) {
+      window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
+      return;
+    }
+
+    void apiRequest("/state/review/", {
+      method: "PUT",
+      body: JSON.stringify({ reviewState: state.reviewState }),
+    }).catch(() => {
+      window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
+    });
   }
 
   function loadControlState() {
@@ -2358,7 +2401,17 @@
   }
 
   function saveControlState() {
-    window.localStorage.setItem(controlStateKey, JSON.stringify(state.controlState));
+    if (!isApiPersistence()) {
+      window.localStorage.setItem(controlStateKey, JSON.stringify(state.controlState));
+      return;
+    }
+
+    void apiRequest("/state/control/", {
+      method: "PUT",
+      body: JSON.stringify({ controlState: state.controlState }),
+    }).catch(() => {
+      window.localStorage.setItem(controlStateKey, JSON.stringify(state.controlState));
+    });
   }
 
   async function handleVendorUpload(files) {
@@ -2373,18 +2426,16 @@
     );
 
     try {
-      const importedAt = new Date();
-      const additions = [];
-      for (let index = 0; index < files.length; index += 1) {
-        additions.push(await buildVendorSurveyResponse(files[index], importedAt, index + 1));
-      }
+      const additions = isApiPersistence()
+        ? await uploadVendorsToApi(files)
+        : await createVendorSurveyResponses(files);
 
       vendorSurveyResponses = additions
         .concat(vendorSurveyResponses)
         .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
         .slice(0, 60);
 
-      saveVendorResponses();
+      await saveVendorResponses();
       syncVendorSelection();
       syncUrl();
       renderVendorsPage();
@@ -2400,6 +2451,29 @@
         "error"
       );
     }
+  }
+
+  async function createVendorSurveyResponses(files) {
+    const importedAt = new Date();
+    const additions = [];
+    for (let index = 0; index < files.length; index += 1) {
+      additions.push(await buildVendorSurveyResponse(files[index], importedAt, index + 1));
+    }
+    return additions;
+  }
+
+  async function uploadVendorsToApi(files) {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    const payload = await apiRequest("/vendors/uploads/", {
+      method: "POST",
+      body: formData,
+    });
+
+    return Array.isArray(payload.responses) ? payload.responses : [];
   }
 
   async function buildVendorSurveyResponse(file, importedAt, sequence) {
@@ -2421,7 +2495,10 @@
     };
   }
 
-  function saveVendorResponses() {
+  async function saveVendorResponses() {
+    if (isApiPersistence()) {
+      return;
+    }
     window.localStorage.setItem(vendorSurveyKey, JSON.stringify(vendorSurveyResponses.slice(0, 60)));
   }
 
@@ -2648,8 +2725,20 @@
     }
   }
 
-  function saveRiskRegister() {
-    window.localStorage.setItem(riskRegisterKey, JSON.stringify(state.riskRegister));
+  async function saveRiskRegister() {
+    if (!isApiPersistence()) {
+      window.localStorage.setItem(riskRegisterKey, JSON.stringify(state.riskRegister));
+      return;
+    }
+
+    const payload = await apiRequest("/risks/", {
+      method: "PUT",
+      body: JSON.stringify({ riskRegister: state.riskRegister }),
+    });
+
+    if (payload && Array.isArray(payload.riskRegister)) {
+      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+    }
   }
 
   function loadRiskRegister() {
@@ -2692,6 +2781,161 @@
 
   function createRiskId() {
     return `risk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function resolveApiBaseUrl() {
+    if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl === "string") {
+      return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
+    }
+    return "/api";
+  }
+
+  function resolveLoginUrl() {
+    if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.loginUrl === "string") {
+      return window.ISMS_PORTAL_CONFIG.loginUrl;
+    }
+    return "/login/";
+  }
+
+  function isApiPersistence() {
+    return persistenceMode === "api";
+  }
+
+  function updateRuntimeMode() {
+    if (!els.runtimeMode) {
+      return;
+    }
+
+    const baseLabel = data.sourceSnapshot.runtimeDependency ? "Workbook dependent" : "Embedded snapshot";
+    els.runtimeMode.textContent = isApiPersistence() ? `${baseLabel} + API` : baseLabel;
+  }
+
+  function updatePersistenceCopy() {
+    if (els.policyUploadStatus) {
+      els.policyUploadStatus.textContent = isApiPersistence()
+        ? "Add markdown, text, or HTML policy files to the shared portal library."
+        : "Add markdown, text, or HTML policy files to this browser's library.";
+    }
+    if (els.vendorUploadStatus) {
+      els.vendorUploadStatus.textContent = isApiPersistence()
+        ? "Upload completed questionnaires, spreadsheets, or exported response files into the shared portal workspace. Text-based files generate inline previews."
+        : "Upload completed questionnaires, spreadsheets, or exported response files. Text-based files generate inline previews.";
+    }
+  }
+
+  function refreshDocumentsIndex() {
+    documentsById.clear();
+    data.documents.concat(uploadedDocuments).forEach((documentItem) => {
+      documentsById.set(documentItem.id, documentItem);
+    });
+  }
+
+  async function loadRemoteState() {
+    if (window.location.protocol === "file:") {
+      persistenceMode = "local";
+      return;
+    }
+
+    try {
+      const payload = await apiRequest("/state/");
+      persistenceMode = payload && payload.persistenceMode === "api" ? "api" : "local";
+      applyRemoteState(payload);
+    } catch (error) {
+      persistenceMode = "local";
+    }
+  }
+
+  function applyRemoteState(payload) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    if (Array.isArray(payload.uploadedDocuments)) {
+      uploadedDocuments = payload.uploadedDocuments;
+    }
+    if (Array.isArray(payload.vendorSurveyResponses)) {
+      vendorSurveyResponses = payload.vendorSurveyResponses;
+    }
+    if (Array.isArray(payload.riskRegister)) {
+      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+    }
+    if (payload.reviewState && typeof payload.reviewState === "object") {
+      state.reviewState = {
+        activities: payload.reviewState.activities || {},
+        checklist: payload.reviewState.checklist || {},
+      };
+    }
+    if (payload.controlState && typeof payload.controlState === "object") {
+      state.controlState = payload.controlState;
+    }
+
+    refreshDocumentsIndex();
+  }
+
+  async function apiRequest(path, options) {
+    const requestOptions = options || {};
+    const method = requestOptions.method || "GET";
+    const headers = new Headers(requestOptions.headers || {});
+    const isFormData = typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+
+    if (!headers.has("Accept")) {
+      headers.set("Accept", "application/json");
+    }
+    if (requestOptions.body && !isFormData && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    const csrfToken = readCookie("csrftoken");
+    if (csrfToken && !/^(GET|HEAD|OPTIONS|TRACE)$/i.test(method)) {
+      headers.set("X-CSRFToken", csrfToken);
+    }
+
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      ...requestOptions,
+      method,
+      headers,
+      credentials: "same-origin",
+    });
+
+    if (response.status === 401) {
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.href = `${loginUrl}?next=${encodeURIComponent(next)}`;
+      throw new Error("Authentication required.");
+    }
+
+    const responseText = await response.text();
+    let payload = null;
+    if (responseText) {
+      try {
+        payload = JSON.parse(responseText);
+      } catch (error) {
+        payload = null;
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error((payload && (payload.detail || payload.message)) || `Request failed (${response.status}).`);
+    }
+
+    return payload;
+  }
+
+  function readCookie(name) {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : "";
+  }
+
+  function portalWorkspaceLabel() {
+    return isApiPersistence() ? "shared portal workspace" : "browser workspace";
+  }
+
+  function riskRegisterLabel() {
+    return isApiPersistence() ? "shared portal register" : "browser register";
+  }
+
+  function storageSentence() {
+    return isApiPersistence() ? "stored in the shared portal." : "stored locally in this browser.";
   }
 
   function normalizeRiskLevel(value) {

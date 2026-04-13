@@ -1,0 +1,99 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In | ISMS Command Center</title>
+  <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-panel">
+      <div class="brand-row auth-brand">
+        <div class="brand-mark">I</div>
+        <div>
+          <p class="brand-label">ISMS</p>
+          <strong class="brand-name">Command Center</strong>
+        </div>
+      </div>
+
+      <div class="report-header">
+        <p class="section-kicker">Authentication</p>
+        <h1>Sign in to the portal</h1>
+        <p class="report-copy">
+          Use your organization SSO for normal access, or a local Django account for break-glass admin access.
+        </p>
+      </div>
+
+      {% if auth_error_message %}
+        <p class="helper-note is-warning">{{ auth_error_message }}</p>
+      {% endif %}
+
+      {% if messages %}
+        <div class="auth-message-list">
+          {% for message in messages %}
+            <p class="helper-note {% if message.tags %}is-{{ message.tags }}{% endif %}">{{ message }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if sso_enabled %}
+        <form class="auth-form-block" method="post" action="{% url 'social:begin' sso_backend_name %}">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ next_url }}">
+          <button class="ghost-button primary-button auth-submit" type="submit">{{ sso_login_label }}</button>
+        </form>
+      {% else %}
+        <p class="helper-note is-warning">
+          SSO is not configured yet. Set the social-auth environment variables, then restart Django.
+        </p>
+      {% endif %}
+
+      <div class="auth-divider">
+        <span>Local Django login</span>
+      </div>
+
+      <form class="auth-form-stack" method="post" action="{% url 'portal-login' %}">
+        {% csrf_token %}
+        <input type="hidden" name="auth_mode" value="password">
+        <input type="hidden" name="next" value="{{ next_url }}">
+
+        <label class="form-field" for="{{ form.username.id_for_label }}">
+          <span>Username</span>
+          {{ form.username }}
+        </label>
+        {% if form.username.errors %}
+          <div class="auth-message-list">
+            {% for error in form.username.errors %}
+              <p class="helper-note is-warning">{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <label class="form-field" for="{{ form.password.id_for_label }}">
+          <span>Password</span>
+          {{ form.password }}
+        </label>
+        {% if form.password.errors %}
+          <div class="auth-message-list">
+            {% for error in form.password.errors %}
+              <p class="helper-note is-warning">{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        {% if form.non_field_errors %}
+          <div class="auth-message-list">
+            {% for error in form.non_field_errors %}
+              <p class="helper-note is-warning">{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <button class="ghost-button auth-submit" type="submit">Sign In with Password</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

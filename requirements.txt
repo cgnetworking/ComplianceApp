@@ -1,0 +1,5 @@
+Django
+gunicorn
+psycopg[binary]
+social-auth-app-django
+whitenoise
