@@ -585,7 +585,7 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
     created_items: list[VendorResponse] = []
 
     for uploaded_file in files:
-        extension = extract_file_extension(uploaded_file.name)
+        extension = file_extension(uploaded_file.name)
         raw_text = decode_upload(uploaded_file).replace("\x00", "").strip() if is_text_like_file(uploaded_file, extension) else ""
         preview_text = build_preview_text(raw_text, 1400, 20)
         response = VendorResponse.objects.create(
@@ -877,11 +877,6 @@ def build_preview_text(raw_text: str, max_characters: int, max_lines: int) -> st
         preview = f"{preview}\n..."
 
     return preview
-
-
-def extract_file_extension(file_name: str) -> str:
-    match = re.search(r"\.([^.]+)$", str(file_name))
-    return match.group(1).lower() if match else ""
 
 
 def is_text_like_file(uploaded_file: UploadedFile, extension: str) -> bool:

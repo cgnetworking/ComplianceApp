@@ -1,0 +1,46 @@
+<aside class="sidebar">
+  <div class="brand-row">
+    <div class="brand-mark">I</div>
+    <div>
+      <p class="brand-label">ISMS</p>
+      <strong class="brand-name">Command Center</strong>
+    </div>
+  </div>
+
+  <label class="sidebar-search">
+    <span class="search-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        <circle cx="11" cy="11" r="6.5"></circle>
+        <path d="M16 16l5 5"></path>
+      </svg>
+    </span>
+    <input id="search-input" type="search" placeholder="{{ search_placeholder|default:'Search controls or policies' }}">
+  </label>
+
+  <nav class="sidebar-nav">
+    <a class="nav-link{% if active_page == 'home' %} is-active{% endif %}" href="./index.html">Home</a>
+    <a class="nav-link{% if active_page == 'controls' %} is-active{% endif %}" href="./controls.html">Controls</a>
+    <a class="nav-link{% if active_page == 'reports' %} is-active{% endif %}" href="./reports.html">Reports</a>
+    <a class="nav-link{% if active_page == 'reviews' %} is-active{% endif %}" href="./reviews.html">Reviews</a>
+    <a class="nav-link{% if active_page == 'policies' %} is-active{% endif %}" href="./policies.html">Policies</a>
+    <a class="nav-link{% if active_page == 'risks' %} is-active{% endif %}" href="./risks.html">Risk Register</a>
+    <a class="nav-link{% if active_page == 'vendors' %} is-active{% endif %}" href="./vendors.html">Vendors</a>
+  </nav>
+
+  <div class="sidebar-group">
+    <p class="sidebar-heading">Framework</p>
+    <div class="sidebar-chip">ISO 27001:2022</div>
+  </div>
+
+  <div class="sidebar-group">
+    <p class="sidebar-heading">Snapshot</p>
+    <div class="sidebar-meta">
+      <span class="sidebar-meta-label">Mode</span>
+      <strong id="runtime-mode">Embedded snapshot</strong>
+    </div>
+    <div class="sidebar-meta">
+      <span class="sidebar-meta-label">Built</span>
+      <strong id="generated-at">-</strong>
+    </div>
+  </div>
+</aside>

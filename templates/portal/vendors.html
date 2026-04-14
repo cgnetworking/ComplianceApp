@@ -9,52 +9,7 @@
 </head>
 <body data-page="vendors">
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand-row">
-        <div class="brand-mark">I</div>
-        <div>
-          <p class="brand-label">ISMS</p>
-          <strong class="brand-name">Command Center</strong>
-        </div>
-      </div>
-
-      <label class="sidebar-search">
-        <span class="search-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <circle cx="11" cy="11" r="6.5"></circle>
-            <path d="M16 16l5 5"></path>
-          </svg>
-        </span>
-        <input id="search-input" type="search" placeholder="Search imported vendor responses">
-      </label>
-
-      <nav class="sidebar-nav">
-        <a class="nav-link" href="./index.html">Home</a>
-        <a class="nav-link" href="./controls.html">Controls</a>
-        <a class="nav-link" href="./reports.html">Reports</a>
-        <a class="nav-link" href="./reviews.html">Reviews</a>
-        <a class="nav-link" href="./policies.html">Policies</a>
-        <a class="nav-link" href="./risks.html">Risk Register</a>
-        <a class="nav-link is-active" href="./vendors.html">Vendors</a>
-      </nav>
-
-      <div class="sidebar-group">
-        <p class="sidebar-heading">Framework</p>
-        <div class="sidebar-chip">ISO 27001:2022</div>
-      </div>
-
-      <div class="sidebar-group">
-        <p class="sidebar-heading">Snapshot</p>
-        <div class="sidebar-meta">
-          <span class="sidebar-meta-label">Mode</span>
-          <strong id="runtime-mode">Embedded snapshot</strong>
-        </div>
-        <div class="sidebar-meta">
-          <span class="sidebar-meta-label">Built</span>
-          <strong id="generated-at">-</strong>
-        </div>
-      </div>
-    </aside>
+      {% include "portal/_sidebar.html" with active_page="vendors" search_placeholder="Search imported vendor responses" %}
 
     <section class="main-shell">
       <header class="topbar">
@@ -108,10 +63,6 @@
       </main>
     </section>
   </div>
-
-  <script>
-    window.ISMS_PORTAL_CONFIG = { apiBaseUrl: "{{ api_base_url }}", loginUrl: "{% url 'portal-login' %}" };
-  </script>
-  <script src="{% static 'app.js' %}"></script>
+  {% include "portal/_app_scripts.html" %}
 </body>
 </html>
