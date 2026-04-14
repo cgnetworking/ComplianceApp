@@ -484,10 +484,14 @@
     const availableControls = getAllControlViews()
       .filter((control) => !relatedControlIds.has(control.id))
       .sort(compareControlViews);
-    const availableControlOptions = availableControls.map((control) => (
-      `<option value="${escapeHtml(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</option>`
-    )).join("");
     const canMapControl = availableControls.length > 0;
+    const availableControlOptions = canMapControl
+      ? ['<option value="" selected disabled>Select Control</option>'].concat(
+        availableControls.map((control) => (
+          `<option value="${escapeHtml(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</option>`
+        ))
+      ).join("")
+      : '<option value="" selected>No additional controls available</option>';
     const documentMeta = [
       `Approver: ${escapeHtml(documentItem.approver)}`,
       `Source: ${escapeHtml(documentItem.path)}`,
@@ -524,10 +528,10 @@
             <label class="form-field">
               <span>Control</span>
               <select data-policy-control-select ${canMapControl ? "" : "disabled"}>
-                ${canMapControl ? availableControlOptions : '<option value="">No additional controls available</option>'}
+                ${availableControlOptions}
               </select>
             </label>
-            <button class="ghost-button" type="button" data-policy-control-add="${escapeHtml(documentItem.id)}" ${canMapControl ? "" : "disabled"}>Add mapping</button>
+            <button class="ghost-button" type="button" data-policy-control-add="${escapeHtml(documentItem.id)}" disabled>Add mapping</button>
           </div>
         </div>
         ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}

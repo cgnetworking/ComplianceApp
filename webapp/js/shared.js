@@ -173,6 +173,16 @@
     });
 
     els.controlDetail.addEventListener("change", (event) => {
+      const policySelect = event.target.closest("[data-control-policy-select]");
+      if (policySelect) {
+        const mapper = policySelect.closest("[data-control-policy-mapper]");
+        const addButton = mapper ? mapper.querySelector("[data-control-policy-add]") : null;
+        if (addButton) {
+          addButton.disabled = !policySelect.value;
+        }
+        return;
+      }
+
       const applicability = event.target.closest("[data-control-applicability]");
       if (applicability) {
         setControlApplicability(applicability.dataset.controlApplicability, applicability.value);
@@ -240,6 +250,18 @@
     }
 
     if (els.documentViewer) {
+      els.documentViewer.addEventListener("change", (event) => {
+        const controlSelect = event.target.closest("[data-policy-control-select]");
+        if (!controlSelect) {
+          return;
+        }
+        const mapper = controlSelect.closest("[data-policy-control-mapper]");
+        const addButton = mapper ? mapper.querySelector("[data-policy-control-add]") : null;
+        if (addButton) {
+          addButton.disabled = !controlSelect.value;
+        }
+      });
+
       els.documentViewer.addEventListener("click", async (event) => {
         const addControlMapping = event.target.closest("[data-policy-control-add]");
         if (addControlMapping) {

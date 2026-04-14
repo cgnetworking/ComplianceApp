@@ -68,10 +68,14 @@
     }).join("");
     const availablePolicies = getPolicyLibraryRows()
       .filter((item) => !control.policyDocumentIds.includes(item.id));
-    const availablePolicyOptions = availablePolicies.map((item) => (
-      `<option value="${escapeHtml(item.id)}">${escapeHtml(item.id)} / ${escapeHtml(item.title)}</option>`
-    )).join("");
     const canMapPolicy = availablePolicies.length > 0;
+    const availablePolicyOptions = canMapPolicy
+      ? ['<option value="" selected disabled>Select Policy</option>'].concat(
+        availablePolicies.map((item) => (
+          `<option value="${escapeHtml(item.id)}">${escapeHtml(item.id)} / ${escapeHtml(item.title)}</option>`
+        ))
+      ).join("")
+      : '<option value="" selected>No additional policy documents available</option>';
 
     const applicabilityOptions = renderSelectOptions(
       ["", "Applicable", "Excluded"],
@@ -133,10 +137,10 @@
             <label class="form-field">
               <span>Policy document</span>
               <select data-control-policy-select ${canMapPolicy ? "" : "disabled"}>
-                ${canMapPolicy ? availablePolicyOptions : '<option value="">No additional policy documents available</option>'}
+                ${availablePolicyOptions}
               </select>
             </label>
-            <button class="ghost-button" type="button" data-control-policy-add="${escapeHtml(control.id)}" ${canMapPolicy ? "" : "disabled"}>Add mapping</button>
+            <button class="ghost-button" type="button" data-control-policy-add="${escapeHtml(control.id)}" disabled>Add mapping</button>
           </div>
           <p class="helper-note">Mappings are editable here and from the Policies tab.</p>
         </div>
