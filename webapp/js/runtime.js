@@ -1,4 +1,4 @@
-  const data = window.ISMS_DATA && typeof window.ISMS_DATA === "object" ? window.ISMS_DATA : {};
+  const data = {};
   normalizeDataPayload(data);
 
   const monthNames = [

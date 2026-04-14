@@ -408,12 +408,12 @@
           {
             label: "Total controls",
             value: controls.length,
-            note: "Embedded Annex A register available locally.",
+            note: "Default Annex A control list available in the portal.",
           },
           {
             label: "Policies embedded",
             value: data.summary.policyCount,
-            note: "Policy pages remain available without the workbook.",
+            note: "Policy pages appear when mapping documents are provided.",
           },
           {
             label: `${monthNames[state.monthIndex]} queue`,
@@ -684,10 +684,11 @@
       return;
     }
 
-    const hasMapping = Array.isArray(data.controls) && data.controls.length > 0;
-    const baseLabel = hasMapping
-      ? (data.sourceSnapshot.runtimeDependency ? "Workbook dependent" : "Embedded snapshot")
-      : "No mapping loaded";
+    const hasControls = Array.isArray(data.controls) && data.controls.length > 0;
+    const hasExpandedMapping = Array.isArray(data.documents) && data.documents.length > 0;
+    const baseLabel = hasControls
+      ? (hasExpandedMapping ? "Custom mapping" : "Default controls")
+      : "No controls loaded";
     els.runtimeMode.textContent = isApiPersistence() ? `${baseLabel} + API` : baseLabel;
   }
   function updatePersistenceCopy() {
@@ -703,7 +704,7 @@
     }
     if (els.mappingUploadStatus) {
       els.mappingUploadStatus.textContent = isApiPersistence()
-        ? "Upload a control mapping snapshot (.json or data.js) to populate controls and mapped policy metadata."
+        ? "Upload a control mapping JSON file (.json) to add mapped policy metadata."
         : "Mapping upload requires API mode so it can be stored in PostgreSQL.";
     }
   }
@@ -716,6 +717,7 @@
   async function loadRemoteState() {
     if (window.location.protocol === "file:") {
       persistenceMode = "local";
+      await loadDefaultControls();
       return;
     }
 
@@ -725,6 +727,54 @@
       applyRemoteState(payload);
     } catch (error) {
       persistenceMode = "local";
+      await loadDefaultControls();
+    }
+  }
+  async function loadDefaultControls() {
+    try {
+      const response = await fetch("/static/default_controls.json", {
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json();
+      if (!Array.isArray(payload)) {
+        return;
+      }
+
+      const controls = payload
+        .filter((item) => item && typeof item.id === "string" && typeof item.name === "string")
+        .map((item) => ({
+          id: item.id.trim(),
+          name: item.name.trim(),
+          domain: "",
+          applicability: "Applicable",
+          implementationModel: "Implemented",
+          owner: "",
+          reviewFrequency: "Annual",
+          rationale: "",
+          evidence: "",
+          documentIds: [],
+          policyDocumentIds: [],
+          preferredDocumentId: "",
+        }))
+        .filter((item) => item.id && item.name);
+      if (!controls.length) {
+        return;
+      }
+
+      applyMappingPayload({
+        sourceSnapshot: {
+          controlRegister: "default_controls.json",
+          reviewSchedule: "",
+          runtimeDependency: false,
+        },
+        controls,
+      });
+    } catch (error) {
+      // Ignore local loading errors and continue with empty defaults.
     }
   }
   function applyRemoteState(payload) {

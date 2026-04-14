@@ -24,7 +24,7 @@ from .models import (
 
 
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
-SUPPORTED_MAPPING_EXTENSIONS = {"json", "js"}
+SUPPORTED_MAPPING_EXTENSIONS = {"json"}
 TEXT_VENDOR_EXTENSIONS = {"csv", "json", "txt", "md", "markdown", "html", "htm", "xml"}
 BLOCKED_TAGS_RE = re.compile(
     r"<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>.*?<\s*/\s*\1\s*>",
@@ -41,7 +41,6 @@ JAVASCRIPT_QUOTED_ATTR_RE = re.compile(
 )
 JAVASCRIPT_UNQUOTED_ATTR_RE = re.compile(r"\s+(href|src)\s*=\s*javascript:[^\s>]+", re.IGNORECASE)
 PURPOSE_RE = re.compile(r"^## 1\. Purpose\s+([\s\S]*?)\s+## ", re.MULTILINE)
-MAPPING_ASSIGNMENT_RE = re.compile(r"^\s*window\.ISMS_DATA\s*=\s*", re.IGNORECASE)
 
 
 class ValidationError(Exception):
@@ -351,7 +350,9 @@ def build_mapping_summary(
 
 
 def normalize_mapping_payload(payload: object) -> dict[str, object]:
-    if not isinstance(payload, dict):
+    if isinstance(payload, list):
+        payload = {"controls": payload}
+    elif not isinstance(payload, dict):
         payload = {}
 
     controls = normalize_mapping_controls(payload.get("controls"))
@@ -383,21 +384,16 @@ def parse_mapping_text(raw_text: str) -> object:
     if not value:
         raise ValidationError("Uploaded mapping file is empty.")
 
-    if MAPPING_ASSIGNMENT_RE.match(value):
-        value = MAPPING_ASSIGNMENT_RE.sub("", value, count=1).strip()
-        if value.endswith(";"):
-            value = value[:-1].strip()
-
     try:
         return json.loads(value)
     except json.JSONDecodeError as error:
-        raise ValidationError("Uploaded mapping must be valid JSON or a window.ISMS_DATA assignment.") from error
+        raise ValidationError("Uploaded mapping must be valid JSON.") from error
 
 
 def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
     extension = file_extension(file.name)
     if extension not in SUPPORTED_MAPPING_EXTENSIONS:
-        raise ValidationError("Upload a JSON mapping file (.json) or data snapshot file (.js).")
+        raise ValidationError("Upload a JSON mapping file (.json).")
 
     parsed_payload = parse_mapping_text(decode_upload(file))
     normalized_payload = normalize_mapping_payload(parsed_payload)
@@ -411,25 +407,36 @@ def get_mapping_payload() -> dict[str, object]:
     if normalized.get("controls"):
         return normalized
 
-    bundled = get_bundled_mapping_payload()
-    if bundled.get("controls"):
-        return bundled
-
-    return normalized
+    return get_default_controls_mapping_payload()
 
 
-def get_bundled_mapping_payload() -> dict[str, object]:
-    data_path = Path(__file__).resolve().parent.parent / "webapp" / "data.js"
+def get_default_controls_mapping_payload() -> dict[str, object]:
+    data_path = Path(__file__).resolve().parent.parent / "webapp" / "default_controls.json"
     try:
         raw_text = data_path.read_text(encoding="utf-8")
     except OSError:
         return default_mapping_payload()
 
     try:
-        parsed = parse_mapping_text(raw_text)
-    except ValidationError:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
         return default_mapping_payload()
-    return normalize_mapping_payload(parsed)
+
+    controls_source = parsed if isinstance(parsed, list) else (parsed.get("controls") if isinstance(parsed, dict) else [])
+    controls = normalize_mapping_controls(controls_source)
+    if not controls:
+        return default_mapping_payload()
+
+    return normalize_mapping_payload(
+        {
+            "sourceSnapshot": {
+                "controlRegister": "default_controls.json",
+                "reviewSchedule": "",
+                "runtimeDependency": False,
+            },
+            "controls": controls,
+        }
+    )
 
 
 def list_review_checklist_items() -> list[dict[str, str]]:
@@ -446,8 +453,6 @@ def ensure_review_checklist_recommendations_seeded() -> None:
 
     mapping_payload = get_mapping_payload()
     checklist_items = normalize_mapping_checklist(mapping_payload.get("checklist"))
-    if not checklist_items:
-        checklist_items = normalize_mapping_checklist(get_bundled_mapping_payload().get("checklist"))
     if not checklist_items:
         return
 

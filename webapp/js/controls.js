@@ -101,10 +101,10 @@
               ${control.isExcluded ? "checked" : ""}
               ${control.isBaseExcluded ? "disabled" : ""}
             >
-            <span>${control.isBaseExcluded ? "Excluded in source snapshot" : "Mark control as excluded"}</span>
+            <span>${control.isBaseExcluded ? "Excluded in mapping data" : "Mark control as excluded"}</span>
           </label>
           <p class="mini-copy">
-            ${escapeHtml(control.isBaseExcluded ? "This control is already excluded in the embedded source data." : "Locally excluded controls display as Excluded in this portal and retain an exclusion rationale in browser storage.")}
+            ${escapeHtml(control.isBaseExcluded ? "This control is already excluded in the current mapping data." : "Locally excluded controls display as Excluded in this portal and retain an exclusion rationale in browser storage.")}
           </p>
           ${control.isExcluded ? `
             <div class="text-area-field">

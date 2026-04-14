@@ -1,11 +1,11 @@
 # ISMS Portal Hosting
 
-This repo includes a Django backend that persists portal uploads and workspace state. In API mode, controls/policy mapping and uploaded policies are loaded from PostgreSQL, so a fresh deployment starts with no policies until you upload mapping and policy content.
+This repo includes a Django backend that persists portal uploads and workspace state. In API mode, uploaded mappings and policies are loaded from PostgreSQL. A fresh deployment still shows the default control catalog (control number and name), and policy detail appears after uploading mapping/policy content.
 
 ## What the backend stores
 
 - Uploaded policy documents from the Policies page
-- Control/policy mapping snapshot data uploaded from the Controls page
+- Control/policy mapping data uploaded from the Controls page
 - Imported vendor questionnaire metadata and extracted preview text
 - Risk register entries
 - Review checklist progress
@@ -15,7 +15,7 @@ This repo includes a Django backend that persists portal uploads and workspace s
 
 After first deploy (or after clearing the database), load content in this order:
 
-1. Open Controls and upload a mapping snapshot (`.json` or `data.js` with `window.ISMS_DATA = {...}`).
+1. Open Controls and upload a mapping JSON file (`.json`).
 2. Open Policies and upload policy source files (`.md`, `.txt`, `.html`).
 
 ## Authentication
