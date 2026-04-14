@@ -10,9 +10,9 @@
     }
 
     const monthItems = monthlyActivities(state.monthIndex);
-    const completedMonthItems = monthItems.filter((item) => state.reviewState.checklist[item.id]).length;
+    const completedMonthItems = monthItems.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
     const checklistItems = getAllChecklistItems();
-    const completedChecklist = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
+    const completedChecklist = checklistItems.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
 
     const cards = [
       {
@@ -68,7 +68,7 @@
     els.activities.innerHTML = `
       <div class="activity-list">
         ${activities.map((activity) => {
-          const isDone = Boolean(state.reviewState.checklist[activity.id]);
+          const isDone = isReviewTaskCompleted(activity.id, state.monthIndex);
           return `
             <article class="activity-card ${isDone ? "is-done" : ""}">
               <div class="activity-top">
@@ -102,8 +102,7 @@
       return;
     }
 
-    const completedCount = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
-    const grouped = groupBy(checklistItems, "category");
+    const completedCount = checklistItems.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
     const frequencyCounts = checklistItems.reduce((counts, item) => {
       const frequency = item.frequency || "Not scheduled";
       counts[frequency] = (counts[frequency] || 0) + 1;
@@ -115,29 +114,11 @@
       ...Object.entries(frequencyCounts).map(([frequency, count]) => `<span class="chip">${escapeHtml(frequency)} / ${count}</span>`),
     ].join("");
 
-    els.checklist.innerHTML = Object.entries(grouped).map(([category, items]) => `
-      <section class="checklist-section">
-        <h3>${escapeHtml(category)}</h3>
-        ${items.map((item) => {
-          const isDone = Boolean(state.reviewState.checklist[item.id]);
-          return `
-            <article class="check-item ${isDone ? "is-done" : ""}">
-              <div class="check-top">
-                <div>
-                  <strong>${escapeHtml(item.item)}</strong>
-                  <div class="mini-copy">${escapeHtml(item.frequency)} / ${escapeHtml(item.owner)}</div>
-                </div>
-                <span class="status-pill ${isDone ? "is-success" : ""}">${isDone ? "Done" : "Track"}</span>
-              </div>
-              <label>
-                <input type="checkbox" data-check-id="${escapeHtml(item.id)}" ${isDone ? "checked" : ""}>
-                Mark this checklist item complete
-              </label>
-            </article>
-          `;
-        }).join("")}
-      </section>
-    `).join("");
+    els.checklist.innerHTML = `
+      <div class="empty-state">
+        Recurring checklist tasks are shown in the monthly review program only. Use the month tabs to track completion.
+      </div>
+    `;
     refreshChecklistAddFormOptions();
   }
   function getAllChecklistItems() {
@@ -432,8 +413,6 @@
   }
   function applyCreatedChecklistItem(created) {
     state.checklistItems = getAllChecklistItems().concat(created);
-    state.reviewState.checklist[created.id] = false;
-    state.reviewState.activities[created.id] = false;
     saveReviewState();
     renderReviewsPage();
     refreshChecklistAddFormOptions();

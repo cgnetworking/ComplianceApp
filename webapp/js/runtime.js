@@ -130,6 +130,8 @@
     checklistAddOwner: document.getElementById("checklist-add-owner"),
     checklistRecommendationSelect: document.getElementById("checklist-recommendation-select"),
     checklistRecommendationAdd: document.getElementById("checklist-recommendation-add"),
+    reviewTasksList: document.getElementById("review-tasks-list"),
+    reviewTasksStatus: document.getElementById("review-tasks-status"),
     homeUpcoming: document.getElementById("home-upcoming"),
     homeDomains: document.getElementById("home-domains"),
     homePolicies: document.getElementById("home-policies"),

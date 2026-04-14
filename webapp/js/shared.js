@@ -41,6 +41,7 @@
     bindUploadEvents();
     bindVendorEvents();
     bindReviewEvents();
+    bindReviewTaskEvents();
     bindRiskEvents();
   }
   function bindSearchEvents() {
@@ -139,6 +140,38 @@
       return;
     }
 
+    els.controlDetail.addEventListener("click", (event) => {
+      const addMapping = event.target.closest("[data-control-policy-add]");
+      if (addMapping) {
+        const controlId = addMapping.dataset.controlPolicyAdd;
+        const mapper = addMapping.closest("[data-control-policy-mapper]");
+        const select = mapper ? mapper.querySelector("[data-control-policy-select]") : null;
+        const documentId = select ? select.value : "";
+        if (!controlId || !documentId) {
+          return;
+        }
+        mapPolicyToControl(controlId, documentId);
+        populateFilters();
+        syncSelectionToVisibleControls();
+        syncUrlAndRender();
+        return;
+      }
+
+      const removeMapping = event.target.closest("[data-control-policy-remove]");
+      if (!removeMapping) {
+        return;
+      }
+      const controlId = removeMapping.dataset.controlPolicyControl;
+      const documentId = removeMapping.dataset.controlPolicyRemove;
+      if (!controlId || !documentId) {
+        return;
+      }
+      unmapPolicyFromControl(controlId, documentId);
+      populateFilters();
+      syncSelectionToVisibleControls();
+      syncUrlAndRender();
+    });
+
     els.controlDetail.addEventListener("change", (event) => {
       const applicability = event.target.closest("[data-control-applicability]");
       if (applicability) {
@@ -208,6 +241,34 @@
 
     if (els.documentViewer) {
       els.documentViewer.addEventListener("click", async (event) => {
+        const addControlMapping = event.target.closest("[data-policy-control-add]");
+        if (addControlMapping) {
+          const documentId = addControlMapping.dataset.policyControlAdd;
+          const mapper = addControlMapping.closest("[data-policy-control-mapper]");
+          const select = mapper ? mapper.querySelector("[data-policy-control-select]") : null;
+          const controlId = select ? select.value : "";
+          if (!documentId || !controlId) {
+            return;
+          }
+          mapPolicyToControl(controlId, documentId);
+          initializePolicySelection();
+          syncUrlAndRender(renderPoliciesPage);
+          return;
+        }
+
+        const removeControlMapping = event.target.closest("[data-policy-control-remove]");
+        if (removeControlMapping) {
+          const controlId = removeControlMapping.dataset.policyControlRemove;
+          const documentId = removeControlMapping.dataset.policyControlDocument;
+          if (!controlId || !documentId) {
+            return;
+          }
+          unmapPolicyFromControl(controlId, documentId);
+          initializePolicySelection();
+          syncUrlAndRender(renderPoliciesPage);
+          return;
+        }
+
         const removeButton = event.target.closest("[data-delete-policy]");
         if (!removeButton) {
           return;
@@ -253,16 +314,6 @@
           return;
         }
         updateReviewStateSelection(target.dataset.activityId, target.checked);
-      });
-    }
-
-    if (els.checklist) {
-      els.checklist.addEventListener("change", (event) => {
-        const target = event.target.closest("[data-check-id]");
-        if (!target) {
-          return;
-        }
-        updateReviewStateSelection(target.dataset.checkId, target.checked);
       });
     }
 
@@ -340,9 +391,68 @@
       await onFilesSelected(files);
     });
   }
+  function buildReviewStateMonthKey(itemId, monthIndex) {
+    const normalizedItemId = typeof itemId === "string" ? itemId.trim() : "";
+    if (!normalizedItemId) {
+      return "";
+    }
+    const parsedMonth = Number(monthIndex);
+    const normalizedMonth = Number.isInteger(parsedMonth) && parsedMonth >= 0 && parsedMonth <= 11
+      ? parsedMonth
+      : today.getMonth();
+    return `m${normalizedMonth}::${normalizedItemId}`;
+  }
+  function isMonthScopedReviewStateKey(value) {
+    return typeof value === "string" && /^m(?:[0-9]|1[01])::.+$/.test(value);
+  }
+  function normalizeReviewStateMapByMonth(value) {
+    if (!value || typeof value !== "object") {
+      return {};
+    }
+    const normalized = {};
+    Object.entries(value).forEach(([rawKey, rawValue]) => {
+      const key = String(rawKey || "").trim();
+      if (!key) {
+        return;
+      }
+      const isChecked = Boolean(rawValue);
+      if (isMonthScopedReviewStateKey(key)) {
+        normalized[key] = isChecked;
+        return;
+      }
+      if (!isChecked) {
+        return;
+      }
+      const monthScopedKey = buildReviewStateMonthKey(key, today.getMonth());
+      if (monthScopedKey) {
+        normalized[monthScopedKey] = true;
+      }
+    });
+    return normalized;
+  }
+  function normalizeReviewStateValue(value) {
+    if (!value || typeof value !== "object") {
+      return { activities: {}, checklist: {} };
+    }
+    return {
+      activities: normalizeReviewStateMapByMonth(value.activities),
+      checklist: normalizeReviewStateMapByMonth(value.checklist),
+    };
+  }
+  function isReviewTaskCompleted(itemId, monthIndex = state.monthIndex) {
+    const key = buildReviewStateMonthKey(itemId, monthIndex);
+    if (!key) {
+      return false;
+    }
+    return Boolean(state.reviewState.checklist[key] || state.reviewState.activities[key]);
+  }
   function updateReviewStateSelection(itemId, checked) {
-    state.reviewState.checklist[itemId] = checked;
-    state.reviewState.activities[itemId] = checked;
+    const key = buildReviewStateMonthKey(itemId, state.monthIndex);
+    if (!key) {
+      return;
+    }
+    state.reviewState.checklist[key] = checked;
+    state.reviewState.activities[key] = checked;
     saveReviewState();
     renderReviewsPage();
   }
@@ -379,6 +489,9 @@
       case "reviews":
         renderReviewsPage();
         break;
+      case "review-tasks":
+        renderReviewTasksPage();
+        break;
       case "policies":
         renderPoliciesPage();
         break;
@@ -399,8 +512,8 @@
     }
 
     const checklistItems = getAllChecklistItems();
-    const checklistDone = checklistItems.filter((item) => state.reviewState.checklist[item.id]).length;
-    const activityDone = options.currentMonthActivities.filter((item) => state.reviewState.checklist[item.id]).length;
+    const checklistDone = checklistItems.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
+    const activityDone = options.currentMonthActivities.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
     const mappedPolicies = new Set(controls.flatMap((control) => control.policyDocumentIds)).size;
 
     const cards = options.mode === "reports"
@@ -551,10 +664,7 @@
   function loadReviewState() {
     try {
       const saved = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
-      return {
-        activities: saved.activities || {},
-        checklist: saved.checklist || {},
-      };
+      return normalizeReviewStateValue(saved);
     } catch (error) {
       return { activities: {}, checklist: {} };
     }
@@ -726,8 +836,8 @@
     }
     if (els.mappingUploadStatus) {
       els.mappingUploadStatus.textContent = isApiPersistence()
-        ? "Upload a control mapping JSON file (.json) to add mapped policy metadata."
-        : "Mapping upload requires API mode so it can be stored in PostgreSQL.";
+        ? "Upload an optional mapping JSON file (.json), or map policies manually from Controls and Policies."
+        : "Map policies manually from Controls and Policies. Mapping upload requires API mode.";
     }
   }
   function refreshDocumentsIndex() {
@@ -828,10 +938,7 @@
       state.recommendedChecklistItems = normalizeChecklistItems(payload.recommendedChecklistItems);
     }
     if (payload.reviewState && typeof payload.reviewState === "object") {
-      state.reviewState = {
-        activities: payload.reviewState.activities || {},
-        checklist: payload.reviewState.checklist || {},
-      };
+      state.reviewState = normalizeReviewStateValue(payload.reviewState);
     }
     if (payload.controlState && typeof payload.controlState === "object") {
       state.controlState = payload.controlState;

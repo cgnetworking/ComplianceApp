@@ -15,6 +15,7 @@ urlpatterns = [
     path("controls.html", portal_views.controls_page, name="portal-controls"),
     path("reports.html", portal_views.reports_page, name="portal-reports"),
     path("reviews.html", portal_views.reviews_page, name="portal-reviews"),
+    path("review-tasks.html", portal_views.review_tasks_page, name="portal-review-tasks"),
     path("policies.html", portal_views.policies_page, name="portal-policies"),
     path("risks.html", portal_views.risks_page, name="portal-risks"),
     path("vendors.html", portal_views.vendors_page, name="portal-vendors"),

@@ -19,6 +19,7 @@ from .services import (
     create_review_checklist_item,
     create_uploaded_policies,
     create_vendor_responses,
+    delete_review_checklist_item,
     delete_uploaded_policy,
     get_bootstrap_payload,
     get_mapping_payload,
@@ -144,6 +145,12 @@ def reviews_page(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+def review_tasks_page(request: HttpRequest) -> HttpResponse:
+    return render_portal_page(request, "portal/review_tasks.html")
+
+
+@login_required(login_url="portal-login")
+@ensure_csrf_cookie
 def policies_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/policies.html")
 
@@ -263,6 +270,17 @@ def checklist_items(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": str(error)}, status=400)
 
     return JsonResponse({"checklistItem": checklist_item}, status=201)
+
+
+@api_login_required
+@require_http_methods(["DELETE"])
+def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse:
+    try:
+        deleted_checklist_item = delete_review_checklist_item(checklist_item_id)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=404)
+
+    return JsonResponse({"deletedChecklistItem": deleted_checklist_item})
 
 
 @api_login_required

@@ -460,11 +460,34 @@
       return;
     }
 
-    const relatedControls = data.controls
-      .filter((control) => control.documentIds.includes(documentItem.id))
+    const relatedControlViews = getAllControlViews()
+      .filter((control) => control.policyDocumentIds.includes(documentItem.id))
+      .sort(compareControlViews);
+    const relatedControlIds = new Set(relatedControlViews.map((control) => control.id));
+    const relatedControls = relatedControlViews
       .slice(0, 8)
       .map((control) => `<a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)}</a>`)
       .join("");
+    const mappedControlRows = relatedControlViews.map((control) => `
+      <div class="mapping-row">
+        <a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</a>
+        <button
+          class="ghost-button danger-button mapping-remove-button"
+          type="button"
+          data-policy-control-remove="${escapeHtml(control.id)}"
+          data-policy-control-document="${escapeHtml(documentItem.id)}"
+        >
+          Remove
+        </button>
+      </div>
+    `).join("");
+    const availableControls = getAllControlViews()
+      .filter((control) => !relatedControlIds.has(control.id))
+      .sort(compareControlViews);
+    const availableControlOptions = availableControls.map((control) => (
+      `<option value="${escapeHtml(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</option>`
+    )).join("");
+    const canMapControl = availableControls.length > 0;
     const documentMeta = [
       `Approver: ${escapeHtml(documentItem.approver)}`,
       `Source: ${escapeHtml(documentItem.path)}`,
@@ -492,6 +515,21 @@
           ${documentMeta.map((item) => `<span>${item}</span>`).join("")}
         </div>
         <div class="chip-row">${relatedControls || '<span class="chip">Not mapped to controls</span>'}</div>
+        <div class="doc-section">
+          <strong>Control mappings</strong>
+          <div class="stack-list">
+            ${mappedControlRows || '<div class="empty-state">Not mapped to any controls yet.</div>'}
+          </div>
+          <div class="quick-add-row" data-policy-control-mapper="${escapeHtml(documentItem.id)}">
+            <label class="form-field">
+              <span>Control</span>
+              <select data-policy-control-select ${canMapControl ? "" : "disabled"}>
+                ${canMapControl ? availableControlOptions : '<option value="">No additional controls available</option>'}
+              </select>
+            </label>
+            <button class="ghost-button" type="button" data-policy-control-add="${escapeHtml(documentItem.id)}" ${canMapControl ? "" : "disabled"}>Add mapping</button>
+          </div>
+        </div>
         ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}
       </div>
       <div class="content-frame">${documentItem.contentHtml}</div>
@@ -525,9 +563,16 @@
   }
   function visiblePoliciesForControls(controls) {
     const visibleIds = new Set(controls.flatMap((control) => control.policyDocumentIds));
-    return data.policyCoverage.filter((item) => visibleIds.has(item.id));
+    return getPolicyLibraryRows().filter((item) => visibleIds.has(item.id));
   }
   function getPolicyLibraryRows() {
+    const controlCounts = {};
+    getAllControlViews().forEach((control) => {
+      control.policyDocumentIds.forEach((documentId) => {
+        controlCounts[documentId] = (controlCounts[documentId] || 0) + 1;
+      });
+    });
+
     return data.documents
       .concat(uploadedDocuments)
       .filter((documentItem) => isPolicyLibraryDocument(documentItem))
@@ -536,7 +581,7 @@
         title: documentItem.title,
         reviewFrequency: documentItem.reviewFrequency,
         type: documentItem.type,
-        controlCount: data.controls.filter((control) => control.documentIds.includes(documentItem.id)).length,
+        controlCount: controlCounts[documentItem.id] || 0,
       }))
       .sort(compareDocumentIds);
   }
@@ -565,6 +610,9 @@
       number: Number(match[2]),
     };
   }
+  function compareControlViews(left, right) {
+    return String(left.id).localeCompare(String(right.id), undefined, { numeric: true });
+  }
   function initializePolicySelection() {
     const coverageRows = filteredPolicyCoverage();
     const contextControl = state.policyContextControlId && controlsById.has(state.policyContextControlId)
@@ -585,7 +633,7 @@
     }
   }
   function firstControlIdForDocument(documentId) {
-    const match = data.controls.find((control) => control.documentIds.includes(documentId));
+    const match = getAllControlViews().find((control) => control.policyDocumentIds.includes(documentId));
     return match ? match.id : "";
   }
   function policyUrl(controlId, documentId) {

@@ -18,7 +18,7 @@
     if (!controls.length) {
       els.controlsBody.innerHTML = `
         <tr>
-          <td colspan="4"><div class="empty-state">No controls match the current filters.</div></td>
+          <td colspan="3"><div class="empty-state">No controls match the current filters.</div></td>
         </tr>
       `;
       return;
@@ -30,7 +30,6 @@
         <td><a class="control-link" data-policy-link="true" href="${policyUrl(control.id, control.preferredDocumentId)}">${escapeHtml(control.id)}</a></td>
         <td>${escapeHtml(control.name)}</td>
         <td>${escapeHtml(control.domain)}</td>
-        <td>${escapeHtml(control.effectiveImplementationModel)}</td>
       </tr>
     `;
     }).join("");
@@ -51,12 +50,28 @@
         return "";
       }
       return `
-        <a class="doc-button ${documentId === control.preferredDocumentId ? "is-active" : ""}" href="${policyUrl(control.id, documentId)}">
-          ${escapeHtml(documentItem.id)} / ${escapeHtml(documentItem.title)}
-          <small>${escapeHtml(documentItem.type)} / ${escapeHtml(documentItem.reviewFrequency)}</small>
-        </a>
+        <div class="mapping-row">
+          <a class="doc-button ${documentId === control.preferredDocumentId ? "is-active" : ""}" href="${policyUrl(control.id, documentId)}">
+            ${escapeHtml(documentItem.id)} / ${escapeHtml(documentItem.title)}
+            <small>${escapeHtml(documentItem.type)} / ${escapeHtml(documentItem.reviewFrequency)}</small>
+          </a>
+          <button
+            class="ghost-button danger-button mapping-remove-button"
+            type="button"
+            data-control-policy-control="${escapeHtml(control.id)}"
+            data-control-policy-remove="${escapeHtml(documentId)}"
+          >
+            Remove
+          </button>
+        </div>
       `;
     }).join("");
+    const availablePolicies = getPolicyLibraryRows()
+      .filter((item) => !control.policyDocumentIds.includes(item.id));
+    const availablePolicyOptions = availablePolicies.map((item) => (
+      `<option value="${escapeHtml(item.id)}">${escapeHtml(item.id)} / ${escapeHtml(item.title)}</option>`
+    )).join("");
+    const canMapPolicy = availablePolicies.length > 0;
 
     const applicabilityOptions = renderSelectOptions(
       ["", "Applicable", "Excluded"],
@@ -105,9 +120,25 @@
       </div>
 
       <div class="doc-section">
-        <strong>Open mapped policy page</strong>
+        <strong>Mapped policies</strong>
         <div class="doc-list">
           ${mappedDocuments || '<div class="empty-state">No embedded documents are mapped to this control.</div>'}
+        </div>
+      </div>
+
+      <div class="doc-section">
+        <div class="detail-card">
+          <strong>Map policy manually</strong>
+          <div class="quick-add-row" data-control-policy-mapper="${escapeHtml(control.id)}">
+            <label class="form-field">
+              <span>Policy document</span>
+              <select data-control-policy-select ${canMapPolicy ? "" : "disabled"}>
+                ${canMapPolicy ? availablePolicyOptions : '<option value="">No additional policy documents available</option>'}
+              </select>
+            </label>
+            <button class="ghost-button" type="button" data-control-policy-add="${escapeHtml(control.id)}" ${canMapPolicy ? "" : "disabled"}>Add mapping</button>
+          </div>
+          <p class="helper-note">Mappings are editable here and from the Policies tab.</p>
         </div>
       </div>
 
@@ -159,6 +190,57 @@
   function normalizeControlReviewFrequency(value) {
     return typeof value === "string" ? value.trim() : "";
   }
+  function normalizeControlPolicyDocumentIds(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const uniqueIds = [];
+    const seen = new Set();
+    value.forEach((item) => {
+      const documentId = typeof item === "string" ? item.trim() : "";
+      if (!documentId || seen.has(documentId)) {
+        return;
+      }
+      seen.add(documentId);
+      uniqueIds.push(documentId);
+    });
+    return uniqueIds;
+  }
+  function normalizeControlPreferredDocumentId(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+  function defaultControlPolicyDocumentIds(control) {
+    const primary = normalizeControlPolicyDocumentIds(control.policyDocumentIds);
+    if (primary.length) {
+      return primary;
+    }
+    return normalizeControlPolicyDocumentIds(control.documentIds);
+  }
+  function resolvePreferredControlDocumentId(preferredDocumentId, documentIds, fallbackDocumentId = "") {
+    const preferred = normalizeControlPreferredDocumentId(preferredDocumentId);
+    if (preferred && documentIds.includes(preferred)) {
+      return preferred;
+    }
+
+    const fallback = normalizeControlPreferredDocumentId(fallbackDocumentId);
+    if (fallback && documentIds.includes(fallback)) {
+      return fallback;
+    }
+
+    return documentIds[0] || "";
+  }
+  function areStringArraysEqual(left, right) {
+    if (left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
   function getAllControlViews() {
     return data.controls.map((control) => getControlView(control)).filter(Boolean);
   }
@@ -168,6 +250,16 @@
       return null;
     }
     const stored = state.controlState[control.id] || {};
+    const basePolicyDocumentIds = defaultControlPolicyDocumentIds(control);
+    const hasPolicyDocumentOverride = Array.isArray(stored.policyDocumentIds);
+    const storedPolicyDocumentIds = normalizeControlPolicyDocumentIds(stored.policyDocumentIds);
+    const effectivePolicyDocumentIds = hasPolicyDocumentOverride
+      ? storedPolicyDocumentIds
+      : basePolicyDocumentIds;
+    const effectivePreferredDocumentId = resolvePreferredControlDocumentId(
+      stored.preferredDocumentId || control.preferredDocumentId,
+      effectivePolicyDocumentIds
+    );
     const storedApplicability = normalizeControlApplicability(stored.applicability);
     const baseApplicability = normalizeControlApplicability(control.applicability);
     const storedReviewFrequency = normalizeControlReviewFrequency(stored.reviewFrequency);
@@ -185,6 +277,9 @@
 
     return {
       ...control,
+      documentIds: effectivePolicyDocumentIds,
+      policyDocumentIds: effectivePolicyDocumentIds,
+      preferredDocumentId: effectivePreferredDocumentId,
       applicability: effectiveApplicability,
       reviewFrequency: effectiveReviewFrequency,
       isBaseExcluded: baseExcluded,
@@ -203,6 +298,9 @@
     const applicability = normalizeControlApplicability(nextState.applicability);
     const reason = typeof nextState.reason === "string" ? nextState.reason : "";
     const reviewFrequency = normalizeControlReviewFrequency(nextState.reviewFrequency);
+    const hasPolicyDocumentOverride = Array.isArray(nextState.policyDocumentIds);
+    const policyDocumentIds = normalizeControlPolicyDocumentIds(nextState.policyDocumentIds);
+    const preferredDocumentId = normalizeControlPreferredDocumentId(nextState.preferredDocumentId);
 
     const entry = {};
     if (applicability) {
@@ -213,6 +311,12 @@
     }
     if (reviewFrequency) {
       entry.reviewFrequency = reviewFrequency;
+    }
+    if (hasPolicyDocumentOverride) {
+      entry.policyDocumentIds = policyDocumentIds;
+    }
+    if (preferredDocumentId && (!hasPolicyDocumentOverride || policyDocumentIds.includes(preferredDocumentId))) {
+      entry.preferredDocumentId = preferredDocumentId;
     }
 
     if (!Object.keys(entry).length) {
@@ -269,6 +373,78 @@
       reason,
     };
     saveControlStateEntry(controlId, nextState);
+  }
+  function updateControlPolicyMapping(controlId, nextPolicyDocumentIds, preferredDocumentId) {
+    const control = controlsById.get(controlId);
+    if (!control) {
+      return;
+    }
+
+    const existing = state.controlState[controlId] || {};
+    const normalizedNextDocumentIds = normalizeControlPolicyDocumentIds(nextPolicyDocumentIds);
+    const basePolicyDocumentIds = defaultControlPolicyDocumentIds(control);
+    const hasPolicyDocumentOverride = !areStringArraysEqual(normalizedNextDocumentIds, basePolicyDocumentIds);
+    const basePreferredDocumentId = resolvePreferredControlDocumentId(
+      control.preferredDocumentId,
+      basePolicyDocumentIds
+    );
+    const resolvedPreferredDocumentId = resolvePreferredControlDocumentId(
+      preferredDocumentId || existing.preferredDocumentId || control.preferredDocumentId,
+      normalizedNextDocumentIds
+    );
+
+    const nextState = {
+      ...existing,
+    };
+    if (hasPolicyDocumentOverride) {
+      nextState.policyDocumentIds = normalizedNextDocumentIds;
+    } else {
+      delete nextState.policyDocumentIds;
+    }
+
+    if (resolvedPreferredDocumentId && (hasPolicyDocumentOverride || resolvedPreferredDocumentId !== basePreferredDocumentId)) {
+      nextState.preferredDocumentId = resolvedPreferredDocumentId;
+    } else {
+      delete nextState.preferredDocumentId;
+    }
+
+    saveControlStateEntry(controlId, nextState);
+  }
+  function mapPolicyToControl(controlId, documentId) {
+    const normalizedDocumentId = normalizeControlPreferredDocumentId(documentId);
+    if (!normalizedDocumentId || !documentsById.has(normalizedDocumentId)) {
+      return;
+    }
+
+    const control = getControlView(controlId);
+    if (!control || control.policyDocumentIds.includes(normalizedDocumentId)) {
+      return;
+    }
+
+    const nextPolicyDocumentIds = control.policyDocumentIds.concat(normalizedDocumentId);
+    updateControlPolicyMapping(
+      controlId,
+      nextPolicyDocumentIds,
+      control.preferredDocumentId || normalizedDocumentId
+    );
+  }
+  function unmapPolicyFromControl(controlId, documentId) {
+    const normalizedDocumentId = normalizeControlPreferredDocumentId(documentId);
+    if (!normalizedDocumentId) {
+      return;
+    }
+
+    const control = getControlView(controlId);
+    if (!control || !control.policyDocumentIds.includes(normalizedDocumentId)) {
+      return;
+    }
+
+    const nextPolicyDocumentIds = control.policyDocumentIds.filter((item) => item !== normalizedDocumentId);
+    const nextPreferredDocumentId = control.preferredDocumentId === normalizedDocumentId
+      ? (nextPolicyDocumentIds[0] || "")
+      : control.preferredDocumentId;
+
+    updateControlPolicyMapping(controlId, nextPolicyDocumentIds, nextPreferredDocumentId);
   }
   function filteredControls() {
     const searchLower = state.search.trim().toLowerCase();

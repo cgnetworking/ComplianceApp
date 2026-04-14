@@ -58,7 +58,12 @@
       return;
     }
 
-    const topPolicies = data.policyCoverage.slice(0, 6);
+    const topPolicies = getPolicyLibraryRows().slice(0, 6);
+    if (!topPolicies.length) {
+      els.homePolicies.innerHTML = '<div class="empty-state">No policy documents are available yet.</div>';
+      return;
+    }
+
     els.homePolicies.innerHTML = `
       <div class="coverage-list">
         ${topPolicies.map((item) => `

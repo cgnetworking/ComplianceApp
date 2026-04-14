@@ -550,6 +550,41 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
     raise ValidationError("Unable to create checklist item id. Retry the request.")
 
 
+def delete_review_checklist_item(external_id: str) -> dict[str, str]:
+    normalized_id = normalize_string(external_id)
+    if not normalized_id:
+        raise ValidationError("Checklist item id is required.")
+
+    try:
+        checklist_item = ReviewChecklistItem.objects.get(external_id=normalized_id)
+    except ReviewChecklistItem.DoesNotExist as error:
+        raise ValidationError("Checklist item was not found.") from error
+
+    deleted_item = checklist_item.to_portal_dict()
+    checklist_item.delete()
+
+    review_state = normalize_review_state(get_state_payload("review_state", {}))
+    checklist_state = review_state.get("checklist") if isinstance(review_state.get("checklist"), dict) else {}
+    activity_state = review_state.get("activities") if isinstance(review_state.get("activities"), dict) else {}
+
+    def keep_state_entry(key: str) -> bool:
+        return key != normalized_id and not key.endswith(f"::{normalized_id}")
+
+    filtered_checklist_state = {str(key): bool(value) for key, value in checklist_state.items() if keep_state_entry(str(key))}
+    filtered_activity_state = {str(key): bool(value) for key, value in activity_state.items() if keep_state_entry(str(key))}
+
+    if filtered_checklist_state != checklist_state or filtered_activity_state != activity_state:
+        set_state_payload(
+            "review_state",
+            {
+                "activities": filtered_activity_state,
+                "checklist": filtered_checklist_state,
+            },
+        )
+
+    return deleted_item
+
+
 def get_bootstrap_payload() -> dict[str, object]:
     ensure_review_checklist_recommendations_seeded()
     return {
@@ -710,12 +745,30 @@ def normalize_control_state(payload: object) -> dict[str, object]:
         raw_applicability = str(value.get("applicability") or "").strip()
         applicability = raw_applicability if raw_applicability in ALLOWED_CONTROL_APPLICABILITY else ""
         review_frequency = str(value.get("reviewFrequency") or "").strip()
-        if excluded or reason or applicability or review_frequency:
+        has_policy_document_override = isinstance(value.get("policyDocumentIds"), list)
+        policy_document_ids: list[str] = []
+        if has_policy_document_override:
+            seen_policy_document_ids: set[str] = set()
+            for item in value.get("policyDocumentIds", []):
+                document_id = str(item or "").strip()
+                if not document_id or document_id in seen_policy_document_ids:
+                    continue
+                seen_policy_document_ids.add(document_id)
+                policy_document_ids.append(document_id)
+        preferred_document_id = str(value.get("preferredDocumentId") or "").strip()
+        if preferred_document_id and has_policy_document_override and preferred_document_id not in policy_document_ids:
+            preferred_document_id = ""
+
+        if excluded or reason or applicability or review_frequency or has_policy_document_override or preferred_document_id:
             entry: dict[str, object] = {"excluded": excluded, "reason": reason}
             if applicability:
                 entry["applicability"] = applicability
             if review_frequency:
                 entry["reviewFrequency"] = review_frequency
+            if has_policy_document_override:
+                entry["policyDocumentIds"] = policy_document_ids
+            if preferred_document_id:
+                entry["preferredDocumentId"] = preferred_document_id
             normalized[key] = entry
     return normalized
 

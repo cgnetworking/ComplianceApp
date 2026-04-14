@@ -1293,6 +1293,32 @@ tbody tr.is-selected {
   opacity: 0.78;
 }
 
+.mapping-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.doc-list .mapping-row,
+.stack-list .mapping-row {
+  width: 100%;
+}
+
+.mapping-row .doc-button {
+  flex: 1;
+}
+
+.mapping-row .chip {
+  flex: 1;
+  justify-content: flex-start;
+  text-decoration: none;
+}
+
+.mapping-remove-button {
+  min-width: 96px;
+  white-space: nowrap;
+}
+
 .document-heading {
   display: grid;
   gap: 12px;
@@ -1619,5 +1645,9 @@ code {
   .timeline-head,
   .timeline-row {
     grid-template-columns: 1fr;
+  }
+
+  .mapping-row {
+    flex-wrap: wrap;
   }
 }
