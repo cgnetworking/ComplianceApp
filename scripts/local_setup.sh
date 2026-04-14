@@ -11,6 +11,7 @@ DEFAULT_DATABASE_USER="${LOCAL_SETUP_DATABASE_USER:-postgres}"
 DEFAULT_NGINX_SERVER_NAME="${LOCAL_SETUP_NGINX_SERVER_NAME:-localhost}"
 DEFAULT_NGINX_STATIC_ROOT="${LOCAL_SETUP_NGINX_STATIC_ROOT:-/var/www/complianceapp/staticfiles}"
 NGINX_SERVER_NAME="$DEFAULT_NGINX_SERVER_NAME"
+DEFAULT_ALLOWED_HOSTS="localhost,127.0.0.1"
 NGINX_STATIC_ROOT="$DEFAULT_NGINX_STATIC_ROOT"
 NGINX_PRIMARY_SERVER_NAME=""
 NGINX_SSL_CERT_PATH=""
@@ -667,6 +668,41 @@ print(db_port)
 PY
 }
 
+merge_host_values() {
+  local existing_hosts="${1:-}"
+  local additional_hosts="${2:-}"
+  python - "$existing_hosts" "$additional_hosts" <<'PY'
+import re
+import sys
+
+existing_hosts = sys.argv[1]
+additional_hosts = sys.argv[2]
+
+merged = []
+seen = set()
+
+def add_host(raw_host: str) -> None:
+    host = raw_host.strip().rstrip(";")
+    if not host or host == "_":
+        return
+    if host.startswith("*."):
+        host = f".{host[2:]}"
+    host = host.strip()
+    if not host or host in seen:
+        return
+    seen.add(host)
+    merged.append(host)
+
+for token in re.split(r"[\s,]+", existing_hosts.strip()):
+    add_host(token)
+
+for token in re.split(r"[\s,]+", additional_hosts.strip()):
+    add_host(token)
+
+print(",".join(merged), end="")
+PY
+}
+
 read_env_var() {
   local key="$1"
   python - "$ENV_FILE" "$key" <<'PY'
@@ -903,6 +939,7 @@ ensure_python_runtime
 ensure_python_venv
 install_nginx
 prompt_for_nginx_server_name
+DEFAULT_ALLOWED_HOSTS="$(merge_host_values "$DEFAULT_ALLOWED_HOSTS" "$NGINX_SERVER_NAME")"
 configure_nginx_site_link
 prompt_for_self_signed_cert_choice
 create_self_signed_nginx_cert
@@ -941,7 +978,7 @@ if [ ! -f "$ENV_FILE" ]; then
   printf '%s\n' \
     "DJANGO_SECRET_KEY=$SECRET_KEY" \
     "DJANGO_DEBUG=True" \
-    "ALLOWED_HOSTS=localhost,127.0.0.1" \
+    "ALLOWED_HOSTS=$DEFAULT_ALLOWED_HOSTS" \
     "CSRF_TRUSTED_ORIGINS=http://localhost:8000" \
     "TIME_ZONE=America/New_York" \
     "DATABASE_URL=$DEFAULT_DATABASE_URL" \
@@ -963,6 +1000,18 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "Created $ENV_FILE"
 else
   echo "Using existing $ENV_FILE"
+fi
+
+CURRENT_ALLOWED_HOSTS="$(read_env_var ALLOWED_HOSTS)"
+if [ -z "$CURRENT_ALLOWED_HOSTS" ]; then
+  upsert_env_var ALLOWED_HOSTS "$DEFAULT_ALLOWED_HOSTS"
+  echo "Added ALLOWED_HOSTS to $ENV_FILE"
+else
+  MERGED_ALLOWED_HOSTS="$(merge_host_values "$CURRENT_ALLOWED_HOSTS" "$NGINX_SERVER_NAME")"
+  if [ "$MERGED_ALLOWED_HOSTS" != "$CURRENT_ALLOWED_HOSTS" ]; then
+    upsert_env_var ALLOWED_HOSTS "$MERGED_ALLOWED_HOSTS"
+    echo "Updated ALLOWED_HOSTS in $ENV_FILE to include NGINX server_name values"
+  fi
 fi
 
 if [ -z "$(read_env_var DATABASE_URL)" ]; then
