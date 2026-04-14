@@ -493,47 +493,11 @@ def list_review_checklist_recommendations() -> list[dict[str, str]]:
     return [item.to_portal_dict() for item in ReviewChecklistRecommendation.objects.all()]
 
 
-def ensure_review_checklist_items_seeded() -> None:
-    if ReviewChecklistItem.objects.exists():
-        return
-
-    mapping_payload = get_mapping_payload()
-    checklist_items = normalize_mapping_checklist(mapping_payload.get("checklist"))
-    if not checklist_items:
-        checklist_items = load_default_review_checklist_payload()
-    if not checklist_items:
-        return
-
-    seen_ids: set[str] = set()
-    to_create: list[ReviewChecklistItem] = []
-    for item in checklist_items:
-        item_id = normalize_string(item.get("id"))
-        item_text = normalize_string(item.get("item"))
-        if not item_id or not item_text or item_id in seen_ids:
-            continue
-        seen_ids.add(item_id)
-        to_create.append(
-            ReviewChecklistItem(
-                external_id=item_id,
-                category=normalize_string(item.get("category"), "Custom"),
-                item=item_text,
-                frequency=normalize_string(item.get("frequency"), "Annual"),
-                owner=normalize_string(item.get("owner"), "Shared portal"),
-            )
-        )
-
-    if to_create:
-        ReviewChecklistItem.objects.bulk_create(to_create, ignore_conflicts=True)
-
-
 def ensure_review_checklist_recommendations_seeded() -> None:
     if ReviewChecklistRecommendation.objects.exists():
         return
 
-    mapping_payload = get_mapping_payload()
-    checklist_items = normalize_mapping_checklist(mapping_payload.get("checklist"))
-    if not checklist_items:
-        checklist_items = load_default_review_checklist_payload()
+    checklist_items = load_default_review_checklist_payload()
     if not checklist_items:
         return
 
@@ -587,7 +551,6 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
 
 
 def get_bootstrap_payload() -> dict[str, object]:
-    ensure_review_checklist_items_seeded()
     ensure_review_checklist_recommendations_seeded()
     return {
         "persistenceMode": "api",
