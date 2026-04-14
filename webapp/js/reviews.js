@@ -23,7 +23,7 @@
       {
         label: "Checklist tasks",
         value: checklistItems.length,
-        note: "Review tasks currently stored in the shared database checklist.",
+        note: "Review tasks currently stored in the checklist.",
       },
       {
         label: "Checklist progress",
