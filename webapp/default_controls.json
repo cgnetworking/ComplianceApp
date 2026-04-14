@@ -1,374 +1,467 @@
 [
   {
     "id": "5.1",
-    "name": "Policies for information security"
+    "name": "Policies for information security",
+    "domain": "Organizational"
   },
   {
     "id": "5.2",
-    "name": "Information security roles and responsibilities"
+    "name": "Information security roles and responsibilities",
+    "domain": "Organizational"
   },
   {
     "id": "5.3",
-    "name": "Segregation of duties"
+    "name": "Segregation of duties",
+    "domain": "Organizational"
   },
   {
     "id": "5.4",
-    "name": "Management responsibilities"
+    "name": "Management responsibilities",
+    "domain": "Organizational"
   },
   {
     "id": "5.5",
-    "name": "Contact with authorities"
+    "name": "Contact with authorities",
+    "domain": "Organizational"
   },
   {
     "id": "5.6",
-    "name": "Contact with special interest groups"
+    "name": "Contact with special interest groups",
+    "domain": "Organizational"
   },
   {
     "id": "5.7",
-    "name": "Threat intelligence"
+    "name": "Threat intelligence",
+    "domain": "Organizational"
   },
   {
     "id": "5.8",
-    "name": "Information security in project management"
+    "name": "Information security in project management",
+    "domain": "Organizational"
   },
   {
     "id": "5.9",
-    "name": "Inventory of information and other associated assets"
+    "name": "Inventory of information and other associated assets",
+    "domain": "Organizational"
   },
   {
     "id": "5.10",
-    "name": "Acceptable use of information and other associated assets"
+    "name": "Acceptable use of information and other associated assets",
+    "domain": "Organizational"
   },
   {
     "id": "5.11",
-    "name": "Return of assets"
+    "name": "Return of assets",
+    "domain": "Organizational"
   },
   {
     "id": "5.12",
-    "name": "Classification of information"
+    "name": "Classification of information",
+    "domain": "Organizational"
   },
   {
     "id": "5.13",
-    "name": "Labelling of information"
+    "name": "Labelling of information",
+    "domain": "Organizational"
   },
   {
     "id": "5.14",
-    "name": "Information transfer"
+    "name": "Information transfer",
+    "domain": "Organizational"
   },
   {
     "id": "5.15",
-    "name": "Access control"
+    "name": "Access control",
+    "domain": "Organizational"
   },
   {
     "id": "5.16",
-    "name": "Identity management"
+    "name": "Identity management",
+    "domain": "Organizational"
   },
   {
     "id": "5.17",
-    "name": "Authentication information"
+    "name": "Authentication information",
+    "domain": "Organizational"
   },
   {
     "id": "5.18",
-    "name": "Access rights"
+    "name": "Access rights",
+    "domain": "Organizational"
   },
   {
     "id": "5.19",
-    "name": "Information security in supplier relationships"
+    "name": "Information security in supplier relationships",
+    "domain": "Organizational"
   },
   {
     "id": "5.20",
-    "name": "Addressing information security within supplier agreements"
+    "name": "Addressing information security within supplier agreements",
+    "domain": "Organizational"
   },
   {
     "id": "5.21",
-    "name": "Managing information security in the ICT supply chain"
+    "name": "Managing information security in the ICT supply chain",
+    "domain": "Organizational"
   },
   {
     "id": "5.22",
-    "name": "Monitoring, review and change management of supplier services"
+    "name": "Monitoring, review and change management of supplier services",
+    "domain": "Organizational"
   },
   {
     "id": "5.23",
-    "name": "Information security for use of cloud services"
+    "name": "Information security for use of cloud services",
+    "domain": "Organizational"
   },
   {
     "id": "5.24",
-    "name": "Information security incident management planning and preparation"
+    "name": "Information security incident management planning and preparation",
+    "domain": "Organizational"
   },
   {
     "id": "5.25",
-    "name": "Assessment and decision on information security events"
+    "name": "Assessment and decision on information security events",
+    "domain": "Organizational"
   },
   {
     "id": "5.26",
-    "name": "Response to information security incidents"
+    "name": "Response to information security incidents",
+    "domain": "Organizational"
   },
   {
     "id": "5.27",
-    "name": "Learning from information security incidents"
+    "name": "Learning from information security incidents",
+    "domain": "Organizational"
   },
   {
     "id": "5.28",
-    "name": "Collection of evidence"
+    "name": "Collection of evidence",
+    "domain": "Organizational"
   },
   {
     "id": "5.29",
-    "name": "Information security during disruption"
+    "name": "Information security during disruption",
+    "domain": "Organizational"
   },
   {
     "id": "5.30",
-    "name": "ICT readiness for business continuity"
+    "name": "ICT readiness for business continuity",
+    "domain": "Organizational"
   },
   {
     "id": "5.31",
-    "name": "Legal, statutory, regulatory and contractual requirements"
+    "name": "Legal, statutory, regulatory and contractual requirements",
+    "domain": "Organizational"
   },
   {
     "id": "5.32",
-    "name": "Intellectual property rights"
+    "name": "Intellectual property rights",
+    "domain": "Organizational"
   },
   {
     "id": "5.33",
-    "name": "Protection of records"
+    "name": "Protection of records",
+    "domain": "Organizational"
   },
   {
     "id": "5.34",
-    "name": "Privacy and protection of PII"
+    "name": "Privacy and protection of PII",
+    "domain": "Organizational"
   },
   {
     "id": "5.35",
-    "name": "Independent review of information security"
+    "name": "Independent review of information security",
+    "domain": "Organizational"
   },
   {
     "id": "5.36",
-    "name": "Compliance with policies, rules and standards for information security"
+    "name": "Compliance with policies, rules and standards for information security",
+    "domain": "Organizational"
   },
   {
     "id": "5.37",
-    "name": "Documented operating procedures"
+    "name": "Documented operating procedures",
+    "domain": "Organizational"
   },
   {
     "id": "6.1",
-    "name": "Screening"
+    "name": "Screening",
+    "domain": "People"
   },
   {
     "id": "6.2",
-    "name": "Terms and conditions of employment"
+    "name": "Terms and conditions of employment",
+    "domain": "People"
   },
   {
     "id": "6.3",
-    "name": "Information security awareness, education and training"
+    "name": "Information security awareness, education and training",
+    "domain": "People"
   },
   {
     "id": "6.4",
-    "name": "Disciplinary process"
+    "name": "Disciplinary process",
+    "domain": "People"
   },
   {
     "id": "6.5",
-    "name": "Responsibilities after termination or change of employment"
+    "name": "Responsibilities after termination or change of employment",
+    "domain": "People"
   },
   {
     "id": "6.6",
-    "name": "Confidentiality or non-disclosure agreements"
+    "name": "Confidentiality or non-disclosure agreements",
+    "domain": "People"
   },
   {
     "id": "6.7",
-    "name": "Remote working"
+    "name": "Remote working",
+    "domain": "People"
   },
   {
     "id": "6.8",
-    "name": "Information security event reporting"
+    "name": "Information security event reporting",
+    "domain": "People"
   },
   {
     "id": "7.1",
-    "name": "Physical security perimeters"
+    "name": "Physical security perimeters",
+    "domain": "Physical"
   },
   {
     "id": "7.2",
-    "name": "Physical entry"
+    "name": "Physical entry",
+    "domain": "Physical"
   },
   {
     "id": "7.3",
-    "name": "Securing offices, rooms and facilities"
+    "name": "Securing offices, rooms and facilities",
+    "domain": "Physical"
   },
   {
     "id": "7.4",
-    "name": "Physical security monitoring"
+    "name": "Physical security monitoring",
+    "domain": "Physical"
   },
   {
     "id": "7.5",
-    "name": "Protecting against physical and environmental threats"
+    "name": "Protecting against physical and environmental threats",
+    "domain": "Physical"
   },
   {
     "id": "7.6",
-    "name": "Working in secure areas"
+    "name": "Working in secure areas",
+    "domain": "Physical"
   },
   {
     "id": "7.7",
-    "name": "Clear desk and clear screen"
+    "name": "Clear desk and clear screen",
+    "domain": "Physical"
   },
   {
     "id": "7.8",
-    "name": "Equipment siting and protection"
+    "name": "Equipment siting and protection",
+    "domain": "Physical"
   },
   {
     "id": "7.9",
-    "name": "Security of assets off-premises"
+    "name": "Security of assets off-premises",
+    "domain": "Physical"
   },
   {
     "id": "7.10",
-    "name": "Storage media"
+    "name": "Storage media",
+    "domain": "Physical"
   },
   {
     "id": "7.11",
-    "name": "Supporting utilities"
+    "name": "Supporting utilities",
+    "domain": "Physical"
   },
   {
     "id": "7.12",
-    "name": "Cabling security"
+    "name": "Cabling security",
+    "domain": "Physical"
   },
   {
     "id": "7.13",
-    "name": "Equipment maintenance"
+    "name": "Equipment maintenance",
+    "domain": "Physical"
   },
   {
     "id": "7.14",
-    "name": "Secure disposal or re-use of equipment"
+    "name": "Secure disposal or re-use of equipment",
+    "domain": "Physical"
   },
   {
     "id": "8.1",
-    "name": "User endpoint devices"
+    "name": "User endpoint devices",
+    "domain": "Technological"
   },
   {
     "id": "8.2",
-    "name": "Privileged access rights"
+    "name": "Privileged access rights",
+    "domain": "Technological"
   },
   {
     "id": "8.3",
-    "name": "Information access restriction"
+    "name": "Information access restriction",
+    "domain": "Technological"
   },
   {
     "id": "8.4",
-    "name": "Access to source code"
+    "name": "Access to source code",
+    "domain": "Technological"
   },
   {
     "id": "8.5",
-    "name": "Secure authentication"
+    "name": "Secure authentication",
+    "domain": "Technological"
   },
   {
     "id": "8.6",
-    "name": "Capacity management"
+    "name": "Capacity management",
+    "domain": "Technological"
   },
   {
     "id": "8.7",
-    "name": "Protection against malware"
+    "name": "Protection against malware",
+    "domain": "Technological"
   },
   {
     "id": "8.8",
-    "name": "Management of technical vulnerabilities"
+    "name": "Management of technical vulnerabilities",
+    "domain": "Technological"
   },
   {
     "id": "8.9",
-    "name": "Configuration management"
+    "name": "Configuration management",
+    "domain": "Technological"
   },
   {
     "id": "8.10",
-    "name": "Information deletion"
+    "name": "Information deletion",
+    "domain": "Technological"
   },
   {
     "id": "8.11",
-    "name": "Data masking"
+    "name": "Data masking",
+    "domain": "Technological"
   },
   {
     "id": "8.12",
-    "name": "Data leakage prevention"
+    "name": "Data leakage prevention",
+    "domain": "Technological"
   },
   {
     "id": "8.13",
-    "name": "Information backup"
+    "name": "Information backup",
+    "domain": "Technological"
   },
   {
     "id": "8.14",
-    "name": "Redundancy of information processing facilities"
+    "name": "Redundancy of information processing facilities",
+    "domain": "Technological"
   },
   {
     "id": "8.15",
-    "name": "Logging"
+    "name": "Logging",
+    "domain": "Technological"
   },
   {
     "id": "8.16",
-    "name": "Monitoring activities"
+    "name": "Monitoring activities",
+    "domain": "Technological"
   },
   {
     "id": "8.17",
-    "name": "Clock synchronization"
+    "name": "Clock synchronization",
+    "domain": "Technological"
   },
   {
     "id": "8.18",
-    "name": "Use of privileged utility programs"
+    "name": "Use of privileged utility programs",
+    "domain": "Technological"
   },
   {
     "id": "8.19",
-    "name": "Installation of software on operational systems"
+    "name": "Installation of software on operational systems",
+    "domain": "Technological"
   },
   {
     "id": "8.20",
-    "name": "Networks security"
+    "name": "Networks security",
+    "domain": "Technological"
   },
   {
     "id": "8.21",
-    "name": "Security of network services"
+    "name": "Security of network services",
+    "domain": "Technological"
   },
   {
     "id": "8.22",
-    "name": "Segregation of networks"
+    "name": "Segregation of networks",
+    "domain": "Technological"
   },
   {
     "id": "8.23",
-    "name": "Web filtering"
+    "name": "Web filtering",
+    "domain": "Technological"
   },
   {
     "id": "8.24",
-    "name": "Use of cryptography"
+    "name": "Use of cryptography",
+    "domain": "Technological"
   },
   {
     "id": "8.25",
-    "name": "Secure development life cycle"
+    "name": "Secure development life cycle",
+    "domain": "Technological"
   },
   {
     "id": "8.26",
-    "name": "Application security requirements"
+    "name": "Application security requirements",
+    "domain": "Technological"
   },
   {
     "id": "8.27",
-    "name": "Secure system architecture and engineering principles"
+    "name": "Secure system architecture and engineering principles",
+    "domain": "Technological"
   },
   {
     "id": "8.28",
-    "name": "Secure coding"
+    "name": "Secure coding",
+    "domain": "Technological"
   },
   {
     "id": "8.29",
-    "name": "Security testing in development and acceptance"
+    "name": "Security testing in development and acceptance",
+    "domain": "Technological"
   },
   {
     "id": "8.30",
-    "name": "Outsourced development"
+    "name": "Outsourced development",
+    "domain": "Technological"
   },
   {
     "id": "8.31",
-    "name": "Separation of development, test and production environments"
+    "name": "Separation of development, test and production environments",
+    "domain": "Technological"
   },
   {
     "id": "8.32",
-    "name": "Change management"
+    "name": "Change management",
+    "domain": "Technological"
   },
   {
     "id": "8.33",
-    "name": "Test information"
+    "name": "Test information",
+    "domain": "Technological"
   },
   {
     "id": "8.34",
-    "name": "Protection of information systems during audit testing"
+    "name": "Protection of information systems during audit testing",
+    "domain": "Technological"
   }
 ]

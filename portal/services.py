@@ -41,6 +41,13 @@ JAVASCRIPT_QUOTED_ATTR_RE = re.compile(
 )
 JAVASCRIPT_UNQUOTED_ATTR_RE = re.compile(r"\s+(href|src)\s*=\s*javascript:[^\s>]+", re.IGNORECASE)
 PURPOSE_RE = re.compile(r"^## 1\. Purpose\s+([\s\S]*?)\s+## ", re.MULTILINE)
+ANNEX_A_CONTROL_DOMAIN_BY_FAMILY = {
+    "5": "Organizational",
+    "6": "People",
+    "7": "Physical",
+    "8": "Technological",
+}
+ALLOWED_CONTROL_APPLICABILITY = {"Applicable", "Excluded"}
 
 
 class ValidationError(Exception):
@@ -122,6 +129,16 @@ def normalize_mapping_source_snapshot(value: object) -> dict[str, object]:
     }
 
 
+def infer_control_domain(control_id: str, domain: str) -> str:
+    if domain:
+        return domain
+
+    match = re.match(r"^\s*(?:A\.)?\s*(\d+)\b", control_id, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return ANNEX_A_CONTROL_DOMAIN_BY_FAMILY.get(match.group(1), "")
+
+
 def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -140,13 +157,14 @@ def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
         preferred_document_id = normalize_string(item.get("preferredDocumentId"))
         if not preferred_document_id and policy_document_ids:
             preferred_document_id = policy_document_ids[0]
+        domain = infer_control_domain(control_id, normalize_string(item.get("domain")))
 
         controls.append(
             {
                 "id": control_id,
                 "name": normalize_string(item.get("name")),
-                "domain": normalize_string(item.get("domain")),
-                "applicability": normalize_string(item.get("applicability"), "Applicable"),
+                "domain": domain,
+                "applicability": normalize_string(item.get("applicability")),
                 "implementationModel": normalize_string(item.get("implementationModel"), "Implemented"),
                 "owner": normalize_string(item.get("owner")),
                 "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Annual"),
@@ -401,7 +419,17 @@ def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
     return normalized_payload
 
 
+def ensure_mapping_state_seeded() -> None:
+    if PortalState.objects.filter(key="mapping_state").exists():
+        return
+
+    default_payload = get_default_controls_mapping_payload()
+    if default_payload.get("controls"):
+        set_state_payload("mapping_state", default_payload)
+
+
 def get_mapping_payload() -> dict[str, object]:
+    ensure_mapping_state_seeded()
     payload = get_state_payload("mapping_state", {})
     normalized = normalize_mapping_payload(payload)
     if normalized.get("controls"):
@@ -427,16 +455,34 @@ def get_default_controls_mapping_payload() -> dict[str, object]:
     if not controls:
         return default_mapping_payload()
 
+    checklist_items = load_default_review_checklist_payload()
     return normalize_mapping_payload(
         {
             "sourceSnapshot": {
                 "controlRegister": "default_controls.json",
-                "reviewSchedule": "",
+                "reviewSchedule": "default_review_checklist.json",
                 "runtimeDependency": False,
             },
             "controls": controls,
+            "checklist": checklist_items,
         }
     )
+
+
+def load_default_review_checklist_payload() -> list[dict[str, object]]:
+    data_path = Path(__file__).resolve().parent.parent / "webapp" / "default_review_checklist.json"
+    try:
+        raw_text = data_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return []
+
+    checklist_source = parsed if isinstance(parsed, list) else (parsed.get("checklist") if isinstance(parsed, dict) else [])
+    return normalize_mapping_checklist(checklist_source)
 
 
 def list_review_checklist_items() -> list[dict[str, str]]:
@@ -447,12 +493,47 @@ def list_review_checklist_recommendations() -> list[dict[str, str]]:
     return [item.to_portal_dict() for item in ReviewChecklistRecommendation.objects.all()]
 
 
+def ensure_review_checklist_items_seeded() -> None:
+    if ReviewChecklistItem.objects.exists():
+        return
+
+    mapping_payload = get_mapping_payload()
+    checklist_items = normalize_mapping_checklist(mapping_payload.get("checklist"))
+    if not checklist_items:
+        checklist_items = load_default_review_checklist_payload()
+    if not checklist_items:
+        return
+
+    seen_ids: set[str] = set()
+    to_create: list[ReviewChecklistItem] = []
+    for item in checklist_items:
+        item_id = normalize_string(item.get("id"))
+        item_text = normalize_string(item.get("item"))
+        if not item_id or not item_text or item_id in seen_ids:
+            continue
+        seen_ids.add(item_id)
+        to_create.append(
+            ReviewChecklistItem(
+                external_id=item_id,
+                category=normalize_string(item.get("category"), "Custom"),
+                item=item_text,
+                frequency=normalize_string(item.get("frequency"), "Annual"),
+                owner=normalize_string(item.get("owner"), "Shared portal"),
+            )
+        )
+
+    if to_create:
+        ReviewChecklistItem.objects.bulk_create(to_create, ignore_conflicts=True)
+
+
 def ensure_review_checklist_recommendations_seeded() -> None:
     if ReviewChecklistRecommendation.objects.exists():
         return
 
     mapping_payload = get_mapping_payload()
     checklist_items = normalize_mapping_checklist(mapping_payload.get("checklist"))
+    if not checklist_items:
+        checklist_items = load_default_review_checklist_payload()
     if not checklist_items:
         return
 
@@ -506,6 +587,7 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
 
 
 def get_bootstrap_payload() -> dict[str, object]:
+    ensure_review_checklist_items_seeded()
     ensure_review_checklist_recommendations_seeded()
     return {
         "persistenceMode": "api",
@@ -662,11 +744,15 @@ def normalize_control_state(payload: object) -> dict[str, object]:
             continue
         excluded = bool(value.get("excluded"))
         reason = str(value.get("reason") or "")
-        applicability = str(value.get("applicability") or "").strip()
-        if excluded or reason or applicability:
+        raw_applicability = str(value.get("applicability") or "").strip()
+        applicability = raw_applicability if raw_applicability in ALLOWED_CONTROL_APPLICABILITY else ""
+        review_frequency = str(value.get("reviewFrequency") or "").strip()
+        if excluded or reason or applicability or review_frequency:
             entry: dict[str, object] = {"excluded": excluded, "reason": reason}
             if applicability:
                 entry["applicability"] = applicability
+            if review_frequency:
+                entry["reviewFrequency"] = review_frequency
             normalized[key] = entry
     return normalized
 

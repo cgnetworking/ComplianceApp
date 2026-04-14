@@ -6,12 +6,15 @@
       state.domain = els.domainFilter.value;
     }
     if (els.applicabilityFilter) {
-      populateSelect(els.applicabilityFilter, ["All"].concat(uniqueValues(controls, "effectiveApplicability")));
+      populateSelect(els.applicabilityFilter, ["All", "Applicable", "Excluded"]);
       els.applicabilityFilter.value = valueOrFallback(els.applicabilityFilter, state.applicability);
       state.applicability = els.applicabilityFilter.value;
     }
     if (els.frequencyFilter) {
-      populateSelect(els.frequencyFilter, ["All"].concat(uniqueValues(controls, "reviewFrequency")));
+      populateSelect(
+        els.frequencyFilter,
+        ["All"].concat(uniqueValues(controls, "effectiveReviewFrequency").filter((value) => value))
+      );
       els.frequencyFilter.value = valueOrFallback(els.frequencyFilter, state.frequency);
       state.frequency = els.frequencyFilter.value;
     }
@@ -137,6 +140,24 @@
     }
 
     els.controlDetail.addEventListener("change", (event) => {
+      const applicability = event.target.closest("[data-control-applicability]");
+      if (applicability) {
+        setControlApplicability(applicability.dataset.controlApplicability, applicability.value);
+        populateFilters();
+        syncSelectionToVisibleControls();
+        syncUrlAndRender();
+        return;
+      }
+
+      const reviewFrequency = event.target.closest("[data-control-review-frequency]");
+      if (reviewFrequency) {
+        updateControlReviewFrequency(reviewFrequency.dataset.controlReviewFrequency, reviewFrequency.value);
+        populateFilters();
+        syncSelectionToVisibleControls();
+        syncUrlAndRender();
+        return;
+      }
+
       const toggle = event.target.closest("[data-control-excluded]");
       if (!toggle) {
         return;
@@ -270,6 +291,7 @@
     if (els.checklistAddForm) {
       els.checklistAddForm.addEventListener("submit", handleChecklistAddSubmit);
     }
+
   }
   function bindRiskEvents() {
     if (els.addRiskTrigger) {
@@ -749,11 +771,13 @@
         .map((item) => ({
           id: item.id.trim(),
           name: item.name.trim(),
-          domain: "",
-          applicability: "Applicable",
+          domain: typeof item.domain === "string" ? item.domain.trim() : "",
+          applicability: typeof item.applicability === "string" ? item.applicability.trim() : "",
           implementationModel: "Implemented",
           owner: "",
-          reviewFrequency: "Annual",
+          reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
+            ? item.reviewFrequency.trim()
+            : "Annual",
           rationale: "",
           evidence: "",
           documentIds: [],

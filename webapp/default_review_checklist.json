@@ -1,0 +1,170 @@
+[
+  {
+    "id": "checklist-01",
+    "category": "ISMS Governance",
+    "item": "Review context, scope, interested parties, and documented issues that affect the ISMS.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-02",
+    "category": "ISMS Governance",
+    "item": "Review information security objectives and supporting metrics.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-03",
+    "category": "ISMS Governance",
+    "item": "Review policy suite, document register, and version control status.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-04",
+    "category": "Risk",
+    "item": "Review risk assessment methodology.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-05",
+    "category": "Risk",
+    "item": "Review risk register, treatment plan, and accepted residual risks.",
+    "frequency": "Quarterly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-06",
+    "category": "Annex A",
+    "item": "Review Statement of Applicability and confirm control applicability changes.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-07",
+    "category": "People",
+    "item": "Review training completion and awareness effectiveness.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-08",
+    "category": "People",
+    "item": "Review screening, confidentiality, and offboarding evidence.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-09",
+    "category": "Access",
+    "item": "Review user access and privileged access.",
+    "frequency": "Quarterly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-10",
+    "category": "Assets",
+    "item": "Review asset inventory and ownership.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-11",
+    "category": "Suppliers",
+    "item": "Review critical supplier assurance and service changes.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-12",
+    "category": "Cloud",
+    "item": "Review Azure and SaaS shared responsibility assumptions.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-13",
+    "category": "Physical",
+    "item": "Review office key holder list and datacenter authorized visitor list.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-14",
+    "category": "Operations",
+    "item": "Review vulnerability management metrics and outstanding exceptions.",
+    "frequency": "Monthly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-15",
+    "category": "Operations",
+    "item": "Review endpoint compliance and malware protection coverage.",
+    "frequency": "Monthly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-16",
+    "category": "Operations",
+    "item": "Review logging, monitoring, and alert handling effectiveness.",
+    "frequency": "Monthly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-17",
+    "category": "Backups",
+    "item": "Review backup job success and failures.",
+    "frequency": "Monthly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-18",
+    "category": "Backups",
+    "item": "Perform restore testing for critical systems.",
+    "frequency": "Semi-annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-19",
+    "category": "BCDR",
+    "item": "Exercise business continuity and disaster recovery plans.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-20",
+    "category": "Development",
+    "item": "Review secure development standard, code access, and environment segregation.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-21",
+    "category": "Development",
+    "item": "Review change management effectiveness and emergency changes.",
+    "frequency": "Quarterly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-22",
+    "category": "Incidents",
+    "item": "Review incidents, lessons learned, and corrective action status.",
+    "frequency": "Quarterly",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-23",
+    "category": "Compliance",
+    "item": "Perform internal audit.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
+  },
+  {
+    "id": "checklist-24",
+    "category": "Compliance",
+    "item": "Conduct management review.",
+    "frequency": "Annual",
+    "owner": "CTO"
+  }
+]

@@ -97,7 +97,7 @@
     const checklistItems = getAllChecklistItems();
     if (!checklistItems.length) {
       els.checklistSummary.innerHTML = `<span class="chip">0/0 complete</span>`;
-      els.checklist.innerHTML = `<div class="empty-state">No checklist items are stored in the database yet.</div>`;
+      els.checklist.innerHTML = `<div class="empty-state">No review tasks are in the tracker yet. Use Quick Add Default Task to add the default checklist.</div>`;
       refreshChecklistAddFormOptions();
       return;
     }
@@ -192,7 +192,7 @@
 
     const recommendations = availableChecklistRecommendations();
     const selectedValue = els.checklistRecommendationSelect.value;
-    const options = [{ value: "", label: "Select a recommended task" }].concat(
+    const options = [{ value: "", label: "Select a default review task" }].concat(
       recommendations.map((item) => ({
         value: item.id,
         label: `${item.item} (${item.frequency} / ${item.owner})`,
@@ -214,75 +214,9 @@
     const selectedId = els.checklistRecommendationSelect.value;
     const recommendation = getRecommendedChecklistItems().find((item) => item.id === selectedId);
     els.checklistRecommendationAdd.disabled = !recommendation;
-    if (!recommendation) {
-      return;
-    }
-
-    if (els.checklistAddCategory) {
-      els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, recommendation.category);
-    }
-    if (els.checklistAddFrequency) {
-      els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, recommendation.frequency);
-    }
-    if (els.checklistAddOwner) {
-      els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, recommendation.owner);
-    }
-    if (els.checklistAddItem) {
-      els.checklistAddItem.value = recommendation.item;
-    }
   }
   function refreshChecklistAddFormOptions() {
-    if (!els.checklistAddCategory || !els.checklistAddFrequency || !els.checklistAddOwner) {
-      return;
-    }
-
-    const checklistItems = getAllChecklistItems();
-    const recommendedItems = getRecommendedChecklistItems();
-    const categories = buildChecklistOptionList(
-      defaultChecklistCategories,
-      checklistItems.map((item) => item.category).concat(recommendedItems.map((item) => item.category)),
-      "Custom"
-    );
-    const frequencies = buildChecklistOptionList(
-      defaultChecklistFrequencies,
-      checklistItems.map((item) => item.frequency).concat(recommendedItems.map((item) => item.frequency)),
-      "Annual"
-    );
-    const owners = buildChecklistOptionList(
-      defaultChecklistOwners,
-      checklistItems.map((item) => item.owner).concat(recommendedItems.map((item) => item.owner)),
-      "Head of IT"
-    );
-
-    const selectedCategory = els.checklistAddCategory.value;
-    const selectedFrequency = els.checklistAddFrequency.value;
-    const selectedOwner = els.checklistAddOwner.value;
-
-    populateSelect(els.checklistAddCategory, categories);
-    populateSelect(els.checklistAddFrequency, frequencies);
-    populateSelect(els.checklistAddOwner, owners);
-
-    els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, selectedCategory || "Custom");
-    els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, selectedFrequency || "Annual");
-    els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, selectedOwner || "Head of IT");
     renderChecklistRecommendationOptions();
-  }
-  function buildChecklistOptionList(defaultValues, dynamicValues, fallbackValue) {
-    const options = defaultValues.slice();
-    dynamicValues.forEach((value) => {
-      if (typeof value !== "string") {
-        return;
-      }
-      const normalized = value.trim();
-      if (!normalized || options.includes(normalized)) {
-        return;
-      }
-      options.push(normalized);
-    });
-    if (!options.length && fallbackValue) {
-      options.push(fallbackValue);
-    }
-    return options;
   }
   function toggleChecklistAddForm(visible) {
     if (!els.checklistAddForm) {
@@ -302,18 +236,9 @@
     }
     els.checklistAddForm.hidden = false;
     refreshChecklistAddFormOptions();
-    if (els.checklistAddCategory && !els.checklistAddCategory.value) {
-      els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, "Custom");
-    }
-    if (els.checklistAddFrequency && !els.checklistAddFrequency.value) {
-      els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, "Annual");
-    }
-    if (els.checklistAddOwner && !els.checklistAddOwner.value) {
-      els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, "Head of IT");
-    }
     renderChecklistRecommendationOptions();
-    if (els.checklistAddItem) {
-      els.checklistAddItem.focus();
+    if (els.checklistRecommendationSelect) {
+      els.checklistRecommendationSelect.focus();
     }
   }
   function hideChecklistAddForm() {
@@ -323,44 +248,12 @@
     els.checklistAddForm.hidden = true;
     els.checklistAddForm.reset();
     setUploadStatus(els.checklistAddStatus, "", "");
-    if (els.checklistAddFrequency) {
-      els.checklistAddFrequency.value = "";
-    }
     if (els.checklistRecommendationSelect) {
       els.checklistRecommendationSelect.value = "";
     }
     if (els.checklistRecommendationAdd) {
       els.checklistRecommendationAdd.disabled = true;
     }
-  }
-  async function handleChecklistAddSubmit(event) {
-    event.preventDefault();
-    if (!els.checklistAddForm || !els.checklistAddItem) {
-      return;
-    }
-
-    const itemText = els.checklistAddItem.value.trim();
-    const category = els.checklistAddCategory ? els.checklistAddCategory.value : "";
-    const frequency = els.checklistAddFrequency ? els.checklistAddFrequency.value : "";
-    const owner = els.checklistAddOwner ? els.checklistAddOwner.value : "";
-
-    if (!itemText) {
-      setUploadStatus(els.checklistAddStatus, "Checklist item text is required.", "error");
-      return;
-    }
-
-    const payload = {
-      category: category || "Custom",
-      item: itemText,
-      frequency: frequency || "Annual",
-      owner: owner || "Shared portal",
-    };
-
-    await submitChecklistItem(payload, {
-      statusMessage: "Saving checklist item...",
-      successMessage: "Checklist item saved.",
-      closeFormOnSuccess: true,
-    });
   }
   async function handleChecklistRecommendationQuickAdd() {
     if (!els.checklistRecommendationSelect) {
@@ -369,7 +262,7 @@
     const selectedId = els.checklistRecommendationSelect.value;
     const recommendation = availableChecklistRecommendations().find((item) => item.id === selectedId);
     if (!recommendation) {
-      setUploadStatus(els.checklistAddStatus, "Select a recommended task to quick add.", "error");
+      setUploadStatus(els.checklistAddStatus, "Select a default review task to quick add.", "error");
       return;
     }
 

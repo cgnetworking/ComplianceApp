@@ -1,3 +1,11 @@
+  const DEFAULT_REVIEW_FREQUENCIES = [
+    "Annual",
+    "Quarterly",
+    "Monthly",
+    "Per event",
+    "After significant change",
+  ];
+
   function renderControlsPage() {
     const controls = filteredControls();
     renderControlsTable(controls);
@@ -10,7 +18,7 @@
     if (!controls.length) {
       els.controlsBody.innerHTML = `
         <tr>
-          <td colspan="5"><div class="empty-state">No controls match the current filters.</div></td>
+          <td colspan="4"><div class="empty-state">No controls match the current filters.</div></td>
         </tr>
       `;
       return;
@@ -23,7 +31,6 @@
         <td>${escapeHtml(control.name)}</td>
         <td>${escapeHtml(control.domain)}</td>
         <td>${escapeHtml(control.effectiveImplementationModel)}</td>
-        <td>${escapeHtml(control.reviewFrequency)}</td>
       </tr>
     `;
     }).join("");
@@ -50,6 +57,15 @@
         </a>
       `;
     }).join("");
+
+    const applicabilityOptions = renderSelectOptions(
+      ["", "Applicable", "Excluded"],
+      control.effectiveApplicability
+    );
+    const reviewFrequencyOptions = renderSelectOptions(
+      buildReviewFrequencyOptions(control.effectiveReviewFrequency),
+      control.effectiveReviewFrequency
+    );
 
     els.controlDetail.innerHTML = `
       <div class="detail-header">
@@ -80,7 +96,11 @@
         </article>
         <article class="detail-card">
           <strong>Review frequency</strong>
-          <div class="mini-copy">${escapeHtml(control.reviewFrequency)}</div>
+          <label class="form-field">
+            <select data-control-review-frequency="${escapeHtml(control.id)}">
+              ${reviewFrequencyOptions}
+            </select>
+          </label>
         </article>
       </div>
 
@@ -93,20 +113,17 @@
 
       <div class="doc-section">
         <div class="detail-card exclusion-card">
-          <strong>Exclusion status</strong>
-          <label class="toggle-row ${control.isBaseExcluded ? "is-disabled" : ""}">
-            <input
-              type="checkbox"
-              data-control-excluded="${escapeHtml(control.id)}"
-              ${control.isExcluded ? "checked" : ""}
+          <strong>Applicability</strong>
+          <label class="form-field">
+            <select
+              data-control-applicability="${escapeHtml(control.id)}"
               ${control.isBaseExcluded ? "disabled" : ""}
             >
-            <span>${control.isBaseExcluded ? "Excluded in mapping data" : "Mark control as excluded"}</span>
+              ${applicabilityOptions}
+            </select>
           </label>
-          <p class="mini-copy">
-            ${escapeHtml(control.isBaseExcluded ? "This control is already excluded in the current mapping data." : "Locally excluded controls display as Excluded in this portal and retain an exclusion rationale in browser storage.")}
-          </p>
-          ${control.isExcluded ? `
+          ${control.isBaseExcluded ? '<p class="mini-copy">This control is already excluded in the current mapping data.</p>' : ""}
+          ${control.effectiveApplicability === "Excluded" ? `
             <div class="text-area-field">
               <label for="exclusion-reason-${escapeHtml(control.id)}">Exclusion Reason</label>
               <textarea
@@ -115,12 +132,32 @@
                 placeholder="Document why this control is excluded."
                 ${control.isBaseExcluded ? "readonly" : ""}
               >${escapeHtml(control.exclusionReason)}</textarea>
-              ${!control.isBaseExcluded && !control.exclusionReason.trim() ? '<p class="helper-note is-warning">Add an exclusion reason for this locally excluded control.</p>' : ""}
+              ${!control.isBaseExcluded && !control.exclusionReason.trim() ? '<p class="helper-note is-warning">Add an exclusion reason for this excluded control.</p>' : ""}
             </div>
           ` : ""}
         </div>
       </div>
     `;
+  }
+  function renderSelectOptions(values, selectedValue) {
+    return values.map((value) => {
+      const selected = value === selectedValue ? " selected" : "";
+      return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(value)}</option>`;
+    }).join("");
+  }
+  function buildReviewFrequencyOptions(selectedValue) {
+    const options = [""].concat(DEFAULT_REVIEW_FREQUENCIES);
+    if (selectedValue && !options.includes(selectedValue)) {
+      options.push(selectedValue);
+    }
+    return options;
+  }
+  function normalizeControlApplicability(value) {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    return normalized === "Applicable" || normalized === "Excluded" ? normalized : "";
+  }
+  function normalizeControlReviewFrequency(value) {
+    return typeof value === "string" ? value.trim() : "";
   }
   function getAllControlViews() {
     return data.controls.map((control) => getControlView(control)).filter(Boolean);
@@ -131,71 +168,107 @@
       return null;
     }
     const stored = state.controlState[control.id] || {};
-    const storedApplicability = typeof stored.applicability === "string" && stored.applicability.trim()
-      ? stored.applicability.trim()
-      : control.applicability;
+    const storedApplicability = normalizeControlApplicability(stored.applicability);
+    const baseApplicability = normalizeControlApplicability(control.applicability);
+    const storedReviewFrequency = normalizeControlReviewFrequency(stored.reviewFrequency);
+    const baseReviewFrequency = normalizeControlReviewFrequency(control.reviewFrequency);
     const baseExcluded = isBaseExcluded(control);
-    const applicabilityExcluded = storedApplicability === "Excluded";
-    const localExcluded = Boolean(stored.excluded) && !baseExcluded && !applicabilityExcluded;
-    const effectiveExcluded = baseExcluded || applicabilityExcluded || localExcluded;
+    const legacyLocalExcluded = Boolean(stored.excluded) && !baseExcluded && storedApplicability !== "Applicable";
+    const effectiveApplicability = (baseExcluded || storedApplicability === "Excluded" || legacyLocalExcluded)
+      ? "Excluded"
+      : (storedApplicability || baseApplicability);
+    const effectiveExcluded = effectiveApplicability === "Excluded";
+    const effectiveReviewFrequency = storedReviewFrequency || baseReviewFrequency;
+    const exclusionReason = effectiveExcluded
+      ? (typeof stored.reason === "string" ? stored.reason : "") || (baseExcluded ? control.rationale : "")
+      : "";
+
     return {
       ...control,
+      applicability: effectiveApplicability,
+      reviewFrequency: effectiveReviewFrequency,
       isBaseExcluded: baseExcluded,
-      isLocallyExcluded: localExcluded,
+      isLocallyExcluded: legacyLocalExcluded,
       isExcluded: effectiveExcluded,
-      effectiveApplicability: effectiveExcluded ? "Excluded" : storedApplicability,
+      effectiveApplicability: effectiveApplicability,
+      effectiveReviewFrequency: effectiveReviewFrequency,
       effectiveImplementationModel: effectiveExcluded ? "Excluded" : control.implementationModel,
-      exclusionReason: (localExcluded || applicabilityExcluded)
-        ? (stored.reason || "")
-        : (baseExcluded ? control.rationale : ""),
+      exclusionReason: exclusionReason,
     };
   }
   function isBaseExcluded(control) {
-    return control.implementationModel === "Excluded" || control.applicability === "Excluded";
+    return control.implementationModel === "Excluded" || normalizeControlApplicability(control.applicability) === "Excluded";
   }
-  function setControlExclusion(controlId, excluded) {
+  function saveControlStateEntry(controlId, nextState) {
+    const applicability = normalizeControlApplicability(nextState.applicability);
+    const reason = typeof nextState.reason === "string" ? nextState.reason : "";
+    const reviewFrequency = normalizeControlReviewFrequency(nextState.reviewFrequency);
+
+    const entry = {};
+    if (applicability) {
+      entry.applicability = applicability;
+    }
+    if (reason) {
+      entry.reason = reason;
+    }
+    if (reviewFrequency) {
+      entry.reviewFrequency = reviewFrequency;
+    }
+
+    if (!Object.keys(entry).length) {
+      delete state.controlState[controlId];
+    } else {
+      state.controlState[controlId] = entry;
+    }
+    saveControlState();
+  }
+  function setControlApplicability(controlId, applicability) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
       return;
     }
 
     const existing = state.controlState[controlId] || {};
-    if (excluded) {
-      state.controlState[controlId] = {
-        ...existing,
-        excluded: true,
-        reason: existing.reason || "",
-      };
-    } else {
-      const nextState = {
-        ...existing,
-        excluded: false,
-      };
-      if (!nextState.reason && !nextState.applicability) {
-        delete state.controlState[controlId];
-      } else {
-        state.controlState[controlId] = nextState;
-      }
+    const nextState = {
+      ...existing,
+      applicability: normalizeControlApplicability(applicability),
+    };
+    if (nextState.applicability !== "Excluded") {
+      nextState.reason = "";
     }
-    saveControlState();
+    saveControlStateEntry(controlId, nextState);
+  }
+  function setControlExclusion(controlId, excluded) {
+    setControlApplicability(controlId, excluded ? "Excluded" : "");
+  }
+  function updateControlReviewFrequency(controlId, reviewFrequency) {
+    const control = controlsById.get(controlId);
+    if (!control) {
+      return;
+    }
+
+    const existing = state.controlState[controlId] || {};
+    const normalizedFrequency = normalizeControlReviewFrequency(reviewFrequency);
+    const baseReviewFrequency = normalizeControlReviewFrequency(control.reviewFrequency);
+    const nextState = {
+      ...existing,
+      reviewFrequency: normalizedFrequency === baseReviewFrequency ? "" : normalizedFrequency,
+    };
+    saveControlStateEntry(controlId, nextState);
   }
   function updateControlReason(controlId, reason) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
       return;
     }
-    const existing = state.controlState[controlId] || { excluded: true, reason: "" };
+
+    const existing = state.controlState[controlId] || {};
     const nextState = {
       ...existing,
-      excluded: existing.excluded !== false,
+      applicability: "Excluded",
       reason,
     };
-    if (!nextState.excluded && !nextState.reason && !nextState.applicability) {
-      delete state.controlState[controlId];
-    } else {
-      state.controlState[controlId] = nextState;
-    }
-    saveControlState();
+    saveControlStateEntry(controlId, nextState);
   }
   function filteredControls() {
     const searchLower = state.search.trim().toLowerCase();
@@ -207,7 +280,7 @@
       if (page !== "policies" && state.applicability !== "All" && view.effectiveApplicability !== state.applicability) {
         return false;
       }
-      if (page !== "policies" && state.frequency !== "All" && view.reviewFrequency !== state.frequency) {
+      if (page !== "policies" && state.frequency !== "All" && view.effectiveReviewFrequency !== state.frequency) {
         return false;
       }
       if (!searchLower || (page !== "controls" && page !== "reports")) {
@@ -222,6 +295,7 @@
         view.evidence,
         view.effectiveImplementationModel,
         view.effectiveApplicability,
+        view.effectiveReviewFrequency,
         view.exclusionReason,
         ...view.documentIds.map((documentId) => {
           const documentItem = documentsById.get(documentId);
@@ -243,7 +317,7 @@
     }
   }
   function reviewCadence(reviewFrequency) {
-    const value = reviewFrequency.toLowerCase();
+    const value = String(reviewFrequency || "").toLowerCase();
     if (value.includes("monthly")) {
       return "Monthly";
     }
