@@ -671,7 +671,7 @@ PY
 merge_host_values() {
   local existing_hosts="${1:-}"
   local additional_hosts="${2:-}"
-  python - "$existing_hosts" "$additional_hosts" <<'PY'
+  "$PYTHON_BIN" - "$existing_hosts" "$additional_hosts" <<'PY'
 import re
 import sys
 
