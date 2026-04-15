@@ -970,6 +970,12 @@ tbody tr.is-selected {
   line-height: 1.55;
 }
 
+.risk-factor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1203,6 +1209,139 @@ tbody tr.is-selected {
 
 .risk-form-status.is-error {
   color: var(--red);
+}
+
+.risk-matrix-panel {
+  grid-column: 1 / -1;
+}
+
+.risk-matrix-copy {
+  margin-bottom: 14px;
+}
+
+.risk-matrix-frame {
+  display: grid;
+  gap: 10px;
+}
+
+.risk-matrix-axis {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.risk-matrix-axis-impact {
+  text-align: center;
+}
+
+.risk-matrix-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.risk-matrix-axis-probability {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  text-align: center;
+  transform: rotate(180deg);
+  padding: 10px 0;
+}
+
+.risk-matrix-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.risk-matrix-table {
+  min-width: 760px;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.risk-matrix-table thead th {
+  position: static;
+  background: #f7f4fd;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.risk-matrix-table th,
+.risk-matrix-table td {
+  border: 1px solid #e4deef;
+  padding: 10px 8px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.risk-matrix-table .risk-matrix-corner,
+.risk-matrix-table tbody th {
+  background: #f6f2fc;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.risk-matrix-table tbody tr,
+.risk-matrix-table tbody tr:hover {
+  cursor: default;
+  background: transparent;
+}
+
+.risk-matrix-cell span {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-transform: capitalize;
+}
+
+.risk-matrix-cell strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.risk-band-very-low {
+  background: #45b559;
+  color: #fff;
+}
+
+.risk-band-low {
+  background: #2f9445;
+  color: #fff;
+}
+
+.risk-band-medium {
+  background: #f3e64d;
+  color: #5b4900;
+}
+
+.risk-band-high {
+  background: #f49a1f;
+  color: #fff;
+}
+
+.risk-band-very-high {
+  background: #ef4444;
+  color: #fff;
+}
+
+.risk-band-extreme {
+  background: #b91c1c;
+  color: #fff;
 }
 
 .upload-status {
@@ -1649,5 +1788,22 @@ code {
 
   .mapping-row {
     flex-wrap: wrap;
+  }
+
+  .risk-matrix-layout {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .risk-factor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .risk-matrix-axis-impact,
+  .risk-matrix-axis-probability {
+    text-align: left;
+    writing-mode: horizontal-tb;
+    transform: none;
+    justify-content: flex-start;
   }
 }

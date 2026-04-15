@@ -9,14 +9,14 @@
   {
     "id": "checklist-02",
     "category": "ISMS Governance",
-    "item": "Review information security objectives and supporting metrics.",
+    "item": "Review information security objectives and performance measurements.",
     "frequency": "Annual",
     "owner": "Head of IT"
   },
   {
     "id": "checklist-03",
     "category": "ISMS Governance",
-    "item": "Review policy suite, document register, and version control status.",
+    "item": "Review policy set, document register, and document change control status.",
     "frequency": "Annual",
     "owner": "Head of IT"
   },
@@ -79,14 +79,14 @@
   {
     "id": "checklist-12",
     "category": "Cloud",
-    "item": "Review Azure and SaaS shared responsibility assumptions.",
+    "item": "Review external service and cloud shared responsibility assumptions.",
     "frequency": "Annual",
     "owner": "Head of IT"
   },
   {
     "id": "checklist-13",
     "category": "Physical",
-    "item": "Review office key holder list and datacenter authorized visitor list.",
+    "item": "Review physical access permissions and visitor authorization records for facilities.",
     "frequency": "Annual",
     "owner": "Head of IT"
   },
@@ -100,7 +100,7 @@
   {
     "id": "checklist-15",
     "category": "Operations",
-    "item": "Review endpoint compliance and malware protection coverage.",
+    "item": "Review device protection coverage and hardening compliance status.",
     "frequency": "Monthly",
     "owner": "Head of IT"
   },
@@ -156,14 +156,14 @@
   {
     "id": "checklist-23",
     "category": "Compliance",
-    "item": "Perform internal audit.",
+    "item": "Perform internal audit activities and review finding closure status.",
     "frequency": "Annual",
     "owner": "Head of IT"
   },
   {
     "id": "checklist-24",
     "category": "Compliance",
-    "item": "Conduct management review.",
+    "item": "Conduct management review of ISMS performance and improvement actions.",
     "frequency": "Annual",
     "owner": "CTO"
   }

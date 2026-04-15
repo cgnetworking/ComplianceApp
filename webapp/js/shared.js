@@ -534,8 +534,12 @@
     }
 
     const checklistItems = getAllChecklistItems();
-    const checklistDone = checklistItems.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
-    const activityDone = options.currentMonthActivities.filter((item) => isReviewTaskCompleted(item.id, state.monthIndex)).length;
+    const overviewMonthIndex = page === "reviews" ? parseMonth(state.monthIndex) : today.getMonth();
+    const monthActivities = page === "reviews"
+      ? options.currentMonthActivities
+      : monthlyActivities(overviewMonthIndex);
+    const checklistDone = checklistItems.filter((item) => isReviewTaskCompleted(item.id, overviewMonthIndex)).length;
+    const activityDone = monthActivities.filter((item) => isReviewTaskCompleted(item.id, overviewMonthIndex)).length;
     const mappedPolicies = new Set(controls.flatMap((control) => control.policyDocumentIds)).size;
 
     const cards = options.mode === "reports"
@@ -557,7 +561,7 @@
           },
           {
             label: "Current month queue",
-            value: `${activityDone}/${options.currentMonthActivities.length}`,
+            value: `${activityDone}/${monthActivities.length}`,
             note: "Review activities completed in the shared checklist tracker.",
           },
         ]
@@ -573,8 +577,8 @@
             note: "Policy pages appear when mapping documents are provided.",
           },
           {
-            label: `${monthNames[state.monthIndex]} queue`,
-            value: `${activityDone}/${options.currentMonthActivities.length}`,
+            label: `${monthNames[overviewMonthIndex]} queue`,
+            value: `${activityDone}/${monthActivities.length}`,
             note: "Checklist tasks due this month.",
           },
           {
@@ -643,8 +647,19 @@
     return Array.from(new Set(items.map((item) => item[key]))).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
   }
   function parseMonth(rawValue) {
-    const parsed = Number(rawValue);
-    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 11 ? parsed : today.getMonth();
+    const fallbackMonth = today.getMonth();
+    if (page !== "reviews") {
+      return fallbackMonth;
+    }
+    if (rawValue === null || rawValue === undefined) {
+      return fallbackMonth;
+    }
+    const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : String(rawValue).trim();
+    if (!normalizedValue) {
+      return fallbackMonth;
+    }
+    const parsed = Number(normalizedValue);
+    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 11 ? parsed : fallbackMonth;
   }
   function groupBy(items, key) {
     return items.reduce((groups, item) => {
@@ -1028,19 +1043,65 @@
   function storageSentence() {
     return isApiPersistence() ? "stored in the shared portal." : "stored locally in this browser.";
   }
-  function formatDateTime(value) {
+  function parseDisplayDateValue(value) {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value;
+    }
+
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+      const [year, month, day] = value.trim().split("-").map(Number);
+      const parsedLocalDate = new Date(year, month - 1, day);
+      return Number.isNaN(parsedLocalDate.getTime()) ? null : parsedLocalDate;
+    }
+
     const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  function ordinalSuffix(day) {
+    const normalizedDay = Number(day);
+    if (!Number.isInteger(normalizedDay)) {
+      return "";
+    }
+    const lastTwoDigits = normalizedDay % 100;
+    if (lastTwoDigits >= 11 && lastTwoDigits <= 13) {
+      return "th";
+    }
+    const lastDigit = normalizedDay % 10;
+    if (lastDigit === 1) {
+      return "st";
+    }
+    if (lastDigit === 2) {
+      return "nd";
+    }
+    if (lastDigit === 3) {
+      return "rd";
+    }
+    return "th";
+  }
+  function formatDateWithOrdinal(value) {
+    const parsed = parseDisplayDateValue(value);
+    if (!parsed) {
       return "-";
     }
-    return new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
+
+    const month = new Intl.DateTimeFormat(undefined, {
+      month: "long",
+    }).format(parsed);
+    const day = parsed.getDate();
+    return `${month} ${day}${ordinalSuffix(day)} ${parsed.getFullYear()}`;
+  }
+  function formatDateTime(value) {
+    const parsed = parseDisplayDateValue(value);
+    if (!parsed) {
+      return "-";
+    }
+
+    const time = new Intl.DateTimeFormat(undefined, {
       hour: "numeric",
       minute: "2-digit",
       timeZoneName: "short",
     }).format(parsed);
+    return `${formatDateWithOrdinal(parsed)}, ${time}`;
   }
   function escapeHtml(value) {
     return String(value)

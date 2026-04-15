@@ -704,6 +704,8 @@ def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
                 external_id=record["external_id"],
                 defaults={
                     "risk": record["risk"],
+                    "probability": record["probability"],
+                    "impact": record["impact"],
                     "initial_risk_level": record["initial_risk_level"],
                     "date": record["date"],
                     "owner": record["owner"],
@@ -780,14 +782,18 @@ def normalize_risk_record(item: object) -> dict[str, object]:
     external_id = str(item.get("id") or "").strip()
     risk_text = str(item.get("risk") or "").strip()
     owner = str(item.get("owner") or "").strip()
-    initial_risk_level = normalize_risk_level(item.get("initialRiskLevel"))
+    probability = normalize_risk_factor(item.get("probability"))
+    impact = normalize_risk_factor(item.get("impact"))
+    legacy_score = normalize_risk_score(item.get("initialRiskLevel"))
+    probability, impact = resolve_risk_factors(probability, impact, legacy_score)
+    initial_risk_level = probability * impact
     raised_date = parse_iso_date(item.get("date"))
     closed_date = parse_optional_iso_date(item.get("closedDate"))
     created_at = parse_iso_datetime(item.get("createdAt"), fallback=timezone.now())
     updated_at = parse_iso_datetime(item.get("updatedAt"), fallback=timezone.now())
 
-    if not external_id or not risk_text or not owner or not initial_risk_level or not raised_date:
-        raise ValidationError("Each risk requires an id, description, owner, level, and date.")
+    if not external_id or not risk_text or not owner or not probability or not impact or not raised_date:
+        raise ValidationError("Each risk requires an id, description, owner, probability, impact, and date.")
     if closed_date and closed_date < raised_date:
         raise ValidationError("Risk closed date cannot be earlier than the raised date.")
 
@@ -795,6 +801,8 @@ def normalize_risk_record(item: object) -> dict[str, object]:
         "external_id": external_id,
         "risk": risk_text,
         "owner": owner,
+        "probability": probability,
+        "impact": impact,
         "initial_risk_level": initial_risk_level,
         "date": raised_date,
         "closed_date": closed_date,
@@ -831,12 +839,78 @@ def parse_iso_datetime(value: object, fallback: datetime) -> datetime:
     return parsed
 
 
-def normalize_risk_level(value: object) -> int:
+def normalize_risk_factor(value: object) -> int:
     try:
         level = int(value)
     except (TypeError, ValueError):
         return 0
     return level if 1 <= level <= 5 else 0
+
+
+def normalize_risk_score(value: object) -> int:
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return score if 1 <= score <= 25 else 0
+
+
+def resolve_risk_factors(probability: int, impact: int, legacy_score: int) -> tuple[int, int]:
+    if probability and impact:
+        return probability, impact
+    if not legacy_score:
+        return probability, impact
+
+    fallback_probability, fallback_impact = risk_factors_from_legacy_score(legacy_score)
+    if probability and not impact:
+        impact = infer_missing_risk_factor(probability, legacy_score, fallback_impact)
+    elif impact and not probability:
+        probability = infer_missing_risk_factor(impact, legacy_score, fallback_probability)
+    else:
+        probability = fallback_probability if not probability else probability
+        impact = fallback_impact if not impact else impact
+    return probability, impact
+
+
+def infer_missing_risk_factor(known_factor: int, score: int, fallback: int) -> int:
+    if known_factor and score and score % known_factor == 0:
+        derived = score // known_factor
+        if 1 <= derived <= 5:
+            return derived
+    return fallback if 1 <= fallback <= 5 else 0
+
+
+def risk_factors_from_legacy_score(score: int) -> tuple[int, int]:
+    if not score:
+        return 0, 0
+    if score <= 5:
+        # Legacy records stored one 1-5 level; map conservatively in both dimensions.
+        return score, score
+    return closest_risk_factor_pair(score)
+
+
+def closest_risk_factor_pair(score: int) -> tuple[int, int]:
+    target = min(max(score, 1), 25)
+    candidates: list[tuple[int, int, int, int, int, int]] = []
+    for probability in range(1, 6):
+        for impact in range(1, 6):
+            product = probability * impact
+            if product < target:
+                continue
+            candidates.append(
+                (
+                    product - target,
+                    abs(probability - impact),
+                    -product,
+                    -max(probability, impact),
+                    probability,
+                    impact,
+                )
+            )
+    if not candidates:
+        return 5, 5
+    best = min(candidates)
+    return best[4], best[5]
 
 
 def format_uploaded_policy_id(number: int) -> str:

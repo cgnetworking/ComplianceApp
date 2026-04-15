@@ -1,3 +1,6 @@
+  const probabilityFieldNames = ["risk-probability", "probability", "initial-risk-probability"];
+  const impactFieldNames = ["risk-impact", "impact", "initial-risk-impact"];
+
   function renderRisksPage() {
     const risks = filteredRisks();
     syncSelectionToVisibleRisks(risks);
@@ -12,7 +15,7 @@
 
     const openRisks = state.riskRegister.filter((risk) => !isRiskClosed(risk));
     const closedRisks = state.riskRegister.filter((risk) => isRiskClosed(risk));
-    const highRisks = openRisks.filter((risk) => risk.initialRiskLevel >= 4);
+    const highRisks = openRisks.filter((risk) => risk.initialRiskLevel >= 10);
 
     const cards = [
       {
@@ -28,7 +31,9 @@
       {
         label: "High risks",
         value: highRisks.length,
-        note: highRisks.length ? "Open risks with an initial risk level of 4 or 5." : "No open risks are currently rated at level 4 or 5.",
+        note: highRisks.length
+          ? "Open risks with a matrix score of 10 or higher (high or above)."
+          : "No open risks are currently at high matrix score or above.",
       },
       {
         label: "Closed risks",
@@ -67,7 +72,9 @@
           <thead>
             <tr>
               <th>Risk</th>
-              <th>Level</th>
+              <th>Probability</th>
+              <th>Impact</th>
+              <th>Score</th>
               <th>Date</th>
               <th>Risk Owner</th>
               <th>Status</th>
@@ -80,8 +87,11 @@
                   <strong>${escapeHtml(risk.risk)}</strong>
                   <div class="mini-copy">${escapeHtml(isRiskClosed(risk) ? `Closed on ${formatDate(risk.closedDate)}` : "Open risk")}</div>
                 </td>
+                <td>${escapeHtml(String(risk.probability))}</td>
+                <td>${escapeHtml(String(risk.impact))}</td>
                 <td>
-                  <span class="risk-level-badge level-${risk.initialRiskLevel}">Level ${escapeHtml(String(risk.initialRiskLevel))}</span>
+                  <span class="risk-level-badge level-${riskBadgeLevel(risk.probability, risk.impact)}">${escapeHtml(String(risk.initialRiskLevel))}</span>
+                  <div class="mini-copy">${escapeHtml(`P${risk.probability} x I${risk.impact} / ${riskBandLabel(risk.probability, risk.impact)}`)}</div>
                 </td>
                 <td>${escapeHtml(formatDate(risk.date))}</td>
                 <td>${escapeHtml(risk.owner)}</td>
@@ -128,7 +138,7 @@
       els.riskSubmitButton.textContent = isEditing ? "Save Changes" : "Save Risk";
     }
 
-    setRiskLevelSelection(isEditing ? selectedRisk.initialRiskLevel : 3);
+    setRiskFormFactorSelections(isEditing ? selectedRisk.probability : 3, isEditing ? selectedRisk.impact : 3);
     renderRiskFormStatus();
   }
   function renderRiskFormStatus() {
@@ -151,15 +161,18 @@
 
     const formData = new FormData(event.currentTarget);
     const riskText = String(formData.get("risk") || "").trim();
-    const initialRiskLevel = normalizeRiskLevel(formData.get("initial-risk-level"));
+    const legacyRiskLevel = normalizeRiskFactor(formData.get("initial-risk-level"));
+    const probability = normalizeRiskFactor(readFirstFormValue(formData, probabilityFieldNames)) || legacyRiskLevel;
+    const impact = normalizeRiskFactor(readFirstFormValue(formData, impactFieldNames)) || legacyRiskLevel;
+    const initialRiskLevel = probability * impact;
     const raisedDate = normalizeDateInputValue(formData.get("risk-date"));
     const riskOwner = String(formData.get("risk-owner") || "").trim();
     const closedDate = normalizeDateInputValue(formData.get("risk-closed-date"));
     const existingRisk = getSelectedRisk();
     const isEditing = Boolean(existingRisk);
 
-    if (!riskText || !initialRiskLevel || !raisedDate || !riskOwner) {
-      setRiskFormStatus("Complete the risk, initial risk level, date, and risk owner before saving.", "error");
+    if (!riskText || !probability || !impact || !raisedDate || !riskOwner) {
+      setRiskFormStatus("Complete the risk, probability, impact, date, and risk owner before saving.", "error");
       renderRiskFormStatus();
       return;
     }
@@ -175,6 +188,8 @@
     const nextRisk = {
       id: riskId,
       risk: riskText,
+      probability,
+      impact,
       initialRiskLevel,
       date: raisedDate,
       owner: riskOwner,
@@ -215,9 +230,25 @@
   function clearRiskFormStatus() {
     setRiskFormStatus("", "");
   }
-  function setRiskLevelSelection(level) {
-    els.riskLevelInputs.forEach((input) => {
-      input.checked = Number(input.value) === level;
+  function setRiskFormFactorSelections(probability, impact) {
+    setSingleRiskFactorSelection(els.riskProbabilityInput, probability);
+    setSingleRiskFactorSelection(els.riskImpactInput, impact);
+    setRiskFactorSelection(els.riskProbabilityInputs, probability);
+    setRiskFactorSelection(els.riskImpactInputs, impact);
+    setRiskFactorSelection(els.riskLevelInputs, Math.max(probability, impact));
+  }
+  function setSingleRiskFactorSelection(element, factor) {
+    if (!element) {
+      return;
+    }
+    if (String(element.type).toLowerCase() === "radio") {
+      return;
+    }
+    element.value = String(factor);
+  }
+  function setRiskFactorSelection(inputs, factor) {
+    inputs.forEach((input) => {
+      input.checked = Number(input.value) === factor;
     });
   }
   function filteredRisks() {
@@ -233,7 +264,12 @@
           risk.owner,
           risk.date,
           risk.closedDate,
-          `level ${risk.initialRiskLevel}`,
+          `probability ${risk.probability}`,
+          `impact ${risk.impact}`,
+          `score ${risk.initialRiskLevel}`,
+          `p${risk.probability}`,
+          `i${risk.impact}`,
+          riskBandLabel(risk.probability, risk.impact),
           isRiskClosed(risk) ? "closed" : "open",
         ].join(" ").toLowerCase();
         return searchableText.includes(searchLower);
@@ -245,6 +281,12 @@
         }
         if (left.initialRiskLevel !== right.initialRiskLevel) {
           return right.initialRiskLevel - left.initialRiskLevel;
+        }
+        if (left.impact !== right.impact) {
+          return right.impact - left.impact;
+        }
+        if (left.probability !== right.probability) {
+          return right.probability - left.probability;
         }
         if (left.date !== right.date) {
           return right.date.localeCompare(left.date);
@@ -307,15 +349,19 @@
     }
 
     const riskText = typeof item.risk === "string" ? item.risk.trim() : "";
-    const initialRiskLevel = normalizeRiskLevel(item.initialRiskLevel);
+    const legacyRiskScore = normalizeRiskScore(item.initialRiskLevel);
+    const { probability, impact } = normalizeRiskFactors(item.probability, item.impact, legacyRiskScore);
+    const initialRiskLevel = probability * impact;
     const raisedDate = normalizeDateInputValue(item.date);
-    if (!riskText || !initialRiskLevel || !raisedDate) {
+    if (!riskText || !probability || !impact || !raisedDate) {
       return null;
     }
 
     return {
       id: typeof item.id === "string" && item.id ? item.id : createRiskId(),
       risk: riskText,
+      probability,
+      impact,
       initialRiskLevel,
       date: raisedDate,
       owner: typeof item.owner === "string" ? item.owner.trim() : "",
@@ -330,9 +376,155 @@
   function riskRegisterLabel() {
     return isApiPersistence() ? "shared portal register" : "browser register";
   }
-  function normalizeRiskLevel(value) {
+  function readFirstFormValue(formData, keys) {
+    for (const key of keys) {
+      const value = formData.get(key);
+      if (typeof value === "string" && value.trim()) {
+        return value;
+      }
+      if (value !== null && value !== undefined && String(value).trim()) {
+        return String(value);
+      }
+    }
+    return "";
+  }
+  function normalizeRiskFactor(value) {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : 0;
+  }
+  function normalizeRiskScore(value) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 25 ? parsed : 0;
+  }
+  function normalizeRiskFactors(probabilityValue, impactValue, legacyScoreValue) {
+    let probability = normalizeRiskFactor(probabilityValue);
+    let impact = normalizeRiskFactor(impactValue);
+    const legacyScore = normalizeRiskScore(legacyScoreValue);
+
+    if (probability && impact) {
+      return { probability, impact };
+    }
+    if (!legacyScore) {
+      return { probability, impact };
+    }
+
+    const fallback = riskFactorsFromLegacyScore(legacyScore);
+    if (probability && !impact) {
+      impact = inferMissingRiskFactor(probability, legacyScore, fallback.impact);
+    } else if (impact && !probability) {
+      probability = inferMissingRiskFactor(impact, legacyScore, fallback.probability);
+    } else {
+      probability = probability || fallback.probability;
+      impact = impact || fallback.impact;
+    }
+    return { probability, impact };
+  }
+  function inferMissingRiskFactor(knownFactor, score, fallbackFactor) {
+    if (knownFactor && score && score % knownFactor === 0) {
+      const derived = score / knownFactor;
+      if (Number.isInteger(derived) && derived >= 1 && derived <= 5) {
+        return derived;
+      }
+    }
+    return normalizeRiskFactor(fallbackFactor);
+  }
+  function riskFactorsFromLegacyScore(score) {
+    if (score <= 5) {
+      return { probability: score, impact: score };
+    }
+    return closestRiskFactorPair(score);
+  }
+  function closestRiskFactorPair(score) {
+    const target = Math.min(Math.max(score, 1), 25);
+    let best = null;
+
+    for (let probability = 1; probability <= 5; probability += 1) {
+      for (let impact = 1; impact <= 5; impact += 1) {
+        const product = probability * impact;
+        if (product < target) {
+          continue;
+        }
+        const candidate = {
+          delta: product - target,
+          spread: Math.abs(probability - impact),
+          score: product,
+          maxFactor: Math.max(probability, impact),
+          probability,
+          impact,
+        };
+        if (!best || compareRiskFactorCandidates(candidate, best) < 0) {
+          best = candidate;
+        }
+      }
+    }
+
+    if (!best) {
+      return { probability: 5, impact: 5 };
+    }
+    return { probability: best.probability, impact: best.impact };
+  }
+  function compareRiskFactorCandidates(left, right) {
+    if (left.delta !== right.delta) {
+      return left.delta - right.delta;
+    }
+    if (left.spread !== right.spread) {
+      return left.spread - right.spread;
+    }
+    if (left.score !== right.score) {
+      return right.score - left.score;
+    }
+    if (left.maxFactor !== right.maxFactor) {
+      return right.maxFactor - left.maxFactor;
+    }
+    if (left.probability !== right.probability) {
+      return left.probability - right.probability;
+    }
+    return left.impact - right.impact;
+  }
+  function riskBadgeLevel(probability, impact) {
+    const bandKey = riskBandKey(probability, impact);
+    if (bandKey === "extreme" || bandKey === "very-high") {
+      return 5;
+    }
+    if (bandKey === "high") {
+      return 4;
+    }
+    if (bandKey === "medium") {
+      return 3;
+    }
+    if (bandKey === "low") {
+      return 2;
+    }
+    return 1;
+  }
+  function riskBandLabel(probability, impact) {
+    const bandKey = riskBandKey(probability, impact);
+    if (bandKey === "very-low") {
+      return "Very low";
+    }
+    if (bandKey === "very-high") {
+      return "Very high";
+    }
+    if (bandKey === "extreme") {
+      return "Extreme";
+    }
+    return bandKey.charAt(0).toUpperCase() + bandKey.slice(1);
+  }
+  function riskBandKey(probability, impact) {
+    const normalizedProbability = normalizeRiskFactor(probability);
+    const normalizedImpact = normalizeRiskFactor(impact);
+    if (!normalizedProbability || !normalizedImpact) {
+      return "very-low";
+    }
+
+    const matrix = [
+      ["very-low", "very-low", "low", "medium", "medium"],
+      ["very-low", "low", "medium", "medium", "high"],
+      ["low", "medium", "medium", "high", "very-high"],
+      ["medium", "medium", "high", "very-high", "extreme"],
+      ["medium", "high", "very-high", "extreme", "extreme"],
+    ];
+    return matrix[normalizedProbability - 1][normalizedImpact - 1];
   }
   function normalizeDateInputValue(value) {
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
@@ -367,11 +559,5 @@
     if (!normalizedValue) {
       return "-";
     }
-
-    const [year, month, day] = normalizedValue.split("-").map(Number);
-    return new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }).format(new Date(year, month - 1, day));
+    return formatDateWithOrdinal(normalizedValue);
   }

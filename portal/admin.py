@@ -24,7 +24,7 @@ class VendorResponseAdmin(admin.ModelAdmin):
 
 @admin.register(RiskRecord)
 class RiskRecordAdmin(admin.ModelAdmin):
-    list_display = ("external_id", "owner", "initial_risk_level", "date", "closed_date")
+    list_display = ("external_id", "owner", "probability", "impact", "initial_risk_level", "date", "closed_date")
     search_fields = ("external_id", "owner", "risk")
 
 

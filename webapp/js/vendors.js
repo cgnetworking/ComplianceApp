@@ -493,12 +493,15 @@
     return type.startsWith("text/") || type.includes("json") || type.includes("xml");
   }
   function formatShortDateTime(value) {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return "-";
+    }
+    const time = new Intl.DateTimeFormat(undefined, {
       hour: "numeric",
       minute: "2-digit",
-    }).format(new Date(value));
+    }).format(parsed);
+    return `${formatDateWithOrdinal(parsed)}, ${time}`;
   }
   function formatFileSize(value) {
     const bytes = Number(value) || 0;

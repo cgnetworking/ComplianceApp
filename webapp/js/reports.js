@@ -1,8 +1,9 @@
   function renderReportsPage() {
     const controls = filteredControls();
+    const currentMonthIndex = today.getMonth();
     renderGlobalOverview(controls, {
       mode: "reports",
-      currentMonthActivities: monthlyActivities(state.monthIndex),
+      currentMonthActivities: monthlyActivities(currentMonthIndex),
     });
     renderFrameworkChart(controls);
     renderTimelineChart();

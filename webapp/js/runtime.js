@@ -64,6 +64,9 @@
   const today = new Date();
   const page = document.body.dataset.page || "home";
   const params = new URLSearchParams(window.location.search);
+  const initialMonthIndex = page === "reviews" && params.has("month")
+    ? parseMonth(params.get("month"))
+    : today.getMonth();
   refreshControlsIndex();
   refreshDocumentsIndex();
 
@@ -72,7 +75,7 @@
     domain: params.get("domain") || "All",
     applicability: params.get("applicability") || "All",
     frequency: params.get("frequency") || "All",
-    monthIndex: parseMonth(params.get("month")),
+    monthIndex: initialMonthIndex,
     selectedControlId: params.get("control"),
     policyContextControlId: params.get("control"),
     activeDocumentId: params.get("doc"),
@@ -147,6 +150,18 @@
     riskClosedDateInput: document.getElementById("risk-closed-date"),
     riskSubmitButton: document.getElementById("risk-submit-button"),
     riskFormStatus: document.getElementById("risk-form-status"),
+    riskProbabilityInput: document.querySelector(
+      '#risk-probability, select[name="risk-probability"], select[name="probability"], select[name="initial-risk-probability"], input[name="risk-probability"]:not([type="radio"]), input[name="probability"]:not([type="radio"]), input[name="initial-risk-probability"]:not([type="radio"])'
+    ),
+    riskImpactInput: document.querySelector(
+      '#risk-impact, select[name="risk-impact"], select[name="impact"], select[name="initial-risk-impact"], input[name="risk-impact"]:not([type="radio"]), input[name="impact"]:not([type="radio"]), input[name="initial-risk-impact"]:not([type="radio"])'
+    ),
+    riskProbabilityInputs: Array.from(
+      document.querySelectorAll('input[type="radio"][name="risk-probability"], input[type="radio"][name="probability"], input[type="radio"][name="initial-risk-probability"]')
+    ),
+    riskImpactInputs: Array.from(
+      document.querySelectorAll('input[type="radio"][name="risk-impact"], input[type="radio"][name="impact"], input[type="radio"][name="initial-risk-impact"]')
+    ),
     riskLevelInputs: Array.from(document.querySelectorAll('input[name="initial-risk-level"]')),
   };
 

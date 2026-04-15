@@ -452,15 +452,17 @@
   }
   function filteredControls() {
     const searchLower = state.search.trim().toLowerCase();
+    const usesDomainFilter = page === "controls" || page === "reports";
+    const usesReportOnlyFilters = page === "reports";
 
     return getAllControlViews().filter((view) => {
-      if (page !== "policies" && state.domain !== "All" && view.domain !== state.domain) {
+      if (usesDomainFilter && state.domain !== "All" && view.domain !== state.domain) {
         return false;
       }
-      if (page !== "policies" && state.applicability !== "All" && view.effectiveApplicability !== state.applicability) {
+      if (usesReportOnlyFilters && state.applicability !== "All" && view.effectiveApplicability !== state.applicability) {
         return false;
       }
-      if (page !== "policies" && state.frequency !== "All" && view.effectiveReviewFrequency !== state.frequency) {
+      if (usesReportOnlyFilters && state.frequency !== "All" && view.effectiveReviewFrequency !== state.frequency) {
         return false;
       }
       if (!searchLower || (page !== "controls" && page !== "reports")) {

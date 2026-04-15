@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
+
+RISK_FACTOR_VALIDATORS = [MinValueValidator(1), MaxValueValidator(5)]
+RISK_SCORE_VALIDATORS = [MinValueValidator(1), MaxValueValidator(25)]
 
 
 class UploadedPolicy(models.Model):
@@ -80,7 +84,9 @@ class VendorResponse(models.Model):
 class RiskRecord(models.Model):
     external_id = models.CharField(max_length=64, unique=True)
     risk = models.TextField()
-    initial_risk_level = models.PositiveSmallIntegerField()
+    probability = models.PositiveSmallIntegerField(default=3, validators=RISK_FACTOR_VALIDATORS)
+    impact = models.PositiveSmallIntegerField(default=3, validators=RISK_FACTOR_VALIDATORS)
+    initial_risk_level = models.PositiveSmallIntegerField(validators=RISK_SCORE_VALIDATORS)
     date = models.DateField()
     owner = models.CharField(max_length=255)
     closed_date = models.DateField(blank=True, null=True)
@@ -93,11 +99,21 @@ class RiskRecord(models.Model):
     def __str__(self) -> str:
         return self.external_id
 
+    def save(self, *args, **kwargs) -> None:
+        score = int(self.probability or 0) * int(self.impact or 0)
+        if 1 <= score <= 25:
+            self.initial_risk_level = score
+        super().save(*args, **kwargs)
+
     def to_portal_dict(self) -> dict[str, object]:
+        score = int(self.probability or 0) * int(self.impact or 0)
+        initial_risk_level = score if 1 <= score <= 25 else self.initial_risk_level
         return {
             "id": self.external_id,
             "risk": self.risk,
-            "initialRiskLevel": self.initial_risk_level,
+            "probability": self.probability,
+            "impact": self.impact,
+            "initialRiskLevel": initial_risk_level,
             "date": self.date.isoformat(),
             "owner": self.owner,
             "closedDate": self.closed_date.isoformat() if self.closed_date else "",

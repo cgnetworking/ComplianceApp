@@ -166,14 +166,39 @@
     const existingSignatures = new Set(getAllChecklistItems().map((item) => checklistSignature(item)));
     return getRecommendedChecklistItems().filter((item) => !existingSignatures.has(checklistSignature(item)));
   }
+  function checklistRecommendationSearchInput() {
+    return document.getElementById("checklist-recommendation-search");
+  }
+  function filteredChecklistRecommendations(recommendations) {
+    const searchInput = checklistRecommendationSearchInput();
+    if (!searchInput) {
+      return recommendations;
+    }
+    const query = searchInput.value.trim().toLowerCase();
+    if (!query) {
+      return recommendations;
+    }
+    return recommendations.filter((item) => item.item.toLowerCase().includes(query));
+  }
   function renderChecklistRecommendationOptions() {
     if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
       return;
     }
 
-    const recommendations = availableChecklistRecommendations();
+    const searchInput = checklistRecommendationSearchInput();
+    if (searchInput && !searchInput.dataset.recommendationSearchBound) {
+      searchInput.addEventListener("input", renderChecklistRecommendationOptions);
+      searchInput.dataset.recommendationSearchBound = "true";
+    }
+
+    const allRecommendations = availableChecklistRecommendations();
+    const recommendations = filteredChecklistRecommendations(allRecommendations);
     const selectedValue = els.checklistRecommendationSelect.value;
-    const options = [{ value: "", label: "Select a recommended task" }].concat(
+    const noSearchResults = recommendations.length === 0 && allRecommendations.length > 0;
+    const emptyOptionLabel = noSearchResults
+      ? "No matching recommended tasks"
+      : "Select a recommended task";
+    const options = [{ value: "", label: emptyOptionLabel }].concat(
       recommendations.map((item) => ({
         value: item.id,
         label: `${item.item} (${item.frequency} / ${item.owner})`,
@@ -185,6 +210,7 @@
       .join("");
 
     els.checklistRecommendationSelect.value = valueOrFallback(els.checklistRecommendationSelect, selectedValue || "");
+    els.checklistRecommendationSelect.disabled = recommendations.length === 0;
     els.checklistRecommendationAdd.disabled = recommendations.length === 0 || !els.checklistRecommendationSelect.value;
   }
   function handleChecklistRecommendationSelected() {
@@ -312,6 +338,10 @@
     }
     if (els.checklistRecommendationAdd) {
       els.checklistRecommendationAdd.disabled = true;
+    }
+    const searchInput = checklistRecommendationSearchInput();
+    if (searchInput) {
+      searchInput.value = "";
     }
   }
   async function handleChecklistAddSubmit(event) {
