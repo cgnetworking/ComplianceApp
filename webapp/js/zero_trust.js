@@ -98,7 +98,6 @@
           commands: [],
         },
       },
-      entraSetupDirections: [],
       updatedAt: "",
     };
   }
@@ -245,7 +244,6 @@
                   : defaults.installInstructions.graphAppOnlyAuth,
             }
           : defaults.installInstructions,
-      entraSetupDirections: Array.isArray(value.entraSetupDirections) ? value.entraSetupDirections : [],
       updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : "",
     };
   }
@@ -413,7 +411,6 @@
     const pwshStatus = document.getElementById("zero-trust-pwsh-status");
     const moduleStatus = document.getElementById("zero-trust-module-status");
     const health = document.getElementById("zero-trust-prereq-health");
-    const entraDirections = document.getElementById("zero-trust-entra-directions");
 
     const platformInfo = assessment.platform || {};
     const prerequisites = assessment.prerequisites || {};
@@ -445,41 +442,6 @@
         `<span class="chip">Module / ${escapeHtml(moduleState.installed ? "Installed" : "Missing")}</span>`,
       ];
       health.innerHTML = chips.join("");
-    }
-
-    if (entraDirections) {
-      const steps = Array.isArray(assessment.entraSetupDirections) ? assessment.entraSetupDirections : [];
-      if (!steps.length) {
-        entraDirections.innerHTML = "<div class=\"empty-state\">No Entra setup directions are available.</div>";
-      } else {
-        entraDirections.innerHTML = `
-          <ol class="zero-trust-directions">
-            ${steps.map((step) => {
-              const title = step && typeof step.title === "string" ? step.title : "Step";
-              const details = Array.isArray(step && step.details) ? step.details : [];
-              const referenceUrl = step && typeof step.referenceUrl === "string" ? step.referenceUrl.trim() : "";
-              const referenceLabel = step && typeof step.referenceLabel === "string"
-                ? step.referenceLabel.trim()
-                : "";
-              const permissions = Array.isArray(step && step.permissions) ? step.permissions : [];
-              return `
-                <li>
-                  <strong>${escapeHtml(title)}</strong>
-                  ${referenceUrl
-                    ? `<p class="mini-copy"><a class="zero-trust-doc-link" href="${escapeHtml(referenceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(referenceLabel || referenceUrl)}</a></p>`
-                    : ""}
-                  ${details.length
-                    ? `<ul>${details.map((detail) => `<li>${escapeHtml(String(detail))}</li>`).join("")}</ul>`
-                    : ""}
-                  ${permissions.length
-                    ? `<ul class="zero-trust-permission-list">${permissions.map((permission) => `<li>${escapeHtml(String(permission))}</li>`).join("")}</ul>`
-                    : ""}
-                </li>
-              `;
-            }).join("")}
-          </ol>
-        `;
-      }
     }
 
     renderZeroTrustCertificateControls(assessment);

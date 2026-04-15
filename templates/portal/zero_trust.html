@@ -29,9 +29,6 @@
         <section class="report-header">
           <p class="section-kicker">Microsoft Zero Trust</p>
           <h1>Zero Trust assessment workspace</h1>
-          <p class="report-copy">
-            Dedicated Ubuntu-only workflow for the Microsoft Zero Trust Assessment. `scripts/local_setup.sh` installs the Ubuntu prerequisites, and this workspace runs the assessment with certificate authentication only.
-          </p>
         </section>
 
         <section class="overview" id="zero-trust-overview"></section>
@@ -74,41 +71,6 @@
 
               <div class="detail-stack">
                 <div class="preview-block">
-                  <strong>Ubuntu prerequisite install</strong>
-                  <p class="mini-copy">
-                    `scripts/local_setup.sh` runs these Ubuntu steps automatically. Source:
-                    <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu?view=powershell-7.6" target="_blank" rel="noopener noreferrer">
-                      Install PowerShell 7 on Ubuntu
-                    </a>
-                  </p>
-                  <pre class="command-block"><code>sudo apt-get update
-sudo apt-get install -y wget apt-transport-https software-properties-common
-source /etc/os-release
-wget -q https://packages.microsoft.com/config/ubuntu/$VERSION_ID/packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb
-rm packages-microsoft-prod.deb
-sudo apt-get update
-sudo apt-get install -y powershell
-pwsh</code></pre>
-                </div>
-
-                <div class="preview-block">
-                  <strong>Run Microsoft Zero Trust Assessment with certificate auth</strong>
-                  <p class="mini-copy">
-                    The PowerShell module is installed by `scripts/local_setup.sh`. Source:
-                    <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/security/zero-trust/assessment/get-started" target="_blank" rel="noopener noreferrer">
-                      Get started with the Zero Trust Assessment
-                    </a>
-                  </p>
-                  <pre class="command-block"><code>pwsh
-Connect-ZtAssessment -ClientId YOUR_APP_ID -TenantId YOUR_TENANT_ID -Certificate YOUR_CERT_SUBJECT
-Invoke-ZtAssessment -Path /path/to/output</code></pre>
-                  <p class="mini-copy">
-                    The assessment report contains sensitive tenant details. Store and share it only with authorized personnel.
-                  </p>
-                </div>
-
-                <div class="preview-block">
                   <strong>Create trusted X.509 certificate</strong>
                   <p class="mini-copy">
                     Generate a certificate on this Ubuntu server, trust it in the runtime service context, then download the `.cer` public key for Entra upload.
@@ -127,15 +89,9 @@ Invoke-ZtAssessment -Path /path/to/output</code></pre>
 
                 <div class="preview-block">
                   <strong>Microsoft Entra certificate-auth setup directions</strong>
-                  <p class="mini-copy">
-                    Source:
-                    <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/powershell/microsoftgraph/app-only?view=graph-powershell-1.0" target="_blank" rel="noopener noreferrer">
-                      Use app-only authentication with Microsoft Graph PowerShell
-                    </a>
-                  </p>
-                  <div class="detail-stack" id="zero-trust-entra-directions">
-                    <div class="empty-state">Loading Entra setup steps...</div>
-                  </div>
+                  <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/powershell/microsoftgraph/app-only?view=graph-powershell-1.0" target="_blank" rel="noopener noreferrer">
+                    Use app-only authentication with Microsoft Graph PowerShell
+                  </a>
                 </div>
               </div>
             </section>

@@ -125,21 +125,78 @@ def _current_system_username() -> str:
         return str(os.geteuid())
 
 
-def _runtime_service_requirement_error() -> str:
+def _runtime_service_account() -> pwd.struct_passwd:
     try:
-        pwd.getpwnam(ZERO_TRUST_RUNTIME_SERVICE_USER)
-    except KeyError:
-        return (
+        return pwd.getpwnam(ZERO_TRUST_RUNTIME_SERVICE_USER)
+    except KeyError as error:
+        raise ValueError(
             f"Runtime service account `{ZERO_TRUST_RUNTIME_SERVICE_USER}` was not found. "
             "Create this user and run all services under it."
-        )
+        ) from error
+
+
+def _runtime_service_environment(runtime_user: pwd.struct_passwd) -> dict[str, str]:
+    home_directory = runtime_user.pw_dir.strip() if runtime_user.pw_dir else str(Path.home().resolve())
+    environment = os.environ.copy()
+    environment["HOME"] = home_directory
+    environment["USER"] = runtime_user.pw_name
+    environment["LOGNAME"] = runtime_user.pw_name
+    environment.setdefault("XDG_DATA_HOME", str(Path(home_directory) / ".local" / "share"))
+    return environment
+
+
+def _runtime_service_subprocess_kwargs() -> dict[str, object]:
+    runtime_user = _runtime_service_account()
+    current_uid = os.geteuid()
+
+    if current_uid == runtime_user.pw_uid:
+        return {"env": _runtime_service_environment(runtime_user)}
 
     current_user = _current_system_username()
-    if current_user != ZERO_TRUST_RUNTIME_SERVICE_USER:
-        return (
+    if current_uid != 0:
+        raise ValueError(
             f"This process is running as `{current_user}`. "
-            f"All runtime services must run as `{ZERO_TRUST_RUNTIME_SERVICE_USER}`."
+            f"Zero Trust runtime actions must run as `{ZERO_TRUST_RUNTIME_SERVICE_USER}` or as `root` "
+            f"so the app can switch into `{ZERO_TRUST_RUNTIME_SERVICE_USER}`."
         )
+
+    target_uid = runtime_user.pw_uid
+    target_gid = runtime_user.pw_gid
+    target_name = runtime_user.pw_name
+
+    def _demote_to_runtime_user() -> None:
+        os.initgroups(target_name, target_gid)
+        os.setgid(target_gid)
+        os.setuid(target_uid)
+
+    return {
+        "env": _runtime_service_environment(runtime_user),
+        "preexec_fn": _demote_to_runtime_user,
+    }
+
+
+def _ensure_runtime_service_directory(path: Path) -> None:
+    runtime_user = _runtime_service_account()
+    directory = path.expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+
+    if os.geteuid() != 0:
+        return
+
+    home_directory = Path(runtime_user.pw_dir).expanduser().resolve()
+    current = directory
+    while _is_path_within_root(current, home_directory):
+        os.chown(current, runtime_user.pw_uid, runtime_user.pw_gid)
+        if current == home_directory:
+            break
+        current = current.parent
+
+
+def _runtime_service_requirement_error() -> str:
+    try:
+        _runtime_service_subprocess_kwargs()
+    except ValueError as error:
+        return str(error)
 
     return ""
 
@@ -450,7 +507,19 @@ def detect_linux_platform() -> dict[str, object]:
     return platform_payload
 
 
-def _run_capture(command: list[str], timeout_seconds: int = 20) -> tuple[int, str, str]:
+def _run_capture(
+    command: list[str],
+    timeout_seconds: int = 20,
+    *,
+    runtime_service_context: bool = False,
+) -> tuple[int, str, str]:
+    run_kwargs: dict[str, object] = {}
+    if runtime_service_context:
+        try:
+            run_kwargs.update(_runtime_service_subprocess_kwargs())
+        except ValueError as error:
+            return 126, "", str(error)
+
     try:
         completed = subprocess.run(
             command,
@@ -458,6 +527,7 @@ def _run_capture(command: list[str], timeout_seconds: int = 20) -> tuple[int, st
             text=True,
             check=False,
             timeout=timeout_seconds,
+            **run_kwargs,
         )
     except (FileNotFoundError, subprocess.SubprocessError):
         return 127, "", ""
@@ -487,6 +557,7 @@ def detect_zero_trust_prerequisites(platform_payload: dict[str, object] | None =
 
     version_code, version_stdout, _ = _run_capture(
         ["pwsh", "-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],
+        runtime_service_context=True,
     )
     if version_code == 0 and version_stdout:
         prerequisites["powerShell"]["installed"] = True
@@ -500,6 +571,7 @@ def detect_zero_trust_prerequisites(platform_payload: dict[str, object] | None =
     )
     module_code, module_stdout, _ = _run_capture(
         ["pwsh", "-NoLogo", "-NoProfile", "-Command", module_command],
+        runtime_service_context=True,
     )
     if module_code == 0 and module_stdout:
         prerequisites["zeroTrustModule"]["installed"] = True
@@ -553,7 +625,7 @@ def _prepare_run_context(
 ) -> dict[str, object]:
     run_id = f"zt-{started_at.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     run_directory = (ZERO_TRUST_RUNS_ROOT / run_id).resolve()
-    run_directory.mkdir(parents=True, exist_ok=True)
+    _ensure_runtime_service_directory(run_directory)
     log_path = run_directory / ZERO_TRUST_LOG_FILENAME
 
     schedule = state["schedule"]
@@ -681,7 +753,12 @@ def _run_checked_command(
     *,
     timeout_seconds: int = 120,
     cwd: Path | None = None,
+    runtime_service_context: bool = False,
 ) -> str:
+    run_kwargs: dict[str, object] = {}
+    if runtime_service_context:
+        run_kwargs.update(_runtime_service_subprocess_kwargs())
+
     try:
         completed = subprocess.run(
             command,
@@ -690,6 +767,7 @@ def _run_checked_command(
             check=False,
             timeout=timeout_seconds,
             cwd=str(cwd) if isinstance(cwd, Path) else None,
+            **run_kwargs,
         )
     except FileNotFoundError as error:
         raise ValueError(f"Required command `{command[0]}` is not available on this server.") from error
@@ -736,6 +814,7 @@ def _import_certificate_into_powershell_store(pfx_path: Path, password: str) -> 
     output = _run_checked_command(
         ["pwsh", "-NoLogo", "-NoProfile", "-Command", script],
         timeout_seconds=180,
+        runtime_service_context=True,
     )
     parts = output.strip().split("|")
     if len(parts) < 3:
@@ -756,7 +835,7 @@ def _generate_trusted_app_only_certificate() -> dict[str, object]:
 
     certificate_id = f"cert-{timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     certificate_directory = (ZERO_TRUST_CERTIFICATES_ROOT / certificate_id).resolve()
-    certificate_directory.mkdir(parents=True, exist_ok=True)
+    _ensure_runtime_service_directory(certificate_directory)
 
     private_key_path = certificate_directory / "app_only.key"
     certificate_pem_path = certificate_directory / "app_only.pem"
@@ -789,6 +868,7 @@ def _generate_trusted_app_only_certificate() -> dict[str, object]:
                 str(certificate_pem_path),
             ],
             timeout_seconds=180,
+            runtime_service_context=True,
         )
 
         _run_checked_command(
@@ -803,6 +883,7 @@ def _generate_trusted_app_only_certificate() -> dict[str, object]:
                 str(public_key_path),
             ],
             timeout_seconds=120,
+            runtime_service_context=True,
         )
 
         _run_checked_command(
@@ -820,6 +901,7 @@ def _generate_trusted_app_only_certificate() -> dict[str, object]:
                 f"pass:{pfx_password}",
             ],
             timeout_seconds=120,
+            runtime_service_context=True,
         )
 
         imported_metadata = _import_certificate_into_powershell_store(pfx_path, pfx_password)
@@ -865,7 +947,9 @@ def generate_zero_trust_certificate() -> dict[str, object]:
     platform_info = detect_linux_platform()
     if not platform_info.get("supported"):
         raise ValueError(_normalize_string(platform_info.get("reason"), "Ubuntu is required."))
-    _require_runtime_service_owner()
+    runtime_service_error = _runtime_service_requirement_error()
+    if runtime_service_error:
+        raise ValueError(runtime_service_error)
 
     generated_certificate = _generate_trusted_app_only_certificate()
 
@@ -1074,6 +1158,7 @@ def _run_assessment_in_background(run_context: dict[str, object]) -> None:
 
     try:
         script = _build_powershell_script(run_directory, authentication)
+        process_kwargs = _runtime_service_subprocess_kwargs()
         with log_path.open("w", encoding="utf-8") as stream:
             stream.write("Starting Microsoft Zero Trust Assessment...\n")
             stream.flush()
@@ -1083,6 +1168,7 @@ def _run_assessment_in_background(run_context: dict[str, object]) -> None:
                 stdout=stream,
                 stderr=subprocess.STDOUT,
                 text=True,
+                **process_kwargs,
             )
             return_code = process.wait()
 
@@ -1319,53 +1405,6 @@ def _install_instructions() -> dict[str, object]:
     }
 
 
-def _entra_setup_directions() -> list[dict[str, object]]:
-    return [
-        {
-            "title": "Create a trusted X.509 certificate on this Ubuntu server",
-            "details": [
-                "Use the Generate certificate action in this page so the app creates the certificate with a private key.",
-                "The generated certificate is installed into the runtime service PowerShell certificate stores (`CurrentUser/My` and `CurrentUser/Root`).",
-                "Download the generated public key in `.cer` format from this page for Entra upload.",
-            ],
-        },
-        {
-            "title": "Register an app in Microsoft Entra ID",
-            "details": [
-                "Create a single-tenant app registration in the target tenant.",
-                "Upload the certificate public key under Certificates & secrets.",
-                "Capture Application (client) ID and Directory (tenant) ID.",
-            ],
-        },
-        {
-            "title": "Grant Microsoft Graph application permissions",
-            "details": [
-                "Add the required Microsoft Graph Application permissions from the Zero Trust Assessment documentation.",
-                "Grant admin consent for the tenant.",
-                "Ensure the app-only permissions cover the checks you expect to run.",
-            ],
-            "referenceUrl": ZERO_TRUST_DOC_URL,
-            "referenceLabel": "Zero Trust Assessment required Microsoft Graph permissions",
-            "permissions": ZERO_TRUST_REQUIRED_GRAPH_PERMISSIONS,
-        },
-        {
-            "title": "Grant service access used by Connect-ZtAssessment",
-            "details": [
-                "Configure equivalent app/service principal permissions for Azure, Exchange Online, SharePoint Online, and Security & Compliance where required.",
-                "If app-only access is incomplete for a service, related checks can fail or be skipped.",
-            ],
-        },
-        {
-            "title": "Configure this portal and validate",
-            "details": [
-                "In this page, enter Tenant ID and Client ID.",
-                "Keep the auto-populated certificate reference from the generated cert, or provide your own trusted certificate reference.",
-                "Run the assessment and verify success in the run history and report output.",
-            ],
-        },
-    ]
-
-
 def update_zero_trust_authentication(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("Authentication payload must be an object.")
@@ -1432,7 +1471,6 @@ def get_zero_trust_assessment_payload(*, auto_run_due: bool = False) -> dict[str
             "graphAppOnlyAuth": GRAPH_APP_ONLY_DOC_URL,
         },
         "installInstructions": _install_instructions(),
-        "entraSetupDirections": _entra_setup_directions(),
         "updatedAt": timezone.now().isoformat(),
     }
 
