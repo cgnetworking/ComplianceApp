@@ -166,37 +166,73 @@
     const existingSignatures = new Set(getAllChecklistItems().map((item) => checklistSignature(item)));
     return getRecommendedChecklistItems().filter((item) => !existingSignatures.has(checklistSignature(item)));
   }
-  function checklistRecommendationSearchInput() {
-    return document.getElementById("checklist-recommendation-search");
+  function resetRecommendationTypeahead() {
+    recommendationTypeaheadState.query = "";
+    if (recommendationTypeaheadState.resetHandle) {
+      window.clearTimeout(recommendationTypeaheadState.resetHandle);
+      recommendationTypeaheadState.resetHandle = null;
+    }
   }
-  function filteredChecklistRecommendations(recommendations) {
-    const searchInput = checklistRecommendationSearchInput();
-    if (!searchInput) {
-      return recommendations;
+  function scheduleRecommendationTypeaheadReset() {
+    if (recommendationTypeaheadState.resetHandle) {
+      window.clearTimeout(recommendationTypeaheadState.resetHandle);
     }
-    const query = searchInput.value.trim().toLowerCase();
-    if (!query) {
-      return recommendations;
+    recommendationTypeaheadState.resetHandle = window.setTimeout(() => {
+      recommendationTypeaheadState.query = "";
+      recommendationTypeaheadState.resetHandle = null;
+    }, 900);
+  }
+  function bindChecklistRecommendationTypeahead() {
+    if (!els.checklistRecommendationSelect || els.checklistRecommendationSelect.dataset.typeaheadBound) {
+      return;
     }
-    return recommendations.filter((item) => item.item.toLowerCase().includes(query));
+    els.checklistRecommendationSelect.dataset.typeaheadBound = "true";
+    els.checklistRecommendationSelect.addEventListener("keydown", (event) => {
+      if (!els.checklistRecommendationSelect || event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        resetRecommendationTypeahead();
+        return;
+      }
+
+      if (event.key === "Backspace") {
+        recommendationTypeaheadState.query = recommendationTypeaheadState.query.slice(0, -1);
+      } else if (event.key.length === 1) {
+        recommendationTypeaheadState.query += event.key.toLowerCase();
+      } else {
+        return;
+      }
+
+      const query = recommendationTypeaheadState.query.trim();
+      scheduleRecommendationTypeaheadReset();
+      if (!query) {
+        return;
+      }
+
+      const options = Array.from(els.checklistRecommendationSelect.options).filter((option) => option.value);
+      const match = options.find((option) => option.textContent.toLowerCase().includes(query));
+      if (!match) {
+        return;
+      }
+
+      els.checklistRecommendationSelect.value = match.value;
+      handleChecklistRecommendationSelected();
+      event.preventDefault();
+    });
   }
   function renderChecklistRecommendationOptions() {
     if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
       return;
     }
 
-    const searchInput = checklistRecommendationSearchInput();
-    if (searchInput && !searchInput.dataset.recommendationSearchBound) {
-      searchInput.addEventListener("input", renderChecklistRecommendationOptions);
-      searchInput.dataset.recommendationSearchBound = "true";
-    }
+    bindChecklistRecommendationTypeahead();
 
-    const allRecommendations = availableChecklistRecommendations();
-    const recommendations = filteredChecklistRecommendations(allRecommendations);
+    const recommendations = availableChecklistRecommendations();
     const selectedValue = els.checklistRecommendationSelect.value;
-    const noSearchResults = recommendations.length === 0 && allRecommendations.length > 0;
-    const emptyOptionLabel = noSearchResults
-      ? "No matching recommended tasks"
+    const emptyOptionLabel = recommendations.length === 0
+      ? "No recommended tasks available"
       : "Select a recommended task";
     const options = [{ value: "", label: emptyOptionLabel }].concat(
       recommendations.map((item) => ({
@@ -339,10 +375,7 @@
     if (els.checklistRecommendationAdd) {
       els.checklistRecommendationAdd.disabled = true;
     }
-    const searchInput = checklistRecommendationSearchInput();
-    if (searchInput) {
-      searchInput.value = "";
-    }
+    resetRecommendationTypeahead();
   }
   async function handleChecklistAddSubmit(event) {
     event.preventDefault();
@@ -534,3 +567,7 @@
     }
     return [];
   }
+  const recommendationTypeaheadState = {
+    query: "",
+    resetHandle: null,
+  };
