@@ -5,6 +5,24 @@ from . import views
 
 urlpatterns = [
     path("state/", views.bootstrap_state, name="api-state"),
+    path("zero-trust/status/", views.zero_trust_assessment_status, name="api-zero-trust-status"),
+    path(
+        "zero-trust/authentication/",
+        views.zero_trust_assessment_authentication,
+        name="api-zero-trust-authentication",
+    ),
+    path(
+        "zero-trust/certificate/",
+        views.zero_trust_assessment_certificate,
+        name="api-zero-trust-certificate",
+    ),
+    path(
+        "zero-trust/certificate/public-key/",
+        views.zero_trust_assessment_certificate_public_key,
+        name="api-zero-trust-certificate-public-key",
+    ),
+    path("zero-trust/run/", views.zero_trust_assessment_run, name="api-zero-trust-run"),
+    path("zero-trust/report/", views.zero_trust_assessment_report, name="api-zero-trust-report"),
     path("mapping/uploads/", views.upload_mapping, name="api-mapping-uploads"),
     path("policies/uploads/", views.upload_policies, name="api-policy-uploads"),
     path("policies/<str:document_id>/", views.policy_document, name="api-policy-document"),

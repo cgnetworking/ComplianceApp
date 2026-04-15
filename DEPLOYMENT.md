@@ -51,7 +51,7 @@ The default settings also enable per-backend domain and email allowlists, requir
 1. Run `./scripts/local_setup.sh` from the repository root.
 2. Run `python manage.py createsuperuser` if you want Django admin access.
 
-The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, renders and installs NGINX site config, creates/enables/starts Gunicorn systemd service units, validates app readiness, and starts/enables NGINX when config validation passes.
+The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, renders and installs NGINX site config, creates a dedicated non-login system runtime user for Gunicorn (default: `complianceapp`), creates/enables/starts Gunicorn systemd service units, validates app readiness, and starts/enables NGINX when config validation passes.
 
 During setup, the script asks a yes/no question about generating a local self-signed TLS cert. If you answer yes, it creates the cert at the exact `ssl_certificate` and `ssl_certificate_key` paths rendered into `deploy/nginx/complianceapp.conf`.
 
@@ -67,6 +67,8 @@ Useful local setup overrides:
 - `LOCAL_SETUP_SELF_SIGNED_CERT_DAYS`
 - `LOCAL_SETUP_GUNICORN_BIND`
 - `LOCAL_SETUP_GUNICORN_WORKERS`
+- `LOCAL_SETUP_GUNICORN_USER`
+- `LOCAL_SETUP_GUNICORN_GROUP`
 - `LOCAL_SETUP_GUNICORN_SERVICE_NAME`
 - `LOCAL_SETUP_GUNICORN_SERVICE_NAMES` (comma-separated)
 - `LOCAL_SETUP_HEALTHCHECK_URL`
@@ -116,6 +118,7 @@ Example manual reload on Ubuntu:
 ## Hosting notes
 
 - `gunicorn portal_backend.wsgi:application` is the production entrypoint.
+- `scripts/local_setup.sh` runs Gunicorn as a dedicated locked system user with a non-login shell (default user: `complianceapp`).
 - `scripts/local_setup.sh` already runs `python manage.py collectstatic --noinput`.
 - The current implementation keeps uploaded content in PostgreSQL-backed records, but does not expose raw file downloads. That avoids adding object storage as a hard dependency for the first hosted version.
 - If you later want to retain original uploaded files, add S3-compatible media storage rather than relying on an ephemeral app filesystem.

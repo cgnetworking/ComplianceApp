@@ -1,0 +1,254 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ISMS Zero Trust Assessment</title>
+  <link rel="stylesheet" href="{% static 'styles.css' %}">
+</head>
+<body data-page="zero-trust">
+  <div class="app-shell">
+      {% include "portal/_sidebar.html" with active_page="zero-trust" search_placeholder="Search controls or policies" %}
+
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="workspace-switcher">
+          <div class="workspace-icon">A</div>
+          <div>
+            <p class="workspace-label">Workspace</p>
+            <strong>Acme Co / ISO Program</strong>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          {% include "portal/_auth_controls.html" %}
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="report-header">
+          <p class="section-kicker">Microsoft Zero Trust</p>
+          <h1>Zero Trust assessment workspace</h1>
+          <p class="report-copy">
+            Dedicated Ubuntu-only workflow for the Microsoft Zero Trust Assessment. Complete prerequisites, run the assessment, display the report output here, and continue weekly runs after the first execution.
+          </p>
+        </section>
+
+        <section class="overview" id="zero-trust-overview"></section>
+
+        <section class="page-grid page-grid-zero-trust">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Assessment operations</p>
+                <h2>Install, run, and review</h2>
+              </div>
+            </div>
+
+            <div class="month-tabs zero-trust-tabs" id="zero-trust-tab-bar">
+              <button class="month-tab is-active" type="button" data-zero-trust-tab="prerequisites">Ubuntu prerequisites</button>
+              <button class="month-tab" type="button" data-zero-trust-tab="assessment">Run assessment + results</button>
+            </div>
+
+            <section class="zero-trust-tab-panel" data-zero-trust-panel="prerequisites">
+              <div class="mini-stats" id="zero-trust-prereq-health"></div>
+
+              <div class="detail-grid zero-trust-prereq-grid">
+                <div class="detail-card">
+                  <strong>Environment</strong>
+                  <div class="mini-copy" id="zero-trust-platform-status">Checking Ubuntu support...</div>
+                </div>
+                <div class="detail-card">
+                  <strong>PowerShell 7</strong>
+                  <div class="mini-copy" id="zero-trust-pwsh-status">Checking installation...</div>
+                </div>
+                <div class="detail-card">
+                  <strong>ZeroTrustAssessment module</strong>
+                  <div class="mini-copy" id="zero-trust-module-status">Checking module installation...</div>
+                </div>
+                <div class="detail-card">
+                  <strong>Required roles</strong>
+                  <div class="mini-copy">First consent requires Global Administrator. Subsequent runs require Global Reader, Exchange Administrator, and SharePoint Administrator.</div>
+                </div>
+              </div>
+
+              <div class="detail-stack">
+                <div class="preview-block">
+                  <strong>Install PowerShell 7 on Ubuntu</strong>
+                  <p class="mini-copy">
+                    Source:
+                    <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu?view=powershell-7.6" target="_blank" rel="noopener noreferrer">
+                      Install PowerShell 7 on Ubuntu
+                    </a>
+                  </p>
+                  <pre class="command-block"><code>sudo apt-get update
+sudo apt-get install -y wget apt-transport-https software-properties-common
+source /etc/os-release
+wget -q https://packages.microsoft.com/config/ubuntu/$VERSION_ID/packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+rm packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install -y powershell
+pwsh</code></pre>
+                </div>
+
+                <div class="preview-block">
+                  <strong>Install and run Microsoft Zero Trust Assessment</strong>
+                  <p class="mini-copy">
+                    Source:
+                    <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/security/zero-trust/assessment/get-started" target="_blank" rel="noopener noreferrer">
+                      Get started with the Zero Trust Assessment
+                    </a>
+                  </p>
+                  <pre class="command-block"><code>Install-Module ZeroTrustAssessment -Scope CurrentUser
+Connect-ZtAssessment
+Invoke-ZtAssessment</code></pre>
+                  <p class="mini-copy">
+                    The assessment report contains sensitive tenant details. Store and share it only with authorized personnel.
+                  </p>
+                </div>
+
+                <div class="preview-block">
+                  <strong>Create trusted X.509 app-only certificate</strong>
+                  <p class="mini-copy">
+                    Generate a certificate on this Ubuntu server, trust it in the runtime service context, then download the `.cer` public key for Entra upload.
+                  </p>
+                  <div class="zero-trust-certificate-actions">
+                    <button class="ghost-button" type="button" id="zero-trust-certificate-generate">Generate certificate</button>
+                    <a class="ghost-button is-disabled" id="zero-trust-certificate-download" aria-disabled="true">Download public key (.cer)</a>
+                  </div>
+                  <p class="helper-note is-info" id="zero-trust-certificate-status">
+                    No app-only certificate has been generated from this page yet.
+                  </p>
+                  <p class="mini-copy" id="zero-trust-certificate-meta">
+                    Generate a certificate first, then download the `.cer` file and upload it in Entra app registration.
+                  </p>
+                </div>
+
+                <div class="preview-block">
+                  <strong>Microsoft Entra app-only setup directions</strong>
+                  <p class="mini-copy">
+                    Source:
+                    <a class="zero-trust-doc-link" href="https://learn.microsoft.com/en-us/powershell/microsoftgraph/app-only?view=graph-powershell-1.0" target="_blank" rel="noopener noreferrer">
+                      Use app-only authentication with Microsoft Graph PowerShell
+                    </a>
+                  </p>
+                  <div class="detail-stack" id="zero-trust-entra-directions">
+                    <div class="empty-state">Loading Entra setup steps...</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="zero-trust-tab-panel" data-zero-trust-panel="assessment" hidden>
+              <div class="preview-block">
+                <strong>Authentication mode</strong>
+                <p class="mini-copy">
+                  Choose delegated sign-in or app-only mode for non-interactive runs.
+                </p>
+                <form class="risk-form zero-trust-auth-form" id="zero-trust-auth-form">
+                  <div class="form-grid">
+                    <label class="form-field" for="zero-trust-auth-mode">
+                      <span>Mode</span>
+                      <select id="zero-trust-auth-mode" required>
+                        <option value="delegated">Delegated user sign-in</option>
+                        <option value="app_only">App-only (client credentials + certificate)</option>
+                      </select>
+                    </label>
+                    <label class="form-field toggle-row" for="zero-trust-use-device-code">
+                      <input id="zero-trust-use-device-code" type="checkbox">
+                      Use device code for delegated sign-in
+                    </label>
+                  </div>
+
+                  <div class="form-grid zero-trust-app-only-fields" id="zero-trust-app-only-fields" hidden>
+                    <label class="form-field" for="zero-trust-tenant-id">
+                      <span>Tenant ID</span>
+                      <input id="zero-trust-tenant-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    </label>
+                    <label class="form-field" for="zero-trust-client-id">
+                      <span>Client ID (App ID)</span>
+                      <input id="zero-trust-client-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    </label>
+                    <label class="form-field" for="zero-trust-certificate-reference">
+                      <span>Certificate reference</span>
+                      <input id="zero-trust-certificate-reference" type="text" placeholder="CN=ZeroTrustAssessment or thumbprint">
+                    </label>
+                  </div>
+
+                  <div class="form-actions">
+                    <button class="ghost-button" type="submit" id="zero-trust-auth-save">Save authentication settings</button>
+                  </div>
+                  <p class="helper-note" id="zero-trust-auth-status">
+                    Save settings before starting a run.
+                  </p>
+                </form>
+              </div>
+
+              <div class="panel-head zero-trust-actions-head">
+                <div>
+                  <p class="panel-kicker">Assessment runner</p>
+                  <h2>Run assessment and display report</h2>
+                </div>
+                <div class="panel-head-actions">
+                  <button class="ghost-button" type="button" id="zero-trust-refresh-trigger">Refresh status</button>
+                  <button class="ghost-button primary-button" type="button" id="zero-trust-run-trigger">Run now</button>
+                </div>
+              </div>
+
+              <p class="helper-note" id="zero-trust-action-status">
+                Weekly scheduling starts automatically after the first run.
+              </p>
+
+              <div class="detail-grid zero-trust-status-grid">
+                <div class="detail-card">
+                  <strong>Current status</strong>
+                  <div class="mini-copy" id="zero-trust-run-status">Not started.</div>
+                </div>
+                <div class="detail-card">
+                  <strong>Schedule</strong>
+                  <div class="mini-copy" id="zero-trust-schedule-status">No schedule yet.</div>
+                </div>
+                <div class="detail-card">
+                  <strong>Latest report</strong>
+                  <div class="mini-copy" id="zero-trust-report-status">No report generated yet.</div>
+                </div>
+                <div class="detail-card">
+                  <strong>Run output</strong>
+                  <div class="mini-copy" id="zero-trust-log-status">Log path appears after the first run.</div>
+                </div>
+              </div>
+
+              <div class="preview-block">
+                <strong>Recent runs</strong>
+                <div class="activity-list" id="zero-trust-history"></div>
+              </div>
+
+              <div class="preview-block">
+                <strong>Latest report viewer</strong>
+                <p class="mini-copy" id="zero-trust-report-note">
+                  The latest `ZeroTrustAssessmentReport.html` opens here after a successful run.
+                </p>
+                <div class="zero-trust-report-shell" id="zero-trust-report-shell">
+                  <iframe
+                    id="zero-trust-report-frame"
+                    title="Zero Trust Assessment Report"
+                    class="zero-trust-report-frame"
+                    loading="lazy"
+                    sandbox="allow-scripts"
+                    hidden
+                  ></iframe>
+                  <div class="empty-state" id="zero-trust-report-empty">
+                    No report to display yet. Run the assessment first.
+                  </div>
+                </div>
+              </div>
+            </section>
+          </article>
+        </section>
+      </main>
+    </section>
+  </div>
+  {% include "portal/_app_scripts.html" %}
+</body>
+</html>

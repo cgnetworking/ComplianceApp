@@ -47,6 +47,9 @@
     bindReviewEvents();
     bindReviewTaskEvents();
     bindRiskEvents();
+    if (typeof bindZeroTrustEvents === "function") {
+      bindZeroTrustEvents();
+    }
   }
   function bindSearchEvents() {
     if (!els.searchInput) {
@@ -653,6 +656,11 @@
         break;
       case "vendors":
         renderVendorsPage();
+        break;
+      case "zero-trust":
+        if (typeof renderZeroTrustPage === "function") {
+          renderZeroTrustPage();
+        }
         break;
       default:
         renderHomePage();

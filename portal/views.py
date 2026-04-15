@@ -8,9 +8,10 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 
@@ -33,6 +34,15 @@ from .services import (
     update_uploaded_policy_approver,
     update_review_state,
     user_is_policy_reader,
+)
+from .zero_trust_services import (
+    generate_zero_trust_certificate,
+    get_zero_trust_public_certificate_path,
+    get_latest_zero_trust_report_path,
+    get_zero_trust_assessment_payload,
+    start_zero_trust_assessment_run,
+    trigger_due_zero_trust_assessment_if_needed,
+    update_zero_trust_authentication,
 )
 
 
@@ -216,6 +226,12 @@ def vendors_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/vendors.html")
 
 
+@login_required(login_url="portal-login")
+@ensure_csrf_cookie
+def zero_trust_page(request: HttpRequest) -> HttpResponse:
+    return render_portal_page(request, "portal/zero_trust.html")
+
+
 def parse_json_body(request: HttpRequest) -> object:
     try:
         return json.loads(request.body.decode("utf-8") or "null")
@@ -228,7 +244,87 @@ def parse_json_body(request: HttpRequest) -> object:
 @ensure_csrf_cookie
 @require_GET
 def bootstrap_state(request: HttpRequest) -> JsonResponse:
+    if not user_is_policy_reader(request.user):
+        trigger_due_zero_trust_assessment_if_needed()
     return JsonResponse(get_bootstrap_payload(policy_reader=user_is_policy_reader(request.user)))
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_GET
+def zero_trust_assessment_status(request: HttpRequest) -> JsonResponse:
+    auto_run = str(request.GET.get("autoRun", "")).strip().lower() in {"1", "true", "yes", "on"}
+    payload = get_zero_trust_assessment_payload(auto_run_due=auto_run)
+    return JsonResponse({"zeroTrustAssessment": payload})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["PATCH", "PUT"])
+def zero_trust_assessment_authentication(request: HttpRequest) -> JsonResponse:
+    try:
+        body = parse_json_body(request)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    try:
+        payload = update_zero_trust_authentication(body)
+    except ValueError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    return JsonResponse({"zeroTrustAssessment": payload})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["POST"])
+def zero_trust_assessment_certificate(request: HttpRequest) -> JsonResponse:
+    try:
+        payload = generate_zero_trust_certificate()
+    except ValueError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    return JsonResponse({"zeroTrustAssessment": payload})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_GET
+def zero_trust_assessment_certificate_public_key(request: HttpRequest) -> HttpResponse:
+    certificate_path = get_zero_trust_public_certificate_path()
+    if certificate_path is None:
+        return JsonResponse({"detail": "No generated certificate is available yet."}, status=404)
+
+    response = FileResponse(
+        certificate_path.open("rb"),
+        content_type="application/pkix-cert",
+        as_attachment=True,
+        filename=certificate_path.name,
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["POST"])
+def zero_trust_assessment_run(request: HttpRequest) -> JsonResponse:
+    payload = start_zero_trust_assessment_run(trigger="manual")
+    return JsonResponse({"zeroTrustAssessment": payload}, status=202)
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@xframe_options_exempt
+@require_GET
+def zero_trust_assessment_report(request: HttpRequest) -> HttpResponse:
+    report_path = get_latest_zero_trust_report_path()
+    if report_path is None:
+        return JsonResponse({"detail": "No assessment report is available yet."}, status=404)
+
+    response = FileResponse(report_path.open("rb"), content_type="text/html")
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @api_login_required

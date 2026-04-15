@@ -352,6 +352,10 @@ a {
   grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
 }
 
+.page-grid-zero-trust {
+  grid-template-columns: 1fr;
+}
+
 .banner-panel {
   margin-bottom: 20px;
 }
@@ -1140,6 +1144,117 @@ tbody tr.is-selected {
 .form-actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.zero-trust-tabs {
+  margin-bottom: 16px;
+}
+
+.zero-trust-auth-form {
+  margin-top: 12px;
+}
+
+.zero-trust-auth-form .toggle-row {
+  min-height: 46px;
+  padding: 0 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+}
+
+.zero-trust-app-only-fields {
+  margin-top: 2px;
+}
+
+.zero-trust-directions {
+  padding-left: 20px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.zero-trust-directions li + li {
+  margin-top: 12px;
+}
+
+.zero-trust-directions strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.zero-trust-permission-list {
+  margin: 8px 0 0;
+}
+
+.zero-trust-permission-list li {
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.zero-trust-certificate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.zero-trust-certificate-actions .ghost-button.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.zero-trust-tab-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.zero-trust-tab-panel[hidden] {
+  display: none !important;
+}
+
+.zero-trust-doc-link {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.command-block {
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--text);
+  overflow: auto;
+}
+
+.command-block code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  white-space: pre;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.zero-trust-actions-head {
+  margin-bottom: 12px;
+}
+
+.zero-trust-status-grid,
+.zero-trust-prereq-grid {
+  margin-top: 2px;
+}
+
+.zero-trust-report-shell {
+  margin-top: 12px;
+}
+
+.zero-trust-report-frame {
+  inline-size: 100%;
+  min-block-size: 680px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
 }
 
 .risk-level-grid {

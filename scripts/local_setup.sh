@@ -17,6 +17,9 @@ NGINX_PRIMARY_SERVER_NAME=""
 NGINX_SSL_CERT_PATH=""
 NGINX_SSL_KEY_PATH=""
 GUNICORN_SERVICE_UNITS=""
+GUNICORN_RUNTIME_USER=""
+GUNICORN_RUNTIME_GROUP=""
+GUNICORN_ENV_FILE=""
 APP_HEALTHCHECK_URL=""
 CREATE_SELF_SIGNED_CERT="false"
 PG_SERVICE_FORMULA=""
@@ -503,10 +506,15 @@ setup_gunicorn_systemd_service() {
   local service_name=""
   local service_unit=""
   local service_path=""
-  local service_user="${LOCAL_SETUP_GUNICORN_USER:-${SUDO_USER:-$(id -un)}}"
+  local service_user="${LOCAL_SETUP_GUNICORN_USER:-complianceapp}"
   local service_group="${LOCAL_SETUP_GUNICORN_GROUP:-}"
   local service_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
   local service_workers="${LOCAL_SETUP_GUNICORN_WORKERS:-3}"
+  local nologin_shell="/usr/sbin/nologin"
+  local managed_env_dir="/etc/complianceapp"
+  local managed_env_file=""
+  local managed_env_name=""
+  local user_home=""
   local tmp_file=""
   local -a parsed_names=()
   local -a service_units=()
@@ -516,23 +524,50 @@ setup_gunicorn_systemd_service() {
     return
   fi
 
-  if ! id "$service_user" >/dev/null 2>&1; then
-    echo "Cannot create Gunicorn service: user '$service_user' does not exist." >&2
-    exit 1
-  fi
-
-  if [ -z "$service_group" ]; then
-    service_group="$(id -gn "$service_user" 2>/dev/null || true)"
-  fi
-  if [ -z "$service_group" ]; then
-    service_group="$service_user"
-  fi
-
   if [ ! -x "$VENV_DIR/bin/gunicorn" ]; then
     echo "Gunicorn executable not found at $VENV_DIR/bin/gunicorn." >&2
     echo "Ensure dependencies are installed in the virtual environment and rerun." >&2
     exit 1
   fi
+
+  if [ -z "$service_group" ]; then
+    if id "$service_user" >/dev/null 2>&1; then
+      service_group="$(id -gn "$service_user" 2>/dev/null || true)"
+    fi
+    if [ -z "$service_group" ]; then
+      service_group="$service_user"
+    fi
+  fi
+
+  if [ ! -x "$nologin_shell" ] && [ -x "/sbin/nologin" ]; then
+    nologin_shell="/sbin/nologin"
+  elif [ ! -x "$nologin_shell" ] && [ -x "/usr/bin/false" ]; then
+    nologin_shell="/usr/bin/false"
+  fi
+
+  if ! getent group "$service_group" >/dev/null 2>&1; then
+    log "Creating Gunicorn runtime group: $service_group"
+    run_as_root groupadd --system "$service_group"
+  fi
+
+  if ! id "$service_user" >/dev/null 2>&1; then
+    user_home="/var/lib/$service_user"
+    log "Creating Gunicorn runtime user: $service_user"
+    run_as_root useradd --system --home-dir "$user_home" --create-home --shell "$nologin_shell" --gid "$service_group" "$service_user"
+  elif [ -n "${LOCAL_SETUP_GUNICORN_GROUP:-}" ]; then
+    if ! id -nG "$service_user" | tr ' ' '\n' | grep -Fx "$service_group" >/dev/null 2>&1; then
+      log "Adding $service_user to group $service_group"
+      run_as_root usermod -a -G "$service_group" "$service_user"
+    fi
+  fi
+
+  # Runtime account must remain non-interactive and unavailable for human login.
+  run_as_root usermod --shell "$nologin_shell" --lock "$service_user"
+
+  managed_env_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')"
+  managed_env_file="$managed_env_dir/${managed_env_name}.env"
+  run_as_root install -d -m 0750 -o root -g "$service_group" "$managed_env_dir"
+  run_as_root install -m 0640 -o root -g "$service_group" "$ENV_FILE" "$managed_env_file"
 
   default_service_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')-gunicorn"
   service_names_raw="${LOCAL_SETUP_GUNICORN_SERVICE_NAMES:-${LOCAL_SETUP_GUNICORN_SERVICE_NAME:-$default_service_name}}"
@@ -564,7 +599,7 @@ Type=simple
 User=$service_user
 Group=$service_group
 WorkingDirectory=$ROOT_DIR
-EnvironmentFile=$ENV_FILE
+EnvironmentFile=$managed_env_file
 ExecStart=$VENV_DIR/bin/gunicorn --chdir $ROOT_DIR portal_backend.wsgi:application --bind $service_bind --workers $service_workers --access-logfile - --error-logfile -
 Restart=always
 RestartSec=5
@@ -598,6 +633,9 @@ EOF
   done
 
   GUNICORN_SERVICE_UNITS="${service_units[*]}"
+  GUNICORN_RUNTIME_USER="$service_user"
+  GUNICORN_RUNTIME_GROUP="$service_group"
+  GUNICORN_ENV_FILE="$managed_env_file"
 }
 
 ensure_python_venv() {
@@ -1120,6 +1158,11 @@ echo
 echo "Local setup complete."
 echo "Activate the environment with: source \"$VENV_DIR/bin/activate\""
 echo "Gunicorn service units: ${GUNICORN_SERVICE_UNITS:-none}"
+echo "Gunicorn runtime user: ${GUNICORN_RUNTIME_USER:-none}"
+echo "Gunicorn runtime group: ${GUNICORN_RUNTIME_GROUP:-none}"
+if [ -n "$GUNICORN_ENV_FILE" ]; then
+  echo "Gunicorn environment file: $GUNICORN_ENV_FILE"
+fi
 if [ -n "$APP_HEALTHCHECK_URL" ]; then
   echo "Application readiness URL: $APP_HEALTHCHECK_URL"
 fi
