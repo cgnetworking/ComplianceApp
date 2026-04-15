@@ -20,6 +20,8 @@ GUNICORN_SERVICE_UNITS=""
 GUNICORN_RUNTIME_USER=""
 GUNICORN_RUNTIME_GROUP=""
 GUNICORN_ENV_FILE=""
+GUNICORN_RUNTIME_APP_DIR=""
+GUNICORN_RUNTIME_VENV_DIR=""
 APP_HEALTHCHECK_URL=""
 CREATE_SELF_SIGNED_CERT="false"
 PG_SERVICE_FORMULA=""
@@ -499,6 +501,79 @@ create_self_signed_nginx_cert() {
   run_as_root chmod 644 "$NGINX_SSL_CERT_PATH"
 }
 
+ensure_rsync_installed() {
+  local manager=""
+
+  if command -v rsync >/dev/null 2>&1; then
+    return
+  fi
+
+  manager="$(detect_package_manager)"
+  case "$manager" in
+    apt)
+      log "Installing rsync"
+      run_as_root apt-get update
+      run_as_root apt-get install -y rsync
+      ;;
+    dnf)
+      log "Installing rsync"
+      run_as_root dnf install -y rsync
+      ;;
+    yum)
+      log "Installing rsync"
+      run_as_root yum install -y rsync
+      ;;
+    pacman)
+      log "Installing rsync"
+      run_as_root pacman -Sy --noconfirm rsync
+      ;;
+    *)
+      echo "rsync is required to stage the runtime app bundle." >&2
+      echo "Install rsync and rerun setup." >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v rsync >/dev/null 2>&1; then
+    echo "rsync is unavailable after attempted install." >&2
+    echo "Install rsync and rerun setup." >&2
+    exit 1
+  fi
+}
+
+sync_runtime_app_bundle() {
+  local source_root="$1"
+  local deploy_root="$2"
+  local deploy_app_dir="$3"
+  local deploy_venv_dir="$4"
+
+  ensure_rsync_installed
+
+  log "Syncing runtime app bundle to $deploy_app_dir"
+  run_as_root install -d -m 0755 -o root -g root "$deploy_root" "$deploy_app_dir"
+  run_as_root rsync -a --delete \
+    --exclude ".git/" \
+    --exclude ".venv/" \
+    --exclude ".env" \
+    --exclude "__pycache__/" \
+    --exclude "*.pyc" \
+    --exclude ".pytest_cache/" \
+    "$source_root"/ "$deploy_app_dir"/
+
+  if [ ! -x "$deploy_venv_dir/bin/python" ]; then
+    log "Creating runtime virtual environment at $deploy_venv_dir"
+    run_as_root "$PYTHON_BIN" -m venv "$deploy_venv_dir"
+  fi
+
+  log "Installing runtime dependencies in $deploy_venv_dir"
+  run_as_root "$deploy_venv_dir/bin/python" -m pip install --upgrade pip
+  run_as_root "$deploy_venv_dir/bin/python" -m pip install -r "$deploy_app_dir/requirements.txt"
+
+  run_as_root chown -R root:root "$deploy_app_dir" "$deploy_venv_dir"
+  run_as_root chmod -R a+rX "$deploy_app_dir" "$deploy_venv_dir"
+  run_as_root chmod -R go-w "$deploy_app_dir" "$deploy_venv_dir"
+}
+
 setup_gunicorn_systemd_service() {
   local default_service_name
   local service_names_raw
@@ -510,6 +585,9 @@ setup_gunicorn_systemd_service() {
   local service_group="${LOCAL_SETUP_GUNICORN_GROUP:-}"
   local service_bind="${LOCAL_SETUP_GUNICORN_BIND:-127.0.0.1:8000}"
   local service_workers="${LOCAL_SETUP_GUNICORN_WORKERS:-3}"
+  local service_app_root="${LOCAL_SETUP_GUNICORN_APP_ROOT:-/opt/complianceapp}"
+  local service_working_dir=""
+  local service_venv_dir=""
   local nologin_shell="/usr/sbin/nologin"
   local managed_env_dir="/etc/complianceapp"
   local managed_env_file=""
@@ -524,11 +602,16 @@ setup_gunicorn_systemd_service() {
     return
   fi
 
-  if [ ! -x "$VENV_DIR/bin/gunicorn" ]; then
-    echo "Gunicorn executable not found at $VENV_DIR/bin/gunicorn." >&2
-    echo "Ensure dependencies are installed in the virtual environment and rerun." >&2
+  service_app_root="${service_app_root%/}"
+  if [ -z "$service_app_root" ]; then
+    service_app_root="/opt/complianceapp"
+  fi
+  if [[ "$service_app_root" != /* ]]; then
+    echo "LOCAL_SETUP_GUNICORN_APP_ROOT must be an absolute path." >&2
     exit 1
   fi
+  service_working_dir="$service_app_root/app"
+  service_venv_dir="$service_app_root/venv"
 
   if [ -z "$service_group" ]; then
     if id "$service_user" >/dev/null 2>&1; then
@@ -564,6 +647,19 @@ setup_gunicorn_systemd_service() {
   # Runtime account must remain non-interactive and unavailable for human login.
   run_as_root usermod --shell "$nologin_shell" --lock "$service_user"
 
+  sync_runtime_app_bundle "$ROOT_DIR" "$service_app_root" "$service_working_dir" "$service_venv_dir"
+
+  if command -v runuser >/dev/null 2>&1; then
+    if ! run_as_root runuser -u "$service_user" -- test -x "$service_working_dir"; then
+      echo "Runtime user '$service_user' cannot access $service_working_dir." >&2
+      exit 1
+    fi
+    if ! run_as_root runuser -u "$service_user" -- test -x "$service_venv_dir/bin/gunicorn"; then
+      echo "Runtime user '$service_user' cannot execute $service_venv_dir/bin/gunicorn." >&2
+      exit 1
+    fi
+  fi
+
   managed_env_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')"
   managed_env_file="$managed_env_dir/${managed_env_name}.env"
   run_as_root install -d -m 0750 -o root -g "$service_group" "$managed_env_dir"
@@ -598,9 +694,9 @@ After=network.target
 Type=simple
 User=$service_user
 Group=$service_group
-WorkingDirectory=$ROOT_DIR
+WorkingDirectory=$service_working_dir
 EnvironmentFile=$managed_env_file
-ExecStart=$VENV_DIR/bin/gunicorn --chdir $ROOT_DIR portal_backend.wsgi:application --bind $service_bind --workers $service_workers --access-logfile - --error-logfile -
+ExecStart=$service_venv_dir/bin/gunicorn --chdir $service_working_dir portal_backend.wsgi:application --bind $service_bind --workers $service_workers --access-logfile - --error-logfile -
 Restart=always
 RestartSec=5
 
@@ -636,6 +732,8 @@ EOF
   GUNICORN_RUNTIME_USER="$service_user"
   GUNICORN_RUNTIME_GROUP="$service_group"
   GUNICORN_ENV_FILE="$managed_env_file"
+  GUNICORN_RUNTIME_APP_DIR="$service_working_dir"
+  GUNICORN_RUNTIME_VENV_DIR="$service_venv_dir"
 }
 
 ensure_python_venv() {
@@ -1162,6 +1260,12 @@ echo "Gunicorn runtime user: ${GUNICORN_RUNTIME_USER:-none}"
 echo "Gunicorn runtime group: ${GUNICORN_RUNTIME_GROUP:-none}"
 if [ -n "$GUNICORN_ENV_FILE" ]; then
   echo "Gunicorn environment file: $GUNICORN_ENV_FILE"
+fi
+if [ -n "$GUNICORN_RUNTIME_APP_DIR" ]; then
+  echo "Gunicorn runtime app dir: $GUNICORN_RUNTIME_APP_DIR"
+fi
+if [ -n "$GUNICORN_RUNTIME_VENV_DIR" ]; then
+  echo "Gunicorn runtime venv dir: $GUNICORN_RUNTIME_VENV_DIR"
 fi
 if [ -n "$APP_HEALTHCHECK_URL" ]; then
   echo "Application readiness URL: $APP_HEALTHCHECK_URL"
