@@ -151,6 +151,7 @@
           frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
           startDate: normalizeChecklistStartDate(item.startDate),
           owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
+          createdAt: normalizeChecklistCreatedAt(item.createdAt),
         };
       })
       .filter(Boolean);
@@ -722,6 +723,14 @@
   function normalizeChecklistStartDate(value) {
     const parts = parseChecklistDateParts(value);
     return parts ? parts.isoDate : "";
+  }
+  function normalizeChecklistCreatedAt(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) {
+      return "";
+    }
+    const parsed = parseDisplayDateValue(raw);
+    return parsed ? raw : "";
   }
   function parseChecklistDateParts(value) {
     const normalized = String(value || "").trim();

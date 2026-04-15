@@ -22,6 +22,7 @@
           frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
           startDate: typeof normalizeChecklistStartDate === "function" ? normalizeChecklistStartDate(item.startDate) : "",
           owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
+          createdAt: typeof normalizeChecklistCreatedAt === "function" ? normalizeChecklistCreatedAt(item.createdAt) : "",
         };
       })
       .filter(Boolean);

@@ -25,7 +25,7 @@ from .models import (
 
 
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
-SUPPORTED_MAPPING_EXTENSIONS = {"json"}
+SUPPORTED_MAPPING_EXTENSIONS = {"json", "csv"}
 TEXT_VENDOR_EXTENSIONS = {"csv", "json", "txt", "md", "markdown", "html", "htm", "xml"}
 BLOCKED_TAGS_RE = re.compile(
     r"<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>.*?<\s*/\s*\1\s*>",
@@ -49,6 +49,37 @@ ANNEX_A_CONTROL_DOMAIN_BY_FAMILY = {
     "8": "Technological",
 }
 ALLOWED_CONTROL_APPLICABILITY = {"Applicable", "Excluded"}
+CSV_CONTROL_ID_FIELDS = (
+    "controlid",
+    "id",
+    "control",
+    "controlnumber",
+    "annexacontrol",
+)
+CSV_CONTROL_NAME_FIELDS = ("controlname", "name", "controltitle")
+CSV_CONTROL_DOMAIN_FIELDS = ("controldomain", "domain")
+CSV_CONTROL_APPLICABILITY_FIELDS = ("controlapplicability", "applicability", "status")
+CSV_CONTROL_IMPLEMENTATION_FIELDS = ("controlimplementationmodel", "implementationmodel", "implementation")
+CSV_CONTROL_OWNER_FIELDS = ("controlowner", "owner")
+CSV_CONTROL_REVIEW_FREQUENCY_FIELDS = ("controlreviewfrequency", "reviewfrequency", "frequency")
+CSV_DOCUMENT_IDS_FIELDS = (
+    "policydocumentids",
+    "documentids",
+    "policyids",
+    "documents",
+    "mappedpolicies",
+    "mappeddocuments",
+)
+CSV_DOCUMENT_ID_FIELDS = ("policydocumentid", "documentid", "policyid")
+CSV_PREFERRED_DOCUMENT_ID_FIELDS = ("preferreddocumentid", "primarydocumentid", "defaultdocumentid")
+CSV_DOCUMENT_TITLE_FIELDS = ("documenttitle", "policytitle", "doctitle")
+CSV_DOCUMENT_TYPE_FIELDS = ("documenttype", "policytype")
+CSV_DOCUMENT_OWNER_FIELDS = ("documentowner", "policyowner")
+CSV_DOCUMENT_APPROVER_FIELDS = ("documentapprover", "policyapprover", "approver")
+CSV_DOCUMENT_REVIEW_FREQUENCY_FIELDS = ("documentreviewfrequency", "policyreviewfrequency")
+CSV_DOCUMENT_PATH_FIELDS = ("documentpath", "policypath")
+CSV_DOCUMENT_FOLDER_FIELDS = ("documentfolder", "policyfolder")
+CSV_DOCUMENT_PURPOSE_FIELDS = ("documentpurpose", "policypurpose")
 
 
 class ValidationError(Exception):
@@ -407,23 +438,191 @@ def normalize_mapping_payload(payload: object) -> dict[str, object]:
     return normalized_payload
 
 
-def parse_mapping_text(raw_text: str) -> object:
+def normalize_csv_column_name(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def mapping_csv_lookup(row: dict[str, str], field_names: tuple[str, ...]) -> str:
+    for field_name in field_names:
+        candidate = normalize_string(row.get(field_name))
+        if candidate:
+            return candidate
+    return ""
+
+
+def split_mapping_csv_values(raw_value: str) -> list[str]:
+    candidates = re.split(r"[\n,;|]+", str(raw_value))
+    deduped: list[str] = []
+    for candidate in candidates:
+        normalized = normalize_string(candidate)
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped
+
+
+def ensure_mapping_document_record(document_id: str, records: dict[str, dict[str, object]]) -> dict[str, object]:
+    existing = records.get(document_id)
+    if existing is not None:
+        return existing
+
+    created = {
+        "id": document_id,
+        "title": "",
+        "type": "",
+        "owner": "",
+        "approver": "",
+        "reviewFrequency": "",
+        "path": "",
+        "folder": "",
+        "purpose": "",
+        "contentHtml": "",
+        "isUploaded": False,
+        "originalFilename": "",
+    }
+    records[document_id] = created
+    return created
+
+
+def set_if_empty(item: dict[str, object], key: str, value: str) -> None:
+    if value and not normalize_string(item.get(key)):
+        item[key] = value
+
+
+def parse_mapping_csv_text(value: str) -> dict[str, object]:
+    reader = csv.DictReader(io.StringIO(value))
+    if not reader.fieldnames:
+        raise ValidationError("Uploaded mapping CSV must include a header row.")
+
+    normalized_headers = {
+        normalize_csv_column_name(header)
+        for header in reader.fieldnames
+        if normalize_csv_column_name(header)
+    }
+    if not normalized_headers.intersection(CSV_CONTROL_ID_FIELDS):
+        raise ValidationError("Uploaded mapping CSV must include a control id column (for example: control_id or id).")
+
+    controls_by_id: dict[str, dict[str, object]] = {}
+    documents_by_id: dict[str, dict[str, object]] = {}
+    parsed_rows = 0
+
+    for raw_row in reader:
+        row = {
+            normalize_csv_column_name(key): normalize_string(raw_value)
+            for key, raw_value in raw_row.items()
+            if normalize_csv_column_name(key)
+        }
+        if not any(row.values()):
+            continue
+        parsed_rows += 1
+
+        document_ids: list[str] = []
+        for field_name in CSV_DOCUMENT_IDS_FIELDS:
+            for value_item in split_mapping_csv_values(row.get(field_name, "")):
+                if value_item not in document_ids:
+                    document_ids.append(value_item)
+
+        singular_document_id = mapping_csv_lookup(row, CSV_DOCUMENT_ID_FIELDS)
+        if singular_document_id and singular_document_id not in document_ids:
+            document_ids.append(singular_document_id)
+
+        preferred_document_id = mapping_csv_lookup(row, CSV_PREFERRED_DOCUMENT_ID_FIELDS)
+        if preferred_document_id and preferred_document_id not in document_ids:
+            document_ids.append(preferred_document_id)
+
+        control_id = mapping_csv_lookup(row, CSV_CONTROL_ID_FIELDS)
+        if control_id:
+            control = controls_by_id.get(control_id)
+            if control is None:
+                control = {
+                    "id": control_id,
+                    "name": mapping_csv_lookup(row, CSV_CONTROL_NAME_FIELDS),
+                    "domain": mapping_csv_lookup(row, CSV_CONTROL_DOMAIN_FIELDS),
+                    "applicability": mapping_csv_lookup(row, CSV_CONTROL_APPLICABILITY_FIELDS),
+                    "implementationModel": mapping_csv_lookup(row, CSV_CONTROL_IMPLEMENTATION_FIELDS),
+                    "owner": mapping_csv_lookup(row, CSV_CONTROL_OWNER_FIELDS),
+                    "reviewFrequency": mapping_csv_lookup(row, CSV_CONTROL_REVIEW_FREQUENCY_FIELDS),
+                    "documentIds": [],
+                    "policyDocumentIds": [],
+                    "preferredDocumentId": preferred_document_id,
+                }
+                controls_by_id[control_id] = control
+            else:
+                set_if_empty(control, "name", mapping_csv_lookup(row, CSV_CONTROL_NAME_FIELDS))
+                set_if_empty(control, "domain", mapping_csv_lookup(row, CSV_CONTROL_DOMAIN_FIELDS))
+                set_if_empty(control, "applicability", mapping_csv_lookup(row, CSV_CONTROL_APPLICABILITY_FIELDS))
+                set_if_empty(control, "implementationModel", mapping_csv_lookup(row, CSV_CONTROL_IMPLEMENTATION_FIELDS))
+                set_if_empty(control, "owner", mapping_csv_lookup(row, CSV_CONTROL_OWNER_FIELDS))
+                set_if_empty(control, "reviewFrequency", mapping_csv_lookup(row, CSV_CONTROL_REVIEW_FREQUENCY_FIELDS))
+                if preferred_document_id:
+                    control["preferredDocumentId"] = preferred_document_id
+
+            control_document_ids = control["documentIds"] if isinstance(control.get("documentIds"), list) else []
+            for document_id in document_ids:
+                if document_id not in control_document_ids:
+                    control_document_ids.append(document_id)
+            control["documentIds"] = control_document_ids
+            control["policyDocumentIds"] = list(control_document_ids)
+
+        for document_id in document_ids:
+            ensure_mapping_document_record(document_id, documents_by_id)
+
+        metadata_document_id = singular_document_id or (document_ids[0] if len(document_ids) == 1 else "")
+        if metadata_document_id:
+            document = ensure_mapping_document_record(metadata_document_id, documents_by_id)
+            set_if_empty(document, "title", mapping_csv_lookup(row, CSV_DOCUMENT_TITLE_FIELDS))
+            set_if_empty(document, "type", mapping_csv_lookup(row, CSV_DOCUMENT_TYPE_FIELDS))
+            set_if_empty(document, "owner", mapping_csv_lookup(row, CSV_DOCUMENT_OWNER_FIELDS))
+            set_if_empty(document, "approver", mapping_csv_lookup(row, CSV_DOCUMENT_APPROVER_FIELDS))
+            set_if_empty(document, "reviewFrequency", mapping_csv_lookup(row, CSV_DOCUMENT_REVIEW_FREQUENCY_FIELDS))
+            set_if_empty(document, "path", mapping_csv_lookup(row, CSV_DOCUMENT_PATH_FIELDS))
+            set_if_empty(document, "folder", mapping_csv_lookup(row, CSV_DOCUMENT_FOLDER_FIELDS))
+            set_if_empty(document, "purpose", mapping_csv_lookup(row, CSV_DOCUMENT_PURPOSE_FIELDS))
+
+    if not parsed_rows:
+        raise ValidationError("Uploaded mapping CSV is empty.")
+    if not controls_by_id:
+        raise ValidationError("Uploaded mapping CSV must include at least one control row.")
+
+    for control in controls_by_id.values():
+        document_ids = normalize_string_list(control.get("documentIds"))
+        preferred_document_id = normalize_string(control.get("preferredDocumentId"))
+        if preferred_document_id and preferred_document_id not in document_ids:
+            document_ids.append(preferred_document_id)
+        if not preferred_document_id and document_ids:
+            preferred_document_id = document_ids[0]
+
+        control["documentIds"] = document_ids
+        control["policyDocumentIds"] = list(document_ids)
+        control["preferredDocumentId"] = preferred_document_id
+        for document_id in document_ids:
+            ensure_mapping_document_record(document_id, documents_by_id)
+
+    return {
+        "controls": list(controls_by_id.values()),
+        "documents": list(documents_by_id.values()),
+    }
+
+
+def parse_mapping_text(raw_text: str, extension: str) -> object:
     value = str(raw_text).strip().lstrip("\ufeff")
     if not value:
         raise ValidationError("Uploaded mapping file is empty.")
 
+    if extension == "csv":
+        return parse_mapping_csv_text(value)
+
     try:
         return json.loads(value)
     except json.JSONDecodeError as error:
-        raise ValidationError("Uploaded mapping must be valid JSON.") from error
+        raise ValidationError("Uploaded mapping must be valid JSON when using a .json file.") from error
 
 
 def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
     extension = file_extension(file.name)
     if extension not in SUPPORTED_MAPPING_EXTENSIONS:
-        raise ValidationError("Upload a JSON mapping file (.json).")
+        raise ValidationError("Upload a JSON or CSV mapping file (.json, .csv).")
 
-    parsed_payload = parse_mapping_text(decode_upload(file))
+    parsed_payload = parse_mapping_text(decode_upload(file), extension)
     normalized_payload = normalize_mapping_payload(parsed_payload)
     set_state_payload("mapping_state", normalized_payload)
     return normalized_payload

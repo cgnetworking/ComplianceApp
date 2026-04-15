@@ -15,7 +15,7 @@ This repo includes a Django backend that persists portal uploads and workspace s
 
 After first deploy (or after clearing the database), load content in this order:
 
-1. Open Controls and upload a mapping JSON file (`.json`).
+1. Open Controls and upload a mapping file (`.json` or `.csv`).
 2. Open Policies and upload policy source files (`.md`, `.txt`, `.html`).
 
 ## Authentication

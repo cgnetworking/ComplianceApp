@@ -146,6 +146,7 @@ class ReviewChecklistItem(models.Model):
             "frequency": self.frequency,
             "startDate": self.start_date.isoformat() if self.start_date else "",
             "owner": self.owner,
+            "createdAt": self.created_at.isoformat(),
         }
 
 

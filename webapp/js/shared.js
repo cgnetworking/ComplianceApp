@@ -149,8 +149,7 @@
       if (addMapping) {
         const controlId = addMapping.dataset.controlPolicyAdd;
         const mapper = addMapping.closest("[data-control-policy-mapper]");
-        const select = mapper ? mapper.querySelector("[data-control-policy-select]") : null;
-        const documentId = select ? select.value : "";
+        const documentId = resolveControlPolicyPickerDocumentId(controlId, mapper);
         if (!controlId || !documentId) {
           return;
         }
@@ -177,13 +176,9 @@
     });
 
     els.controlDetail.addEventListener("change", (event) => {
-      const policySelect = event.target.closest("[data-control-policy-select]");
-      if (policySelect) {
-        const mapper = policySelect.closest("[data-control-policy-mapper]");
-        const addButton = mapper ? mapper.querySelector("[data-control-policy-add]") : null;
-        if (addButton) {
-          addButton.disabled = !policySelect.value;
-        }
+      const policyInput = event.target.closest("[data-control-policy-input]");
+      if (policyInput) {
+        handleControlPolicyPickerInputChanged();
         return;
       }
 
@@ -226,6 +221,12 @@
     });
 
     els.controlDetail.addEventListener("input", (event) => {
+      const policyInput = event.target.closest("[data-control-policy-input]");
+      if (policyInput) {
+        handleControlPolicyPickerInputChanged();
+        return;
+      }
+
       const reason = event.target.closest("[data-exclusion-reason]");
       if (!reason) {
         return;
@@ -1004,7 +1005,7 @@
     }
     if (els.mappingUploadStatus) {
       els.mappingUploadStatus.textContent = isApiPersistence()
-        ? "Upload an optional mapping JSON file (.json), or map policies manually from Controls and Policies."
+        ? "Upload an optional mapping file (.json or .csv), or map policies manually from Controls and Policies."
         : "Map policies manually from Controls and Policies. Mapping upload requires API mode.";
     }
   }
