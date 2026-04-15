@@ -4,6 +4,33 @@ import os
 from pathlib import Path
 
 
+def _decode_env_value(raw_value: str) -> str:
+    if len(raw_value) < 2:
+        return raw_value
+
+    quote = raw_value[0]
+    if quote not in {"'", '"'} or raw_value[-1] != quote:
+        return raw_value
+
+    inner = raw_value[1:-1]
+    if quote == "'":
+        return inner
+
+    decoded = []
+    idx = 0
+    while idx < len(inner):
+        char = inner[idx]
+        if char == "\\" and idx + 1 < len(inner):
+            escaped = inner[idx + 1]
+            if escaped in {'\\', '"', '$', '`'}:
+                decoded.append(escaped)
+                idx += 2
+                continue
+        decoded.append(char)
+        idx += 1
+    return "".join(decoded)
+
+
 def load_dotenv(dotenv_path: Path | None = None) -> None:
     env_path = dotenv_path or Path(__file__).resolve().parent.parent / ".env"
     if not env_path.exists():
@@ -24,7 +51,6 @@ def load_dotenv(dotenv_path: Path | None = None) -> None:
         if not key or key in os.environ:
             continue
 
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
+        value = _decode_env_value(value)
 
         os.environ[key] = value

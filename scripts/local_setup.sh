@@ -713,6 +713,33 @@ env_path = Path(sys.argv[1])
 target_key = sys.argv[2]
 value = ""
 
+
+def decode_env_value(raw_value: str) -> str:
+    if len(raw_value) < 2:
+        return raw_value
+
+    quote = raw_value[0]
+    if quote not in {"'", '"'} or raw_value[-1] != quote:
+        return raw_value
+
+    inner = raw_value[1:-1]
+    if quote == "'":
+        return inner
+
+    decoded = []
+    idx = 0
+    while idx < len(inner):
+        char = inner[idx]
+        if char == "\\" and idx + 1 < len(inner):
+            escaped = inner[idx + 1]
+            if escaped in {'\\', '"', '$', '`'}:
+                decoded.append(escaped)
+                idx += 2
+                continue
+        decoded.append(char)
+        idx += 1
+    return "".join(decoded)
+
 if env_path.exists():
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -728,8 +755,7 @@ if env_path.exists():
         parsed_value = parsed_value.strip()
         if key != target_key:
             continue
-        if len(parsed_value) >= 2 and parsed_value[0] == parsed_value[-1] and parsed_value[0] in {"'", '"'}:
-            parsed_value = parsed_value[1:-1]
+        parsed_value = decode_env_value(parsed_value)
         value = parsed_value
 
 print(value, end="")
@@ -746,7 +772,19 @@ import sys
 env_path = Path(sys.argv[1])
 target_key = sys.argv[2]
 target_value = sys.argv[3]
-replacement = f"{target_key}={target_value}"
+
+
+def quote_env_value(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
+    return f'"{escaped}"'
+
+
+replacement = f"{target_key}={quote_env_value(target_value)}"
 
 lines = []
 replaced = False
@@ -1046,8 +1084,10 @@ fi
 
 if [ -z "$DATABASE_PASSWORD" ]; then
   prompt_for_database_password
-  upsert_env_var DATABASE_PASSWORD "$DATABASE_PASSWORD"
 fi
+
+# Normalize quoting/escaping so shells, systemd, and Python loaders read the same value.
+upsert_env_var DATABASE_PASSWORD "$DATABASE_PASSWORD"
 
 mapfile -t DB_FIELDS < <(parse_database_url "$DATABASE_URL")
 if [ "${#DB_FIELDS[@]}" -ne 3 ]; then
