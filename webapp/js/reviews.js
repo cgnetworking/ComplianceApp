@@ -166,96 +166,76 @@
     const existingSignatures = new Set(getAllChecklistItems().map((item) => checklistSignature(item)));
     return getRecommendedChecklistItems().filter((item) => !existingSignatures.has(checklistSignature(item)));
   }
-  function resetRecommendationTypeahead() {
-    recommendationTypeaheadState.query = "";
-    if (recommendationTypeaheadState.resetHandle) {
-      window.clearTimeout(recommendationTypeaheadState.resetHandle);
-      recommendationTypeaheadState.resetHandle = null;
-    }
+  function checklistRecommendationDatalist() {
+    return document.getElementById("checklist-recommendation-options");
   }
-  function scheduleRecommendationTypeaheadReset() {
-    if (recommendationTypeaheadState.resetHandle) {
-      window.clearTimeout(recommendationTypeaheadState.resetHandle);
-    }
-    recommendationTypeaheadState.resetHandle = window.setTimeout(() => {
-      recommendationTypeaheadState.query = "";
-      recommendationTypeaheadState.resetHandle = null;
-    }, 900);
+  function checklistRecommendationLabel(item) {
+    return `${item.item} (${item.frequency} / ${item.owner})`;
   }
-  function bindChecklistRecommendationTypeahead() {
-    if (!els.checklistRecommendationSelect || els.checklistRecommendationSelect.dataset.typeaheadBound) {
-      return;
+  function normalizeRecommendationQuery(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+  function filteredChecklistRecommendations(recommendations, query) {
+    const normalizedQuery = normalizeRecommendationQuery(query);
+    if (!normalizedQuery) {
+      return recommendations;
     }
-    els.checklistRecommendationSelect.dataset.typeaheadBound = "true";
-    els.checklistRecommendationSelect.addEventListener("keydown", (event) => {
-      if (!els.checklistRecommendationSelect || event.ctrlKey || event.metaKey || event.altKey) {
-        return;
-      }
+    return recommendations.filter((item) => item.item.toLowerCase().includes(normalizedQuery));
+  }
+  function findChecklistRecommendationByInputValue(rawValue, exactOnly = false) {
+    const normalizedValue = normalizeRecommendationQuery(rawValue);
+    if (!normalizedValue) {
+      return null;
+    }
 
-      if (event.key === "Escape") {
-        resetRecommendationTypeahead();
-        return;
-      }
-
-      if (event.key === "Backspace") {
-        recommendationTypeaheadState.query = recommendationTypeaheadState.query.slice(0, -1);
-      } else if (event.key.length === 1) {
-        recommendationTypeaheadState.query += event.key.toLowerCase();
-      } else {
-        return;
-      }
-
-      const query = recommendationTypeaheadState.query.trim();
-      scheduleRecommendationTypeaheadReset();
-      if (!query) {
-        return;
-      }
-
-      const options = Array.from(els.checklistRecommendationSelect.options).filter((option) => option.value);
-      const match = options.find((option) => option.textContent.toLowerCase().includes(query));
-      if (!match) {
-        return;
-      }
-
-      els.checklistRecommendationSelect.value = match.value;
-      handleChecklistRecommendationSelected();
-      event.preventDefault();
-    });
+    const recommendations = availableChecklistRecommendations();
+    const exactLabelMatch = recommendations.find((item) => checklistRecommendationLabel(item).toLowerCase() === normalizedValue);
+    if (exactLabelMatch) {
+      return exactLabelMatch;
+    }
+    const exactItemMatch = recommendations.find((item) => item.item.toLowerCase() === normalizedValue);
+    if (exactItemMatch) {
+      return exactItemMatch;
+    }
+    if (exactOnly) {
+      return null;
+    }
+    return recommendations.find((item) => item.item.toLowerCase().includes(normalizedValue)) || null;
   }
   function renderChecklistRecommendationOptions() {
     if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
       return;
     }
 
-    bindChecklistRecommendationTypeahead();
+    const datalist = checklistRecommendationDatalist();
+    if (!datalist) {
+      return;
+    }
 
-    const recommendations = availableChecklistRecommendations();
-    const selectedValue = els.checklistRecommendationSelect.value;
-    const emptyOptionLabel = recommendations.length === 0
-      ? "No recommended tasks available"
-      : "Select a recommended task";
-    const options = [{ value: "", label: emptyOptionLabel }].concat(
-      recommendations.map((item) => ({
-        value: item.id,
-        label: `${item.item} (${item.frequency} / ${item.owner})`,
-      }))
-    );
+    const typedValue = els.checklistRecommendationSelect.value;
+    const allRecommendations = availableChecklistRecommendations();
+    const visibleRecommendations = filteredChecklistRecommendations(allRecommendations, typedValue);
 
-    els.checklistRecommendationSelect.innerHTML = options
-      .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    datalist.innerHTML = visibleRecommendations
+      .map((item) => `<option value="${escapeHtml(checklistRecommendationLabel(item))}"></option>`)
       .join("");
 
-    els.checklistRecommendationSelect.value = valueOrFallback(els.checklistRecommendationSelect, selectedValue || "");
-    els.checklistRecommendationSelect.disabled = recommendations.length === 0;
-    els.checklistRecommendationAdd.disabled = recommendations.length === 0 || !els.checklistRecommendationSelect.value;
+    const hasRecommendations = allRecommendations.length > 0;
+    els.checklistRecommendationSelect.disabled = !hasRecommendations;
+    els.checklistRecommendationSelect.placeholder = hasRecommendations
+      ? "Search recommended tasks"
+      : "No recommended tasks available";
+
+    const exactRecommendation = findChecklistRecommendationByInputValue(typedValue, true);
+    els.checklistRecommendationAdd.disabled = !hasRecommendations || !exactRecommendation;
   }
   function handleChecklistRecommendationSelected() {
     if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
       return;
     }
 
-    const selectedId = els.checklistRecommendationSelect.value;
-    const recommendation = getRecommendedChecklistItems().find((item) => item.id === selectedId);
+    renderChecklistRecommendationOptions();
+    const recommendation = findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value, true);
     els.checklistRecommendationAdd.disabled = !recommendation;
     if (!recommendation) {
       return;
@@ -375,7 +355,6 @@
     if (els.checklistRecommendationAdd) {
       els.checklistRecommendationAdd.disabled = true;
     }
-    resetRecommendationTypeahead();
   }
   async function handleChecklistAddSubmit(event) {
     event.preventDefault();
@@ -410,10 +389,13 @@
     if (!els.checklistRecommendationSelect) {
       return;
     }
-    const selectedId = els.checklistRecommendationSelect.value;
-    const recommendation = availableChecklistRecommendations().find((item) => item.id === selectedId);
+    const recommendation = findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value, true);
     if (!recommendation) {
-      setUploadStatus(els.checklistAddStatus, "Select a recommended task to quick add.", "error");
+      setUploadStatus(
+        els.checklistAddStatus,
+        "Select a recommended task from the search dropdown to quick add.",
+        "error"
+      );
       return;
     }
 
@@ -447,6 +429,7 @@
         if (els.checklistRecommendationAdd) {
           els.checklistRecommendationAdd.disabled = true;
         }
+        renderChecklistRecommendationOptions();
       }
       return true;
     } catch (error) {
@@ -567,7 +550,3 @@
     }
     return [];
   }
-  const recommendationTypeaheadState = {
-    query: "",
-    resetHandle: null,
-  };

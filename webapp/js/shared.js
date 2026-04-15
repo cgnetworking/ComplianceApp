@@ -356,6 +356,7 @@
     }
 
     if (els.checklistRecommendationSelect) {
+      els.checklistRecommendationSelect.addEventListener("input", handleChecklistRecommendationSelected);
       els.checklistRecommendationSelect.addEventListener("change", handleChecklistRecommendationSelected);
     }
 
