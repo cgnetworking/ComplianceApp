@@ -85,7 +85,8 @@ a {
 .ghost-button,
 .control-link,
 .doc-button,
-.month-tab {
+.month-tab,
+.policy-subtab {
   border-radius: var(--radius-sm);
 }
 
@@ -445,7 +446,8 @@ a {
 .ghost-button,
 .control-link,
 .doc-button,
-.month-tab {
+.month-tab,
+.policy-subtab {
   border: 1px solid var(--line);
   background: #fff;
   color: var(--text);
@@ -456,7 +458,8 @@ a {
 .ghost-button:hover,
 .control-link:hover,
 .doc-button:hover,
-.month-tab:hover {
+.month-tab:hover,
+.policy-subtab:hover {
   transform: translateY(-1px);
   border-color: rgba(124, 58, 237, 0.32);
   box-shadow: 0 12px 18px rgba(87, 57, 143, 0.06);
@@ -596,10 +599,23 @@ a {
 .mini-stats,
 .chip-row,
 .doc-list,
-.month-tabs {
+.month-tabs,
+.policy-subtabs {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.policy-subtabs {
+  justify-content: flex-end;
+}
+
+.policy-panel-head {
+  flex-wrap: wrap;
+}
+
+.policy-panel-head .policy-subtabs {
+  margin-left: auto;
 }
 
 .legend-item,
@@ -626,6 +642,7 @@ a {
 
 .status-pill.is-active,
 .month-tab.is-active,
+.policy-subtab.is-active,
 .doc-button.is-active {
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   border-color: transparent;
@@ -854,7 +871,8 @@ tbody tr.is-selected {
 }
 
 .control-link,
-.month-tab {
+.month-tab,
+.policy-subtab {
   min-height: 34px;
   padding: 0 12px;
 }
@@ -1519,6 +1537,10 @@ tbody tr.is-selected {
   font-size: 0.92rem;
 }
 
+.document-approver-field {
+  max-width: 380px;
+}
+
 .document-actions {
   display: flex;
   gap: 10px;
@@ -1804,6 +1826,11 @@ code {
 
   .report-header-split {
     display: grid;
+  }
+
+  .policy-panel-head .policy-subtabs {
+    margin-left: 0;
+    justify-content: flex-start;
   }
 
   .report-actions {

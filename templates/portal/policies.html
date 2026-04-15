@@ -47,10 +47,18 @@
 
         <section class="page-grid page-grid-policies">
           <article class="panel">
-            <div class="panel-head">
+            <div class="panel-head panel-head-actions policy-panel-head">
               <div>
                 <p class="panel-kicker">Policy library</p>
                 <h2>Policy documents</h2>
+              </div>
+              <div class="policy-subtabs" id="policy-library-tabs" role="tablist" aria-label="Policy views">
+                <button class="policy-subtab is-active" type="button" data-policy-library-tab="all" role="tab" aria-selected="true">
+                  All policies
+                </button>
+                <button class="policy-subtab" type="button" data-policy-library-tab="approvals" role="tab" aria-selected="false">
+                  My approvals
+                </button>
               </div>
             </div>
             <div id="policy-coverage"></div>

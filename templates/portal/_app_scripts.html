@@ -1,6 +1,14 @@
 {% load static %}
 <script>
-  window.ISMS_PORTAL_CONFIG = { apiBaseUrl: "{{ api_base_url }}", loginUrl: "{% url 'portal-login' %}" };
+  window.ISMS_PORTAL_CONFIG = {
+    apiBaseUrl: "{{ api_base_url }}",
+    loginUrl: "{% url 'portal-login' %}",
+    currentUser: {
+      username: "{{ current_user.username|default:''|escapejs }}",
+      isStaff: {{ current_user.isStaff|yesno:"true,false" }},
+      isPolicyReader: {{ current_user.isPolicyReader|yesno:"true,false" }}
+    }
+  };
 </script>
 <script src="{% static 'js/shared.js' %}"></script>
 <script src="{% static 'js/home.js' %}"></script>

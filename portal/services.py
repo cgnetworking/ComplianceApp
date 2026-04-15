@@ -59,7 +59,6 @@ CSV_CONTROL_ID_FIELDS = (
 CSV_CONTROL_NAME_FIELDS = ("controlname", "name", "controltitle")
 CSV_CONTROL_DOMAIN_FIELDS = ("controldomain", "domain")
 CSV_CONTROL_APPLICABILITY_FIELDS = ("controlapplicability", "applicability", "status")
-CSV_CONTROL_IMPLEMENTATION_FIELDS = ("controlimplementationmodel", "implementationmodel", "implementation")
 CSV_CONTROL_OWNER_FIELDS = ("controlowner", "owner")
 CSV_CONTROL_REVIEW_FREQUENCY_FIELDS = ("controlreviewfrequency", "reviewfrequency", "frequency")
 CSV_DOCUMENT_IDS_FIELDS = (
@@ -80,10 +79,28 @@ CSV_DOCUMENT_REVIEW_FREQUENCY_FIELDS = ("documentreviewfrequency", "policyreview
 CSV_DOCUMENT_PATH_FIELDS = ("documentpath", "policypath")
 CSV_DOCUMENT_FOLDER_FIELDS = ("documentfolder", "policyfolder")
 CSV_DOCUMENT_PURPOSE_FIELDS = ("documentpurpose", "policypurpose")
+POLICY_READER_GROUP_NAME = "Policy Reader"
+PENDING_POLICY_APPROVER = "Pending review"
 
 
 class ValidationError(Exception):
     pass
+
+
+def user_is_policy_reader(user: object) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if bool(getattr(user, "is_staff", False)):
+        return False
+
+    cached_value = getattr(user, "_portal_is_policy_reader", None)
+    if isinstance(cached_value, bool):
+        return cached_value
+
+    groups = getattr(user, "groups", None)
+    is_policy_reader = bool(groups and groups.filter(name=POLICY_READER_GROUP_NAME).exists())
+    setattr(user, "_portal_is_policy_reader", is_policy_reader)
+    return is_policy_reader
 
 
 def default_mapping_summary() -> dict[str, object]:
@@ -207,7 +224,6 @@ def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
                 "name": normalize_string(item.get("name")),
                 "domain": domain,
                 "applicability": normalize_string(item.get("applicability")),
-                "implementationModel": normalize_string(item.get("implementationModel"), "Implemented"),
                 "owner": normalize_string(item.get("owner")),
                 "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Annual"),
                 "documentIds": document_ids,
@@ -538,7 +554,6 @@ def parse_mapping_csv_text(value: str) -> dict[str, object]:
                     "name": mapping_csv_lookup(row, CSV_CONTROL_NAME_FIELDS),
                     "domain": mapping_csv_lookup(row, CSV_CONTROL_DOMAIN_FIELDS),
                     "applicability": mapping_csv_lookup(row, CSV_CONTROL_APPLICABILITY_FIELDS),
-                    "implementationModel": mapping_csv_lookup(row, CSV_CONTROL_IMPLEMENTATION_FIELDS),
                     "owner": mapping_csv_lookup(row, CSV_CONTROL_OWNER_FIELDS),
                     "reviewFrequency": mapping_csv_lookup(row, CSV_CONTROL_REVIEW_FREQUENCY_FIELDS),
                     "documentIds": [],
@@ -550,7 +565,6 @@ def parse_mapping_csv_text(value: str) -> dict[str, object]:
                 set_if_empty(control, "name", mapping_csv_lookup(row, CSV_CONTROL_NAME_FIELDS))
                 set_if_empty(control, "domain", mapping_csv_lookup(row, CSV_CONTROL_DOMAIN_FIELDS))
                 set_if_empty(control, "applicability", mapping_csv_lookup(row, CSV_CONTROL_APPLICABILITY_FIELDS))
-                set_if_empty(control, "implementationModel", mapping_csv_lookup(row, CSV_CONTROL_IMPLEMENTATION_FIELDS))
                 set_if_empty(control, "owner", mapping_csv_lookup(row, CSV_CONTROL_OWNER_FIELDS))
                 set_if_empty(control, "reviewFrequency", mapping_csv_lookup(row, CSV_CONTROL_REVIEW_FREQUENCY_FIELDS))
                 if preferred_document_id:
@@ -723,6 +737,38 @@ def list_assignable_users() -> list[dict[str, str]]:
     return assignable_users
 
 
+def resolve_assignable_username(identifier: str) -> str:
+    normalized_identifier = normalize_string(identifier)
+    if not normalized_identifier:
+        return ""
+
+    user_model = get_user_model()
+    username_field = getattr(user_model, "USERNAME_FIELD", "username")
+    user = user_model.objects.filter(is_active=True).filter(**{f"{username_field}__iexact": normalized_identifier}).first()
+    if user is None:
+        has_email_field = any(getattr(field, "name", "") == "email" for field in user_model._meta.get_fields())
+        if has_email_field:
+            user = user_model.objects.filter(is_active=True, email__iexact=normalized_identifier).first()
+    if user is None:
+        return ""
+
+    return normalize_string(getattr(user, username_field, ""))
+
+
+def normalize_policy_approver_value(value: object) -> str:
+    normalized = normalize_string(value)
+    if not normalized:
+        return PENDING_POLICY_APPROVER
+    if normalized.lower() == PENDING_POLICY_APPROVER.lower():
+        return PENDING_POLICY_APPROVER
+
+    resolved_username = resolve_assignable_username(normalized)
+    normalized_value = resolved_username or normalized
+    if len(normalized_value) > 255:
+        raise ValidationError("Approver value is too long.")
+    return normalized_value
+
+
 def ensure_review_checklist_recommendations_seeded() -> None:
     checklist_items = load_default_review_checklist_payload()
     if not checklist_items:
@@ -824,20 +870,29 @@ def delete_review_checklist_item(external_id: str) -> dict[str, str]:
     return deleted_item
 
 
-def get_bootstrap_payload() -> dict[str, object]:
+def get_bootstrap_payload(*, policy_reader: bool = False) -> dict[str, object]:
     ensure_review_checklist_recommendations_seeded()
-    return {
+    payload: dict[str, object] = {
         "persistenceMode": "api",
         "mapping": get_mapping_payload(),
-        "checklistItems": list_review_checklist_items(),
-        "recommendedChecklistItems": list_review_checklist_recommendations(),
         "uploadedDocuments": [item.to_portal_dict() for item in UploadedPolicy.objects.all()],
-        "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
-        "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],
-        "assignableUsers": list_assignable_users(),
-        "reviewState": normalize_review_state(get_state_payload("review_state", {})),
-        "controlState": normalize_control_state(get_state_payload("control_state", {})),
     }
+
+    if policy_reader:
+        return payload
+
+    payload.update(
+        {
+            "checklistItems": list_review_checklist_items(),
+            "recommendedChecklistItems": list_review_checklist_recommendations(),
+            "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
+            "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],
+            "assignableUsers": list_assignable_users(),
+            "reviewState": normalize_review_state(get_state_payload("review_state", {})),
+            "controlState": normalize_control_state(get_state_payload("control_state", {})),
+        }
+    )
+    return payload
 
 
 def get_state_payload(key: str, default: dict[str, object]) -> dict[str, object]:
@@ -872,7 +927,7 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
             title=file_name_base(uploaded_file.name),
             document_type="Uploaded policy",
             owner="Shared portal",
-            approver="Pending review",
+            approver=PENDING_POLICY_APPROVER,
             review_frequency="Not scheduled",
             path=f"Portal upload / {uploaded_file.name}",
             folder="Uploaded",
@@ -904,6 +959,21 @@ def delete_uploaded_policy(document_id: str) -> dict[str, object]:
     deleted_payload = policy.to_portal_dict()
     policy.delete()
     return deleted_payload
+
+
+def update_uploaded_policy_approver(document_id: str, approver: object) -> dict[str, object]:
+    normalized_id = normalize_string(document_id)
+    if not normalized_id:
+        raise ValidationError("Policy id is required.")
+
+    try:
+        policy = UploadedPolicy.objects.get(document_id=normalized_id)
+    except UploadedPolicy.DoesNotExist as error:
+        raise ValidationError("Uploaded policy was not found.") from error
+
+    policy.approver = normalize_policy_approver_value(approver)
+    policy.save(update_fields=["approver"])
+    return policy.to_portal_dict()
 
 
 def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]]:

@@ -102,7 +102,6 @@
         <div class="chip-row">
           <span class="chip">${escapeHtml(control.domain)}</span>
           <span class="chip">${escapeHtml(control.effectiveApplicability)}</span>
-          <span class="chip">${escapeHtml(control.effectiveImplementationModel)}</span>
           <span class="status-pill ${control.policyDocumentIds.length ? "is-active" : ""}">${control.policyDocumentIds.length} mapped policies</span>
         </div>
       </div>
@@ -589,13 +588,12 @@
       isExcluded: effectiveExcluded,
       effectiveApplicability: effectiveApplicability,
       effectiveReviewFrequency: effectiveReviewFrequency,
-      effectiveImplementationModel: effectiveExcluded ? "Excluded" : control.implementationModel,
       exclusionReason: exclusionReason,
       owner: effectiveOwner,
     };
   }
   function isBaseExcluded(control) {
-    return control.implementationModel === "Excluded" || normalizeControlApplicability(control.applicability) === "Excluded";
+    return normalizeControlApplicability(control.applicability) === "Excluded";
   }
   function saveControlStateEntry(controlId, nextState) {
     const applicability = normalizeControlApplicability(nextState.applicability);
@@ -792,7 +790,6 @@
         view.name,
         view.domain,
         view.owner,
-        view.effectiveImplementationModel,
         view.effectiveApplicability,
         view.effectiveReviewFrequency,
         view.exclusionReason,

@@ -30,7 +30,9 @@ from .services import (
     replace_mapping_payload,
     replace_risk_register,
     set_state_payload,
+    update_uploaded_policy_approver,
     update_review_state,
+    user_is_policy_reader,
 )
 
 
@@ -73,13 +75,54 @@ def api_login_required(view_func):
     return wrapped
 
 
-def render_portal_page(request: HttpRequest, template_name: str) -> HttpResponse:
+def policy_reader_forbidden_response() -> JsonResponse:
+    return JsonResponse(
+        {
+            "detail": "Policy Reader role can only access read-only policy state.",
+        },
+        status=403,
+    )
+
+
+def policy_reader_api_access(*, allow_policy_reader: bool):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(request: HttpRequest, *args, **kwargs):
+            if user_is_policy_reader(request.user) and not allow_policy_reader:
+                return policy_reader_forbidden_response()
+            return view_func(request, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def current_user_context(request: HttpRequest) -> dict[str, object]:
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    is_policy_reader = user_is_policy_reader(request.user)
+    return {
+        "username": username,
+        "isStaff": bool(request.user.is_staff),
+        "isPolicyReader": is_policy_reader,
+    }
+
+
+def render_portal_page(
+    request: HttpRequest,
+    template_name: str,
+    *,
+    allow_policy_reader: bool = False,
+) -> HttpResponse:
+    if user_is_policy_reader(request.user) and not allow_policy_reader:
+        return redirect("portal-policies")
+
     return render(
         request,
         template_name,
         {
             "api_base_url": "/api",
             "login_url": settings.LOGIN_URL,
+            "current_user": current_user_context(request),
         },
     )
 
@@ -158,7 +201,7 @@ def audit_log_page(request: HttpRequest) -> HttpResponse:
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
 def policies_page(request: HttpRequest) -> HttpResponse:
-    return render_portal_page(request, "portal/policies.html")
+    return render_portal_page(request, "portal/policies.html", allow_policy_reader=True)
 
 
 @login_required(login_url="portal-login")
@@ -181,13 +224,15 @@ def parse_json_body(request: HttpRequest) -> object:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=True)
 @ensure_csrf_cookie
 @require_GET
 def bootstrap_state(request: HttpRequest) -> JsonResponse:
-    return JsonResponse(get_bootstrap_payload())
+    return JsonResponse(get_bootstrap_payload(policy_reader=user_is_policy_reader(request.user)))
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def upload_policies(request: HttpRequest) -> JsonResponse:
     files = request.FILES.getlist("files")
@@ -203,6 +248,7 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["DELETE"])
 def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
     try:
@@ -214,6 +260,31 @@ def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["PATCH", "PUT"])
+def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResponse:
+    if not request.user.is_staff:
+        return JsonResponse({"detail": "Only admins can assign policy approvers."}, status=403)
+
+    try:
+        body = parse_json_body(request)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    if not isinstance(body, dict) or "approver" not in body:
+        return JsonResponse({"detail": "Approver is required."}, status=400)
+
+    try:
+        updated_document = update_uploaded_policy_approver(document_id, body.get("approver"))
+    except ValidationError as error:
+        status_code = 404 if str(error) == "Uploaded policy was not found." else 400
+        return JsonResponse({"detail": str(error)}, status=status_code)
+
+    return JsonResponse({"document": updated_document})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def upload_mapping(request: HttpRequest) -> JsonResponse:
     file_obj = request.FILES.get("file")
@@ -233,6 +304,7 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def upload_vendors(request: HttpRequest) -> JsonResponse:
     files = request.FILES.getlist("files")
@@ -244,6 +316,7 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "PUT"])
 def risk_register(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
@@ -262,6 +335,7 @@ def risk_register(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "POST"])
 def checklist_items(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
@@ -279,6 +353,7 @@ def checklist_items(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["DELETE"])
 def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse:
     try:
@@ -290,12 +365,14 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def checklist_recommendations(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"recommendedChecklistItems": list_review_checklist_recommendations()})
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "PUT"])
 def review_state(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
@@ -315,6 +392,7 @@ def review_state(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "PUT"])
 def control_state(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
@@ -329,6 +407,7 @@ def control_state(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "PUT"])
 def mapping_state(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":

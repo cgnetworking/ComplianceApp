@@ -265,15 +265,19 @@
 
     if (els.documentViewer) {
       els.documentViewer.addEventListener("change", (event) => {
-        const controlSelect = event.target.closest("[data-policy-control-select]");
-        if (!controlSelect) {
+        const approverSelect = event.target.closest("[data-policy-approver-select]");
+        if (approverSelect) {
+          if (typeof handlePolicyApproverSelection === "function") {
+            void handlePolicyApproverSelection(approverSelect);
+          }
           return;
         }
-        const mapper = controlSelect.closest("[data-policy-control-mapper]");
-        const addButton = mapper ? mapper.querySelector("[data-policy-control-add]") : null;
-        if (addButton) {
-          addButton.disabled = !controlSelect.value;
+
+        const controlInput = event.target.closest("[data-policy-control-input]");
+        if (!controlInput || typeof handlePolicyControlPickerInputChanged !== "function") {
+          return;
         }
+        handlePolicyControlPickerInputChanged();
       });
 
       els.documentViewer.addEventListener("click", async (event) => {
@@ -281,8 +285,9 @@
         if (addControlMapping) {
           const documentId = addControlMapping.dataset.policyControlAdd;
           const mapper = addControlMapping.closest("[data-policy-control-mapper]");
-          const select = mapper ? mapper.querySelector("[data-policy-control-select]") : null;
-          const controlId = select ? select.value : "";
+          const controlId = typeof resolvePolicyControlPickerControlId === "function"
+            ? resolvePolicyControlPickerControlId(documentId, mapper)
+            : "";
           if (!documentId || !controlId) {
             return;
           }
@@ -310,6 +315,14 @@
           return;
         }
         await handlePolicyDelete(removeButton.dataset.deletePolicy);
+      });
+
+      els.documentViewer.addEventListener("input", (event) => {
+        const controlInput = event.target.closest("[data-policy-control-input]");
+        if (!controlInput || typeof handlePolicyControlPickerInputChanged !== "function") {
+          return;
+        }
+        handlePolicyControlPickerInputChanged();
       });
     }
   }
@@ -1058,7 +1071,6 @@
           name: item.name.trim(),
           domain: typeof item.domain === "string" ? item.domain.trim() : "",
           applicability: typeof item.applicability === "string" ? item.applicability.trim() : "",
-          implementationModel: "Implemented",
           owner: "",
           reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
             ? item.reviewFrequency.trim()

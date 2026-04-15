@@ -1,4 +1,239 @@
+  const policyLibraryTabs = {
+    all: "all",
+    approvals: "approvals",
+  };
+  const pendingPolicyApprover = "Pending review";
+  const policyControlPickerState = {
+    documentId: "",
+    selectedControlId: "",
+    showAll: false,
+  };
+
+  function normalizePolicyLibraryTab(value) {
+    const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+    return normalized === policyLibraryTabs.approvals ? policyLibraryTabs.approvals : policyLibraryTabs.all;
+  }
+
+  function normalizePolicyApproverIdentity(value) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+  }
+
+  function getPolicyLibraryTab() {
+    state.policyLibraryTab = normalizePolicyLibraryTab(state.policyLibraryTab);
+    return state.policyLibraryTab;
+  }
+
+  function currentPolicyUsername() {
+    if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
+      return "";
+    }
+    const currentUser = window.ISMS_PORTAL_CONFIG.currentUser;
+    if (!currentUser || typeof currentUser !== "object") {
+      return "";
+    }
+    return typeof currentUser.username === "string" ? currentUser.username.trim() : "";
+  }
+  function currentPolicyUserIsStaff() {
+    if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
+      return false;
+    }
+    const currentUser = window.ISMS_PORTAL_CONFIG.currentUser;
+    if (!currentUser || typeof currentUser !== "object") {
+      return false;
+    }
+    return Boolean(currentUser.isStaff);
+  }
+  function currentPolicyUserIsPolicyReader() {
+    if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
+      return false;
+    }
+    const currentUser = window.ISMS_PORTAL_CONFIG.currentUser;
+    if (!currentUser || typeof currentUser !== "object") {
+      return false;
+    }
+    return Boolean(currentUser.isPolicyReader);
+  }
+  function normalizePolicyApproverValue(value) {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    return normalized || pendingPolicyApprover;
+  }
+  function syncPoliciesPageCapabilities() {
+    const isPolicyReader = currentPolicyUserIsPolicyReader();
+    if (els.policyUploadTrigger) {
+      els.policyUploadTrigger.hidden = isPolicyReader;
+      els.policyUploadTrigger.disabled = isPolicyReader;
+    }
+    if (els.policyUploadStatus && isPolicyReader) {
+      setPolicyUploadStatus("Policy Reader access is view-only.", "info");
+    }
+  }
+  function updateUploadedDocumentEntry(updatedDocument) {
+    if (!updatedDocument || typeof updatedDocument !== "object" || typeof updatedDocument.id !== "string") {
+      return false;
+    }
+    const index = uploadedDocuments.findIndex((item) => item.id === updatedDocument.id);
+    if (index < 0) {
+      return false;
+    }
+    uploadedDocuments[index] = {
+      ...uploadedDocuments[index],
+      ...updatedDocument,
+    };
+    return true;
+  }
+  async function updatePolicyApproverViaApi(documentId, approver) {
+    return apiRequest(`/policies/${encodeURIComponent(documentId)}/approver/`, {
+      method: "PATCH",
+      body: JSON.stringify({ approver }),
+    });
+  }
+  function policyApproverOptions(documentItem) {
+    const options = [
+      { value: pendingPolicyApprover, label: pendingPolicyApprover },
+    ];
+    const seenValues = new Set([pendingPolicyApprover.toLowerCase()]);
+
+    state.assignableUsers.forEach((user) => {
+      if (!user || typeof user !== "object") {
+        return;
+      }
+      const username = typeof user.username === "string" ? user.username.trim() : "";
+      if (!username) {
+        return;
+      }
+      const key = username.toLowerCase();
+      if (seenValues.has(key)) {
+        return;
+      }
+      seenValues.add(key);
+      const displayName = typeof user.displayName === "string" ? user.displayName.trim() : "";
+      const label = displayName && displayName.toLowerCase() !== key
+        ? `${displayName} (${username})`
+        : username;
+      options.push({ value: username, label });
+    });
+
+    const currentApprover = normalizePolicyApproverValue(documentItem && documentItem.approver);
+    const currentKey = currentApprover.toLowerCase();
+    if (!seenValues.has(currentKey)) {
+      options.push({ value: currentApprover, label: currentApprover });
+    }
+    return options;
+  }
+  function renderPolicyApproverField(documentItem) {
+    if (!documentItem || !documentItem.isUploaded || !currentPolicyUserIsStaff()) {
+      return "";
+    }
+    const options = policyApproverOptions(documentItem);
+    const selectedApprover = normalizePolicyApproverValue(documentItem.approver);
+    return `
+      <div class="doc-section">
+        <label class="form-field document-approver-field">
+          <span>Policy approver</span>
+          <select
+            data-policy-approver-select
+            data-policy-approver-document="${escapeHtml(documentItem.id)}"
+          >
+            ${options.map((item) => {
+              const selected = item.value.toLowerCase() === selectedApprover.toLowerCase() ? " selected" : "";
+              return `<option value="${escapeHtml(item.value)}"${selected}>${escapeHtml(item.label)}</option>`;
+            }).join("")}
+          </select>
+        </label>
+        <p class="helper-note">Only admins can update policy approver assignments.</p>
+      </div>
+    `;
+  }
+  async function handlePolicyApproverSelection(selectElement) {
+    if (!selectElement) {
+      return;
+    }
+    const documentId = typeof selectElement.dataset.policyApproverDocument === "string"
+      ? selectElement.dataset.policyApproverDocument.trim()
+      : "";
+    if (!documentId || !currentPolicyUserIsStaff()) {
+      return;
+    }
+
+    const selectedApprover = normalizePolicyApproverValue(selectElement.value);
+    const documentItem = documentsById.get(documentId);
+    if (!documentItem || !documentItem.isUploaded) {
+      setPolicyUploadStatus("Only uploaded policies can have approvers assigned.", "error");
+      return;
+    }
+    if (normalizePolicyApproverValue(documentItem.approver).toLowerCase() === selectedApprover.toLowerCase()) {
+      return;
+    }
+
+    setPolicyUploadStatus(`Updating approver for ${documentItem.id}...`, "info");
+    try {
+      if (isApiPersistence()) {
+        const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
+        const updatedDocument = payload && payload.document && typeof payload.document === "object"
+          ? payload.document
+          : null;
+        if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+          throw new Error("Updated policy response was invalid.");
+        }
+      } else {
+        if (!updateUploadedDocumentEntry({ id: documentId, approver: selectedApprover })) {
+          throw new Error("Uploaded policy was not found in local storage.");
+        }
+        await saveUploadedPolicies(uploadedDocuments);
+      }
+
+      refreshDocumentsIndex();
+      initializePolicySelection();
+      syncUrl();
+      renderPoliciesPage();
+      setPolicyUploadStatus("Policy approver updated.", "success");
+    } catch (error) {
+      const detail = error instanceof Error && error.message
+        ? error.message
+        : "Policy approver could not be updated.";
+      setPolicyUploadStatus(detail, "error");
+    }
+  }
+
+  function renderPolicyLibraryTabs() {
+    const tabContainer = document.getElementById("policy-library-tabs");
+    if (!tabContainer) {
+      return;
+    }
+    const activeTab = getPolicyLibraryTab();
+    tabContainer.querySelectorAll("[data-policy-library-tab]").forEach((button) => {
+      const tabValue = normalizePolicyLibraryTab(button.dataset.policyLibraryTab);
+      const isActive = tabValue === activeTab;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+  }
+
+  function bindPolicyLibraryTabs() {
+    const tabContainer = document.getElementById("policy-library-tabs");
+    if (!tabContainer || tabContainer.dataset.policyTabsBound === "true") {
+      return;
+    }
+    tabContainer.dataset.policyTabsBound = "true";
+    tabContainer.addEventListener("click", (event) => {
+      const tabButton = event.target.closest("[data-policy-library-tab]");
+      if (!tabButton) {
+        return;
+      }
+      const nextTab = normalizePolicyLibraryTab(tabButton.dataset.policyLibraryTab);
+      if (nextTab === getPolicyLibraryTab()) {
+        return;
+      }
+      state.policyLibraryTab = nextTab;
+      initializePolicySelection();
+      syncUrlAndRender(renderPoliciesPage);
+    });
+  }
+
   function renderPoliciesPage() {
+    bindPolicyLibraryTabs();
+    renderPolicyLibraryTabs();
+    syncPoliciesPageCapabilities();
     initializePolicySelection();
     renderSelectedControlBanner();
     renderPolicyCoverageList(filteredPolicyCoverage(), true);
@@ -196,6 +431,9 @@
     if (tone === "error") {
       els.policyUploadStatus.classList.add("is-error");
     }
+    if (tone === "info") {
+      els.policyUploadStatus.classList.add("is-info");
+    }
   }
   function setMappingUploadStatus(message, tone) {
     if (!els.mappingUploadStatus) {
@@ -388,7 +626,7 @@
           </div>
           <div class="chip-row">
             <span class="chip">${escapeHtml(control.domain)}</span>
-            <span class="chip">${escapeHtml(control.effectiveImplementationModel)}</span>
+            <span class="chip">${escapeHtml(control.effectiveApplicability)}</span>
             <span class="chip">${escapeHtml(control.reviewFrequency)}</span>
           </div>
           <div>
@@ -409,6 +647,14 @@
       return;
     }
     if (!rows.length) {
+      if (getPolicyLibraryTab() === policyLibraryTabs.approvals) {
+        const username = normalizePolicyApproverIdentity(currentPolicyUsername());
+        const message = username
+          ? "No policies are currently assigned to you for approval."
+          : "My approvals is unavailable because the current user could not be resolved.";
+        els.policyCoverage.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+        return;
+      }
       els.policyCoverage.innerHTML = '<div class="empty-state">No policies match the current selection.</div>';
       return;
     }
@@ -453,15 +699,26 @@
     if (!els.documentViewer) {
       return;
     }
+    const visibleRows = filteredPolicyCoverage();
+    const activeDocumentIsVisible = visibleRows.some((item) => item.id === state.activeDocumentId);
     const documentItem = documentsById.get(state.activeDocumentId);
-    if (!documentItem) {
+    if (!documentItem || !activeDocumentIsVisible) {
+      policyControlPickerState.documentId = "";
+      policyControlPickerState.selectedControlId = "";
+      policyControlPickerState.showAll = false;
       els.documentViewer.innerHTML = '<div class="empty-state">Choose a policy to display its embedded content.</div>';
       return;
     }
+    if (policyControlPickerState.documentId !== documentItem.id) {
+      policyControlPickerState.selectedControlId = "";
+      policyControlPickerState.showAll = false;
+    }
+    policyControlPickerState.documentId = documentItem.id;
 
     const relatedControlViews = getAllControlViews()
       .filter((control) => control.policyDocumentIds.includes(documentItem.id))
       .sort(compareControlViews);
+    const isPolicyReader = currentPolicyUserIsPolicyReader();
     const relatedControlIds = new Set(relatedControlViews.map((control) => control.id));
     const relatedControls = relatedControlViews
       .slice(0, 8)
@@ -470,27 +727,22 @@
     const mappedControlRows = relatedControlViews.map((control) => `
       <div class="mapping-row">
         <a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</a>
-        <button
-          class="ghost-button danger-button mapping-remove-button"
-          type="button"
-          data-policy-control-remove="${escapeHtml(control.id)}"
-          data-policy-control-document="${escapeHtml(documentItem.id)}"
-        >
-          Remove
-        </button>
+        ${isPolicyReader ? "" : `
+          <button
+            class="ghost-button danger-button mapping-remove-button"
+            type="button"
+            data-policy-control-remove="${escapeHtml(control.id)}"
+            data-policy-control-document="${escapeHtml(documentItem.id)}"
+          >
+            Remove
+          </button>
+        `}
       </div>
     `).join("");
     const availableControls = getAllControlViews()
       .filter((control) => !relatedControlIds.has(control.id))
       .sort(compareControlViews);
-    const canMapControl = availableControls.length > 0;
-    const availableControlOptions = canMapControl
-      ? ['<option value="" selected disabled>Select Control</option>'].concat(
-        availableControls.map((control) => (
-          `<option value="${escapeHtml(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</option>`
-        ))
-      ).join("")
-      : '<option value="" selected>No additional controls available</option>';
+    const canMapControl = !isPolicyReader && availableControls.length > 0;
     const documentMeta = [
       `Approver: ${escapeHtml(documentItem.approver)}`,
       `Source: ${escapeHtml(documentItem.path)}`,
@@ -498,9 +750,40 @@
     if (documentItem.isUploaded && documentItem.uploadedAt) {
       documentMeta.push(`Uploaded: ${escapeHtml(formatDateTime(documentItem.uploadedAt))}`);
     }
-    const documentActions = documentItem.isUploaded
+    const documentActions = documentItem.isUploaded && !isPolicyReader
       ? `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
       : "";
+    const approverFieldMarkup = renderPolicyApproverField(documentItem);
+    const controlMappingEditor = isPolicyReader
+      ? '<p class="helper-note">Policy Reader access is view-only. Control mappings cannot be edited.</p>'
+      : `
+        <div class="quick-add-row" data-policy-control-mapper="${escapeHtml(documentItem.id)}">
+          <label class="form-field" for="policy-control-picker-input">
+            <span>Control</span>
+            <div class="recommendation-picker" data-policy-control-picker>
+              <input
+                id="policy-control-picker-input"
+                type="search"
+                data-policy-control-input
+                placeholder="${canMapControl ? "Search controls" : "No additional controls available"}"
+                autocomplete="off"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="policy-control-picker-list"
+                ${canMapControl ? "" : "disabled"}
+              >
+              <div
+                class="recommendation-picker-list"
+                id="policy-control-picker-list"
+                data-policy-control-list
+                role="listbox"
+                hidden
+              ></div>
+            </div>
+          </label>
+          <button class="ghost-button" type="button" data-policy-control-add="${escapeHtml(documentItem.id)}" disabled>Add mapping</button>
+        </div>
+      `;
 
     els.documentViewer.innerHTML = `
       <div class="document-heading">
@@ -517,26 +800,290 @@
         <div class="document-meta">
           ${documentMeta.map((item) => `<span>${item}</span>`).join("")}
         </div>
+        ${approverFieldMarkup}
         <div class="chip-row">${relatedControls || '<span class="chip">Not mapped to controls</span>'}</div>
         <div class="doc-section">
           <strong>Control mappings</strong>
           <div class="stack-list">
             ${mappedControlRows || '<div class="empty-state">Not mapped to any controls yet.</div>'}
           </div>
-          <div class="quick-add-row" data-policy-control-mapper="${escapeHtml(documentItem.id)}">
-            <label class="form-field">
-              <span>Control</span>
-              <select data-policy-control-select ${canMapControl ? "" : "disabled"}>
-                ${availableControlOptions}
-              </select>
-            </label>
-            <button class="ghost-button" type="button" data-policy-control-add="${escapeHtml(documentItem.id)}" disabled>Add mapping</button>
-          </div>
+          ${controlMappingEditor}
         </div>
         ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}
       </div>
       <div class="content-frame">${documentItem.contentHtml}</div>
     `;
+    renderPolicyControlOptions();
+  }
+  function policyControlMapper() {
+    if (!els.documentViewer) {
+      return null;
+    }
+    return els.documentViewer.querySelector("[data-policy-control-mapper]");
+  }
+  function policyControlPickerInput(mapper = policyControlMapper()) {
+    if (!mapper) {
+      return null;
+    }
+    return mapper.querySelector("[data-policy-control-input]");
+  }
+  function policyControlPickerList(mapper = policyControlMapper()) {
+    if (!mapper) {
+      return null;
+    }
+    return mapper.querySelector("[data-policy-control-list]");
+  }
+  function policyControlPickerAddButton(mapper = policyControlMapper()) {
+    if (!mapper) {
+      return null;
+    }
+    return mapper.querySelector("[data-policy-control-add]");
+  }
+  function normalizePolicyControlQuery(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+  function policyControlLabel(control) {
+    return `${control.id} / ${control.name}`;
+  }
+  function availablePolicyControlOptions(documentId = state.activeDocumentId) {
+    const normalizedDocumentId = String(documentId || "").trim();
+    if (!normalizedDocumentId) {
+      return [];
+    }
+    return getAllControlViews()
+      .filter((control) => !control.policyDocumentIds.includes(normalizedDocumentId))
+      .sort(compareControlViews);
+  }
+  function filteredPolicyControlOptions(options, query) {
+    const normalizedQuery = normalizePolicyControlQuery(query);
+    if (!normalizedQuery) {
+      return options;
+    }
+    return options.filter((control) => `${control.id} ${control.name}`.toLowerCase().includes(normalizedQuery));
+  }
+  function findPolicyControlOptionById(documentId, controlId) {
+    const normalizedControlId = String(controlId || "").trim();
+    if (!normalizedControlId) {
+      return null;
+    }
+    return availablePolicyControlOptions(documentId).find((control) => control.id === normalizedControlId) || null;
+  }
+  function findExactPolicyControlOptionByInput(documentId, rawValue) {
+    const normalizedValue = normalizePolicyControlQuery(rawValue);
+    if (!normalizedValue) {
+      return null;
+    }
+
+    const options = availablePolicyControlOptions(documentId);
+    const exactLabelMatch = options.find((control) => policyControlLabel(control).toLowerCase() === normalizedValue);
+    if (exactLabelMatch) {
+      return exactLabelMatch;
+    }
+    return options.find((control) => (
+      control.id.toLowerCase() === normalizedValue
+      || control.name.toLowerCase() === normalizedValue
+      || `${control.id} ${control.name}`.toLowerCase() === normalizedValue
+    )) || null;
+  }
+  function findPolicyControlOptionByInputValue(documentId, rawValue, exactOnly = false) {
+    const normalizedValue = normalizePolicyControlQuery(rawValue);
+    if (!normalizedValue) {
+      return null;
+    }
+
+    const options = availablePolicyControlOptions(documentId);
+    const exactLabelMatch = options.find((control) => policyControlLabel(control).toLowerCase() === normalizedValue);
+    if (exactLabelMatch) {
+      return exactLabelMatch;
+    }
+
+    const exactMatch = options.find((control) => (
+      control.id.toLowerCase() === normalizedValue
+      || control.name.toLowerCase() === normalizedValue
+      || `${control.id} ${control.name}`.toLowerCase() === normalizedValue
+    ));
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    if (exactOnly) {
+      return null;
+    }
+    return options.find((control) => `${control.id} ${control.name}`.toLowerCase().includes(normalizedValue)) || null;
+  }
+  function openPolicyControlPicker() {
+    const mapper = policyControlMapper();
+    const input = policyControlPickerInput(mapper);
+    const list = policyControlPickerList(mapper);
+    if (!mapper || !input || !list || input.disabled) {
+      return;
+    }
+    list.hidden = false;
+    mapper.classList.add("is-open");
+    input.setAttribute("aria-expanded", "true");
+  }
+  function closePolicyControlPicker() {
+    const mapper = policyControlMapper();
+    const input = policyControlPickerInput(mapper);
+    const list = policyControlPickerList(mapper);
+    if (!mapper || !input || !list) {
+      return;
+    }
+    list.hidden = true;
+    mapper.classList.remove("is-open");
+    input.setAttribute("aria-expanded", "false");
+  }
+  function applyPolicyControlPickerSelection(control, shouldClose = true) {
+    const mapper = policyControlMapper();
+    const input = policyControlPickerInput(mapper);
+    const addButton = policyControlPickerAddButton(mapper);
+    if (!mapper || !input || !addButton || !control) {
+      return;
+    }
+    policyControlPickerState.selectedControlId = control.id;
+    policyControlPickerState.showAll = false;
+    input.value = policyControlLabel(control);
+    addButton.disabled = false;
+    renderPolicyControlOptions();
+    if (shouldClose) {
+      closePolicyControlPicker();
+    }
+  }
+  function bindPolicyControlPickerEvents() {
+    const mapper = policyControlMapper();
+    const input = policyControlPickerInput(mapper);
+    const list = policyControlPickerList(mapper);
+    if (!mapper || !input || !list || input.dataset.policyControlPickerBound) {
+      return;
+    }
+
+    input.dataset.policyControlPickerBound = "true";
+
+    input.addEventListener("focus", () => {
+      policyControlPickerState.showAll = true;
+      renderPolicyControlOptions();
+      openPolicyControlPicker();
+    });
+    input.addEventListener("click", () => {
+      policyControlPickerState.showAll = true;
+      renderPolicyControlOptions();
+      openPolicyControlPicker();
+    });
+    input.addEventListener("blur", () => {
+      window.setTimeout(closePolicyControlPicker, 120);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closePolicyControlPicker();
+        return;
+      }
+      if (event.key !== "Enter") {
+        return;
+      }
+      const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+      const selectedControl = findPolicyControlOptionById(documentId, policyControlPickerState.selectedControlId)
+        || findPolicyControlOptionByInputValue(documentId, input.value);
+      if (!selectedControl) {
+        return;
+      }
+      applyPolicyControlPickerSelection(selectedControl, true);
+      event.preventDefault();
+    });
+
+    list.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
+    list.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-policy-control-id]");
+      if (!option) {
+        return;
+      }
+      const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+      const selectedControl = findPolicyControlOptionById(documentId, option.dataset.policyControlId);
+      if (!selectedControl) {
+        return;
+      }
+      applyPolicyControlPickerSelection(selectedControl, true);
+    });
+  }
+  function renderPolicyControlOptions() {
+    const mapper = policyControlMapper();
+    const input = policyControlPickerInput(mapper);
+    const list = policyControlPickerList(mapper);
+    const addButton = policyControlPickerAddButton(mapper);
+    if (!mapper || !input || !list || !addButton) {
+      return;
+    }
+
+    bindPolicyControlPickerEvents();
+
+    const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+    const allOptions = availablePolicyControlOptions(documentId);
+    const queryForFilter = policyControlPickerState.showAll ? "" : input.value;
+    const visibleOptions = filteredPolicyControlOptions(allOptions, queryForFilter);
+
+    const hasOptions = allOptions.length > 0;
+    input.disabled = !hasOptions;
+    input.placeholder = hasOptions
+      ? "Search controls"
+      : "No additional controls available";
+    if (!hasOptions) {
+      policyControlPickerState.selectedControlId = "";
+      addButton.disabled = true;
+      input.value = "";
+      list.innerHTML = '<div class="recommendation-option-empty">No additional controls available</div>';
+      closePolicyControlPicker();
+      return;
+    }
+
+    const exactMatch = findExactPolicyControlOptionByInput(documentId, input.value);
+    if (exactMatch) {
+      policyControlPickerState.selectedControlId = exactMatch.id;
+    } else if (!input.value.trim() || !visibleOptions.some((item) => item.id === policyControlPickerState.selectedControlId)) {
+      policyControlPickerState.selectedControlId = "";
+    }
+
+    if (!visibleOptions.length) {
+      list.innerHTML = '<div class="recommendation-option-empty">No matching controls</div>';
+    } else {
+      list.innerHTML = visibleOptions.map((item) => `
+        <button
+          class="recommendation-option ${item.id === policyControlPickerState.selectedControlId ? "is-active" : ""}"
+          type="button"
+          data-policy-control-id="${escapeHtml(item.id)}"
+          role="option"
+          aria-selected="${item.id === policyControlPickerState.selectedControlId ? "true" : "false"}"
+        >
+          ${escapeHtml(policyControlLabel(item))}
+        </button>
+      `).join("");
+    }
+
+    addButton.disabled = !policyControlPickerState.selectedControlId;
+  }
+  function handlePolicyControlPickerInputChanged() {
+    policyControlPickerState.showAll = false;
+    renderPolicyControlOptions();
+    openPolicyControlPicker();
+  }
+  function resolvePolicyControlPickerControlId(documentId, mapperElement) {
+    const mapper = mapperElement || policyControlMapper();
+    if (!mapper) {
+      return "";
+    }
+
+    const resolvedDocumentId = documentId || mapper.dataset.policyControlMapper || state.activeDocumentId;
+    const selectedOption = findPolicyControlOptionById(resolvedDocumentId, policyControlPickerState.selectedControlId);
+    if (selectedOption) {
+      return selectedOption.id;
+    }
+
+    const input = policyControlPickerInput(mapper);
+    if (!input) {
+      return "";
+    }
+    const typedOption = findPolicyControlOptionByInputValue(resolvedDocumentId, input.value);
+    return typedOption ? typedOption.id : "";
   }
   function filteredPolicyCoverage() {
     const searchLower = state.search.trim().toLowerCase();
@@ -544,15 +1091,26 @@
       ? getControlView(state.policyContextControlId)
       : null;
     const allowedIds = contextControl ? new Set(contextControl.documentIds) : null;
+    const activeTab = getPolicyLibraryTab();
+    const myApproverIdentity = normalizePolicyApproverIdentity(currentPolicyUsername());
 
     return getPolicyLibraryRows().filter((item) => {
       if (allowedIds && !allowedIds.has(item.id)) {
         return false;
       }
+      const documentItem = documentsById.get(item.id);
+      if (activeTab === policyLibraryTabs.approvals) {
+        if (!myApproverIdentity) {
+          return false;
+        }
+        const approverIdentity = normalizePolicyApproverIdentity(documentItem ? documentItem.approver : "");
+        if (approverIdentity !== myApproverIdentity) {
+          return false;
+        }
+      }
       if (!searchLower) {
         return true;
       }
-      const documentItem = documentsById.get(item.id);
       const text = [
         item.id,
         item.title,
@@ -626,13 +1184,18 @@
       return;
     }
 
-    if (contextControl) {
+    if (
+      contextControl
+      && contextControl.preferredDocumentId
+      && coverageRows.some((item) => item.id === contextControl.preferredDocumentId)
+    ) {
       state.activeDocumentId = contextControl.preferredDocumentId;
       return;
     }
 
     if (coverageRows.length) {
       state.activeDocumentId = coverageRows[0].id;
+      return;
     }
   }
   function firstControlIdForDocument(documentId) {
