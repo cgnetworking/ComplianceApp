@@ -9,6 +9,8 @@
       populateSelect(els.applicabilityFilter, ["All", "Applicable", "Excluded"]);
       els.applicabilityFilter.value = valueOrFallback(els.applicabilityFilter, state.applicability);
       state.applicability = els.applicabilityFilter.value;
+    } else {
+      state.applicability = "All";
     }
     if (els.frequencyFilter) {
       populateSelect(
@@ -17,6 +19,8 @@
       );
       els.frequencyFilter.value = valueOrFallback(els.frequencyFilter, state.frequency);
       state.frequency = els.frequencyFilter.value;
+    } else {
+      state.frequency = "All";
     }
   }
   function initializeSelection() {
@@ -49,7 +53,7 @@
       return;
     }
 
-    const searchablePages = new Set(["controls", "reports", "policies", "risks", "vendors"]);
+    const searchablePages = new Set(["controls", "reports", "policies", "risks", "vendors", "audit-log"]);
     if (!searchablePages.has(page)) {
       els.searchInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") {
@@ -325,7 +329,7 @@
           return;
         }
         state.monthIndex = Number(target.dataset.monthIndex);
-        syncUrlAndRender(renderReviewsPage);
+        syncUrlAndRender();
       });
     }
 
@@ -452,13 +456,67 @@
     });
     return normalized;
   }
+  function normalizeReviewStateTimestampMap(value) {
+    if (!value || typeof value !== "object") {
+      return {};
+    }
+
+    const normalized = {};
+    Object.entries(value).forEach(([rawKey, rawValue]) => {
+      const key = String(rawKey || "").trim();
+      const parsed = new Date(rawValue);
+      if (!key || Number.isNaN(parsed.getTime())) {
+        return;
+      }
+      if (isMonthScopedReviewStateKey(key)) {
+        normalized[key] = parsed.toISOString();
+        return;
+      }
+      const monthScopedKey = buildReviewStateMonthKey(key, today.getMonth());
+      if (monthScopedKey) {
+        normalized[monthScopedKey] = parsed.toISOString();
+      }
+    });
+    return normalized;
+  }
+  function normalizeReviewAuditLogEntries(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        return {
+          id: typeof entry.id === "string" ? entry.id : "",
+          action: typeof entry.action === "string" && entry.action.trim() ? entry.action.trim() : "state_changed",
+          entityType: typeof entry.entityType === "string" && entry.entityType.trim() ? entry.entityType.trim() : "record",
+          entityId: typeof entry.entityId === "string" ? entry.entityId.trim() : "",
+          summary: typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.",
+          occurredAt: typeof entry.occurredAt === "string" ? entry.occurredAt : "",
+          actor: entry.actor && typeof entry.actor === "object"
+            ? {
+                username: typeof entry.actor.username === "string" ? entry.actor.username.trim() : "",
+                displayName: typeof entry.actor.displayName === "string" ? entry.actor.displayName.trim() : "",
+              }
+            : {},
+          metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
+        };
+      })
+      .filter(Boolean)
+      .slice(-2000);
+  }
   function normalizeReviewStateValue(value) {
     if (!value || typeof value !== "object") {
-      return { activities: {}, checklist: {} };
+      return { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
     }
     return {
       activities: normalizeReviewStateMapByMonth(value.activities),
       checklist: normalizeReviewStateMapByMonth(value.checklist),
+      completedAt: normalizeReviewStateTimestampMap(value.completedAt),
+      auditLog: normalizeReviewAuditLogEntries(value.auditLog || value.events),
     };
   }
   function isReviewTaskCompleted(itemId, monthIndex = state.monthIndex) {
@@ -468,15 +526,55 @@
     }
     return Boolean(state.reviewState.checklist[key] || state.reviewState.activities[key]);
   }
+  function getReviewTaskCompletedAt(itemId, monthIndex = state.monthIndex) {
+    const key = buildReviewStateMonthKey(itemId, monthIndex);
+    if (!key || !state.reviewState.completedAt || typeof state.reviewState.completedAt !== "object") {
+      return "";
+    }
+    const timestamp = state.reviewState.completedAt[key];
+    return typeof timestamp === "string" && timestamp.trim() ? timestamp.trim() : "";
+  }
+  function renderReviewCompletionIndicators() {
+    if (page !== "reviews" || !els.activities) {
+      return;
+    }
+
+    els.activities.querySelectorAll(".activity-card.is-done").forEach((card) => {
+      const indicator = card.querySelector(".status-pill.is-success");
+      const checkbox = card.querySelector("[data-activity-id]");
+      if (!indicator || !checkbox) {
+        return;
+      }
+      const completedAt = getReviewTaskCompletedAt(checkbox.dataset.activityId, state.monthIndex);
+      if (!completedAt) {
+        return;
+      }
+      const formattedTimestamp = formatDateTime(completedAt);
+      indicator.textContent = `Done (${formattedTimestamp})`;
+      indicator.title = `Completed ${formattedTimestamp}`;
+    });
+  }
   function updateReviewStateSelection(itemId, checked) {
     const key = buildReviewStateMonthKey(itemId, state.monthIndex);
     if (!key) {
       return;
     }
+    const wasCompleted = Boolean(state.reviewState.checklist[key] || state.reviewState.activities[key]);
     state.reviewState.checklist[key] = checked;
     state.reviewState.activities[key] = checked;
+    if (!state.reviewState.completedAt || typeof state.reviewState.completedAt !== "object") {
+      state.reviewState.completedAt = {};
+    }
+    if (checked) {
+      if (!wasCompleted || !state.reviewState.completedAt[key]) {
+        state.reviewState.completedAt[key] = new Date().toISOString();
+      }
+    } else {
+      delete state.reviewState.completedAt[key];
+    }
     saveReviewState();
     renderReviewsPage();
+    renderReviewCompletionIndicators();
   }
   function syncSearchSelection() {
     if (page === "policies") {
@@ -489,6 +587,9 @@
     }
     if (page === "vendors") {
       syncVendorSelection();
+      return;
+    }
+    if (page === "audit-log") {
       return;
     }
     syncSelectionToVisibleControls();
@@ -510,9 +611,15 @@
         break;
       case "reviews":
         renderReviewsPage();
+        renderReviewCompletionIndicators();
         break;
       case "review-tasks":
         renderReviewTasksPage();
+        break;
+      case "audit-log":
+        if (typeof renderAuditLogPage === "function") {
+          renderAuditLogPage();
+        }
         break;
       case "policies":
         renderPoliciesPage();
@@ -599,7 +706,7 @@
   function syncUrl() {
     const query = new URLSearchParams();
 
-    if (page === "controls" || page === "reports" || page === "policies" || page === "risks" || page === "vendors") {
+    if (page === "controls" || page === "reports" || page === "policies" || page === "risks" || page === "vendors" || page === "audit-log") {
       if (state.search) {
         query.set("q", state.search);
       }
@@ -607,10 +714,10 @@
     if ((page === "controls" || page === "reports") && state.domain !== "All") {
       query.set("domain", state.domain);
     }
-    if ((page === "controls" || page === "reports") && state.applicability !== "All") {
+    if (page === "reports" && state.applicability !== "All") {
       query.set("applicability", state.applicability);
     }
-    if ((page === "controls" || page === "reports") && state.frequency !== "All") {
+    if (page === "reports" && state.frequency !== "All") {
       query.set("frequency", state.frequency);
     }
     if (page === "controls" && state.selectedControlId) {
@@ -627,6 +734,9 @@
     }
     if (page === "risks" && state.selectedRiskId && !state.isAddingRisk) {
       query.set("risk", state.selectedRiskId);
+    }
+    if (page === "risks" && state.riskAssignee && state.riskAssignee !== "All") {
+      query.set("assignee", state.riskAssignee);
     }
     if (page === "vendors" && state.selectedVendorResponseId) {
       query.set("vendor", state.selectedVendorResponseId);
@@ -703,7 +813,7 @@
       const saved = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
       return normalizeReviewStateValue(saved);
     } catch (error) {
-      return { activities: {}, checklist: {} };
+      return { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
     }
   }
   function saveReviewState() {
@@ -715,6 +825,17 @@
     void apiRequest("/state/review/", {
       method: "PUT",
       body: JSON.stringify({ reviewState: state.reviewState }),
+    }).then((payload) => {
+      if (!payload || typeof payload.reviewState !== "object") {
+        return;
+      }
+      state.reviewState = normalizeReviewStateValue(payload.reviewState);
+      if (page === "reviews") {
+        renderReviewsPage();
+        renderReviewCompletionIndicators();
+      } else if (page === "audit-log" && typeof renderAuditLogPage === "function") {
+        renderAuditLogPage();
+      }
     }).catch(() => {
       window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
     });
@@ -967,6 +1088,12 @@
     }
     if (Array.isArray(payload.riskRegister)) {
       state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+    }
+    if (Array.isArray(payload.assignableUsers) && typeof normalizeAssignableUsers === "function") {
+      const assignableUsers = normalizeAssignableUsers(payload.assignableUsers);
+      if (assignableUsers.length) {
+        state.assignableUsers = assignableUsers;
+      }
     }
     if (Array.isArray(payload.checklistItems)) {
       state.checklistItems = normalizeChecklistItems(payload.checklistItems);

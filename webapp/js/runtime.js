@@ -75,6 +75,7 @@
     domain: params.get("domain") || "All",
     applicability: params.get("applicability") || "All",
     frequency: params.get("frequency") || "All",
+    riskAssignee: params.get("assignee") || "All",
     monthIndex: initialMonthIndex,
     selectedControlId: params.get("control"),
     policyContextControlId: params.get("control"),
@@ -82,6 +83,7 @@
     selectedRiskId: params.get("risk") || "",
     selectedVendorResponseId: params.get("vendor"),
     riskRegister: loadRiskRegister(),
+    assignableUsers: [],
     isAddingRisk: false,
     riskFormStatus: { message: "", tone: "" },
     reviewState: loadReviewState(),
@@ -139,6 +141,7 @@
     homeDomains: document.getElementById("home-domains"),
     homePolicies: document.getElementById("home-policies"),
     addRiskTrigger: document.getElementById("add-risk-trigger"),
+    riskAssigneeFilter: document.getElementById("risk-assignee-filter"),
     riskList: document.getElementById("risk-list"),
     riskForm: document.getElementById("risk-form"),
     riskFormKicker: document.getElementById("risk-form-kicker"),
@@ -167,6 +170,7 @@
 
   async function init() {
     await loadRemoteState();
+    await loadAssignableUsers();
     updateRuntimeMode();
     updatePersistenceCopy();
     if (els.generatedAt) {
@@ -180,6 +184,66 @@
     initializeSelection();
     bindEvents();
     renderPage();
+  }
+
+  async function loadAssignableUsers() {
+    const existingAssignableUsers = Array.isArray(state.assignableUsers) ? state.assignableUsers : [];
+    state.assignableUsers = existingAssignableUsers.length ? existingAssignableUsers : fallbackAssignableUsers();
+    if (existingAssignableUsers.length) {
+      return;
+    }
+    if (window.location.protocol === "file:") {
+      return;
+    }
+
+    try {
+      const payload = await apiRequest("/state/");
+      const assignableUsers = normalizeAssignableUsers(payload && payload.assignableUsers);
+      if (assignableUsers.length) {
+        state.assignableUsers = assignableUsers;
+      }
+    } catch (error) {
+      // Keep fallback owners from the local risk register when the API is unavailable.
+    }
+  }
+
+  function normalizeAssignableUsers(items) {
+    if (!Array.isArray(items)) {
+      return [];
+    }
+
+    const seen = new Set();
+    return items
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+        const username = typeof item.username === "string" ? item.username.trim() : "";
+        if (!username || seen.has(username)) {
+          return null;
+        }
+        seen.add(username);
+        const displayName = typeof item.displayName === "string" && item.displayName.trim()
+          ? item.displayName.trim()
+          : username;
+        return { username, displayName };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function fallbackAssignableUsers() {
+    const seen = new Set();
+    return state.riskRegister
+      .map((risk) => (risk && typeof risk.owner === "string" ? risk.owner.trim() : ""))
+      .filter((owner) => {
+        if (!owner || seen.has(owner)) {
+          return false;
+        }
+        seen.add(owner);
+        return true;
+      })
+      .map((owner) => ({ username: owner, displayName: owner }));
   }
 
 void init();

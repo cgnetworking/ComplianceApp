@@ -2,6 +2,7 @@
   const impactFieldNames = ["risk-impact", "impact", "initial-risk-impact"];
 
   function renderRisksPage() {
+    renderRiskAssigneeFilter();
     const risks = filteredRisks();
     syncSelectionToVisibleRisks(risks);
     renderRiskOverview();
@@ -61,7 +62,7 @@
     }
 
     if (!risks.length) {
-      els.riskList.innerHTML = '<div class="empty-state">No risks match the current search.</div>';
+      els.riskList.innerHTML = '<div class="empty-state">No risks match the current search or assignee filter.</div>';
       return;
     }
 
@@ -94,7 +95,7 @@
                   <div class="mini-copy">${escapeHtml(`P${risk.probability} x I${risk.impact} / ${riskBandLabel(risk.probability, risk.impact)}`)}</div>
                 </td>
                 <td>${escapeHtml(formatDate(risk.date))}</td>
-                <td>${escapeHtml(risk.owner)}</td>
+                <td>${escapeHtml(formatRiskOwnerLabel(risk.owner))}</td>
                 <td>
                   <span class="status-pill ${isRiskClosed(risk) ? "is-closed" : "is-active"}">
                     ${escapeHtml(isRiskClosed(risk) ? `Closed ${formatDate(risk.closedDate)}` : "Open")}
@@ -128,9 +129,7 @@
     if (els.riskDateInput) {
       els.riskDateInput.value = isEditing ? selectedRisk.date : todayDateValue();
     }
-    if (els.riskOwnerInput) {
-      els.riskOwnerInput.value = isEditing ? selectedRisk.owner : "";
-    }
+    renderRiskOwnerOptions(isEditing ? selectedRisk.owner : "");
     if (els.riskClosedDateInput) {
       els.riskClosedDateInput.value = isEditing ? selectedRisk.closedDate : "";
     }
@@ -251,17 +250,157 @@
       input.checked = Number(input.value) === factor;
     });
   }
+  function renderRiskAssigneeFilter() {
+    if (!els.riskAssigneeFilter) {
+      return;
+    }
+
+    const selectedAssignee = state.riskAssignee || "All";
+    const assigneeOptions = [{ value: "All", label: "All assignees" }].concat(collectRiskFilterOwnerOptions());
+    els.riskAssigneeFilter.innerHTML = assigneeOptions
+      .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+      .join("");
+    els.riskAssigneeFilter.value = valueOrFallback(els.riskAssigneeFilter, selectedAssignee);
+    state.riskAssignee = els.riskAssigneeFilter.value;
+
+    if (els.riskAssigneeFilter.dataset.bound) {
+      return;
+    }
+    els.riskAssigneeFilter.dataset.bound = "true";
+    els.riskAssigneeFilter.addEventListener("change", (event) => {
+      state.riskAssignee = event.target.value;
+      syncSelectionToVisibleRisks();
+      syncUrl();
+      renderRisksPage();
+    });
+  }
+  function renderRiskOwnerOptions(selectedOwner) {
+    if (!els.riskOwnerInput) {
+      return;
+    }
+
+    const owners = collectAssignableOwnerOptions(selectedOwner ? [selectedOwner] : []);
+    if (!owners.length) {
+      els.riskOwnerInput.innerHTML = '<option value="">No assignable users available</option>';
+      els.riskOwnerInput.value = "";
+      els.riskOwnerInput.disabled = true;
+      if (els.riskSubmitButton) {
+        els.riskSubmitButton.disabled = true;
+      }
+      return;
+    }
+
+    els.riskOwnerInput.disabled = false;
+    if (els.riskSubmitButton) {
+      els.riskSubmitButton.disabled = false;
+    }
+
+    els.riskOwnerInput.innerHTML = owners
+      .map((owner) => `<option value="${escapeHtml(owner.value)}">${escapeHtml(owner.label)}</option>`)
+      .join("");
+    const preferredOwner = selectedOwner || (state.riskAssignee !== "All" ? state.riskAssignee : owners[0].value);
+    els.riskOwnerInput.value = valueOrFallback(els.riskOwnerInput, preferredOwner);
+  }
+  function collectAssignableOwnerOptions(extraOwners = []) {
+    const options = [];
+    const seen = new Set();
+    const addOption = (value, label) => {
+      const normalizedValue = typeof value === "string" ? value.trim() : "";
+      if (!normalizedValue || seen.has(normalizedValue)) {
+        return;
+      }
+      seen.add(normalizedValue);
+      options.push({
+        value: normalizedValue,
+        label: normalizeRiskOwnerLabel(label, normalizedValue),
+      });
+    };
+
+    state.assignableUsers.forEach((user) => {
+      if (!user || typeof user !== "object") {
+        return;
+      }
+      addOption(user.username, formatAssignableUserLabel(user));
+    });
+    extraOwners.forEach((owner) => {
+      const normalizedOwner = typeof owner === "string" ? owner.trim() : "";
+      if (!normalizedOwner) {
+        return;
+      }
+      const label = isKnownAssignableUser(normalizedOwner)
+        ? formatRiskOwnerLabel(normalizedOwner)
+        : `${normalizedOwner} (legacy owner)`;
+      addOption(normalizedOwner, label);
+    });
+
+    return options.sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }));
+  }
+  function collectRiskFilterOwnerOptions() {
+    const options = collectAssignableOwnerOptions();
+    const seen = new Set(options.map((option) => option.value));
+    state.riskRegister.forEach((risk) => {
+      if (!risk || typeof risk !== "object") {
+        return;
+      }
+      const owner = typeof risk.owner === "string" ? risk.owner.trim() : "";
+      if (!owner || seen.has(owner)) {
+        return;
+      }
+      seen.add(owner);
+      options.push({ value: owner, label: formatRiskOwnerLabel(owner) });
+    });
+    return options.sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }));
+  }
+  function isKnownAssignableUser(owner) {
+    const normalizedOwner = typeof owner === "string" ? owner.trim() : "";
+    if (!normalizedOwner) {
+      return false;
+    }
+    return state.assignableUsers.some((user) => user && user.username === normalizedOwner);
+  }
+  function formatAssignableUserLabel(user) {
+    const username = typeof user.username === "string" ? user.username.trim() : "";
+    const displayName = typeof user.displayName === "string" ? user.displayName.trim() : "";
+    if (!displayName || displayName.toLowerCase() === username.toLowerCase()) {
+      return username;
+    }
+    return `${displayName} (${username})`;
+  }
+  function formatRiskOwnerLabel(owner) {
+    const normalizedOwner = typeof owner === "string" ? owner.trim() : "";
+    if (!normalizedOwner) {
+      return "";
+    }
+
+    const matchingUser = state.assignableUsers.find((user) => user && user.username === normalizedOwner);
+    return matchingUser ? formatAssignableUserLabel(matchingUser) : normalizedOwner;
+  }
+  function normalizeRiskOwnerLabel(label, fallbackValue) {
+    if (typeof label === "string" && label.trim()) {
+      return label.trim();
+    }
+    if (typeof fallbackValue === "string" && fallbackValue.trim()) {
+      return fallbackValue.trim();
+    }
+    return "";
+  }
   function filteredRisks() {
     const searchLower = state.search.trim().toLowerCase();
+    const assigneeFilter = typeof state.riskAssignee === "string" ? state.riskAssignee.trim() : "";
     return state.riskRegister
       .slice()
       .filter((risk) => {
+        if (assigneeFilter && assigneeFilter !== "All" && risk.owner !== assigneeFilter) {
+          return false;
+        }
         if (!searchLower) {
           return true;
         }
+        const ownerLabel = formatRiskOwnerLabel(risk.owner);
         const searchableText = [
           risk.risk,
           risk.owner,
+          ownerLabel,
           risk.date,
           risk.closedDate,
           `probability ${risk.probability}`,

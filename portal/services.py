@@ -9,6 +9,7 @@ import uuid
 from datetime import date, datetime, timezone as dt_timezone
 from pathlib import Path
 
+from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
@@ -493,34 +494,48 @@ def list_review_checklist_recommendations() -> list[dict[str, str]]:
     return [item.to_portal_dict() for item in ReviewChecklistRecommendation.objects.all()]
 
 
-def ensure_review_checklist_recommendations_seeded() -> None:
-    if ReviewChecklistRecommendation.objects.exists():
-        return
+def list_assignable_users() -> list[dict[str, str]]:
+    user_model = get_user_model()
+    username_field = getattr(user_model, "USERNAME_FIELD", "username")
+    assignable_users: list[dict[str, str]] = []
+    for user in user_model.objects.filter(is_active=True).order_by(username_field):
+        username = normalize_string(getattr(user, username_field, ""))
+        if not username:
+            continue
+        first_name = normalize_string(getattr(user, "first_name", ""))
+        last_name = normalize_string(getattr(user, "last_name", ""))
+        full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+        email = normalize_string(getattr(user, "email", ""))
+        assignable_users.append(
+            {
+                "username": username,
+                "displayName": full_name or email or username,
+            }
+        )
+    return assignable_users
 
+
+def ensure_review_checklist_recommendations_seeded() -> None:
     checklist_items = load_default_review_checklist_payload()
     if not checklist_items:
         return
 
     seen_ids: set[str] = set()
-    to_create: list[ReviewChecklistRecommendation] = []
     for item in checklist_items:
         item_id = normalize_string(item.get("id"))
         item_text = normalize_string(item.get("item"))
         if not item_id or not item_text or item_id in seen_ids:
             continue
         seen_ids.add(item_id)
-        to_create.append(
-            ReviewChecklistRecommendation(
-                external_id=item_id,
-                category=normalize_string(item.get("category"), "Custom"),
-                item=item_text,
-                frequency=normalize_string(item.get("frequency"), "Annual"),
-                owner=normalize_string(item.get("owner"), "Shared portal"),
-            )
+        ReviewChecklistRecommendation.objects.update_or_create(
+            external_id=item_id,
+            defaults={
+                "category": normalize_string(item.get("category"), "Custom"),
+                "item": item_text,
+                "frequency": normalize_string(item.get("frequency"), "Annual"),
+                "owner": normalize_string(item.get("owner"), "Shared portal"),
+            },
         )
-
-    if to_create:
-        ReviewChecklistRecommendation.objects.bulk_create(to_create, ignore_conflicts=True)
 
 
 def create_review_checklist_item(payload: object) -> dict[str, str]:
@@ -566,19 +581,32 @@ def delete_review_checklist_item(external_id: str) -> dict[str, str]:
     review_state = normalize_review_state(get_state_payload("review_state", {}))
     checklist_state = review_state.get("checklist") if isinstance(review_state.get("checklist"), dict) else {}
     activity_state = review_state.get("activities") if isinstance(review_state.get("activities"), dict) else {}
+    completed_at_state = review_state.get("completedAt") if isinstance(review_state.get("completedAt"), dict) else {}
+    audit_log = review_state.get("auditLog") if isinstance(review_state.get("auditLog"), list) else []
 
     def keep_state_entry(key: str) -> bool:
         return key != normalized_id and not key.endswith(f"::{normalized_id}")
 
     filtered_checklist_state = {str(key): bool(value) for key, value in checklist_state.items() if keep_state_entry(str(key))}
     filtered_activity_state = {str(key): bool(value) for key, value in activity_state.items() if keep_state_entry(str(key))}
+    filtered_completed_at_state = {
+        str(key): str(value)
+        for key, value in completed_at_state.items()
+        if keep_state_entry(str(key))
+    }
 
-    if filtered_checklist_state != checklist_state or filtered_activity_state != activity_state:
+    if (
+        filtered_checklist_state != checklist_state
+        or filtered_activity_state != activity_state
+        or filtered_completed_at_state != completed_at_state
+    ):
         set_state_payload(
             "review_state",
             {
                 "activities": filtered_activity_state,
                 "checklist": filtered_checklist_state,
+                "completedAt": filtered_completed_at_state,
+                "auditLog": audit_log,
             },
         )
 
@@ -595,6 +623,7 @@ def get_bootstrap_payload() -> dict[str, object]:
         "uploadedDocuments": [item.to_portal_dict() for item in UploadedPolicy.objects.all()],
         "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
         "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],
+        "assignableUsers": list_assignable_users(),
         "reviewState": normalize_review_state(get_state_payload("review_state", {})),
         "controlState": normalize_control_state(get_state_payload("control_state", {})),
     }
@@ -723,14 +752,221 @@ def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
     return [item.to_portal_dict() for item in RiskRecord.objects.all()]
 
 
+def normalize_review_state_boolean_map(value: object) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key).strip(): bool(item)
+        for key, item in value.items()
+        if str(key).strip()
+    }
+
+
+def normalize_review_state_timestamp_map(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        raw_timestamp = str(raw_value or "").strip()
+        if not raw_timestamp:
+            continue
+        try:
+            normalized[key] = parse_iso_datetime(raw_timestamp, fallback=timezone.now()).isoformat()
+        except ValidationError:
+            continue
+    return normalized
+
+
+def normalize_audit_metadata(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, object] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+            normalized[key] = raw_value
+        else:
+            normalized[key] = str(raw_value)
+    return normalized
+
+
+def normalize_review_state_audit_entry(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+
+    action = normalize_string(value.get("action"), "state_changed")
+    entity_type = normalize_string(value.get("entityType"), "record")
+    entity_id = normalize_string(value.get("entityId"))
+    summary = normalize_string(value.get("summary"), "State updated.")
+
+    occurred_at_raw = value.get("occurredAt")
+    try:
+        occurred_at = parse_iso_datetime(occurred_at_raw, fallback=timezone.now()).isoformat()
+    except ValidationError:
+        occurred_at = timezone.now().isoformat()
+
+    actor = value.get("actor") if isinstance(value.get("actor"), dict) else {}
+    username = normalize_string(actor.get("username"), "system")
+    display_name = normalize_string(actor.get("displayName"), username)
+
+    fallback_seed = f"{action}|{entity_type}|{entity_id}|{occurred_at}"
+    fallback_id = f"audit-{uuid.uuid5(uuid.NAMESPACE_URL, fallback_seed).hex[:12]}"
+
+    return {
+        "id": normalize_string(value.get("id"), fallback_id),
+        "action": action,
+        "entityType": entity_type,
+        "entityId": entity_id,
+        "summary": summary,
+        "actor": {
+            "username": username,
+            "displayName": display_name,
+        },
+        "occurredAt": occurred_at,
+        "metadata": normalize_audit_metadata(value.get("metadata")),
+    }
+
+
+def normalize_review_state_audit_log(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+
+    normalized: list[dict[str, object]] = []
+    for entry in value:
+        normalized_entry = normalize_review_state_audit_entry(entry)
+        if normalized_entry is None:
+            continue
+        normalized.append(normalized_entry)
+    return normalized[-2000:]
+
+
+def parse_review_state_month_scope(state_key: str) -> tuple[int | None, str]:
+    match = re.match(r"^m([0-9]|1[01])::(.+)$", state_key)
+    if not match:
+        return None, state_key
+    return int(match.group(1)), str(match.group(2)).strip()
+
+
+def build_review_done_audit_entry(
+    state_key: str,
+    *,
+    actor_username: str,
+    actor_display_name: str,
+    occurred_at_iso: str,
+) -> dict[str, object]:
+    month_index, scoped_item_id = parse_review_state_month_scope(state_key)
+    metadata: dict[str, object] = {
+        "source": "reviews",
+        "status": "done",
+        "stateKey": state_key,
+    }
+    if month_index is not None:
+        metadata["monthIndex"] = month_index
+    if scoped_item_id:
+        metadata["scopedItemId"] = scoped_item_id
+
+    return {
+        "id": f"audit-{uuid.uuid4().hex[:12]}",
+        "action": "state_changed",
+        "entityType": "task",
+        "entityId": scoped_item_id or state_key,
+        "summary": "State changed to done.",
+        "actor": {
+            "username": actor_username,
+            "displayName": actor_display_name,
+        },
+        "occurredAt": occurred_at_iso,
+        "metadata": metadata,
+    }
+
+
+def done_review_state_keys(payload: dict[str, object]) -> set[str]:
+    checklist = payload.get("checklist") if isinstance(payload.get("checklist"), dict) else {}
+    activities = payload.get("activities") if isinstance(payload.get("activities"), dict) else {}
+    keys = set(checklist.keys()) | set(activities.keys())
+    return {
+        key
+        for key in keys
+        if bool(checklist.get(key)) or bool(activities.get(key))
+    }
+
+
+def update_review_state(
+    payload: object,
+    *,
+    actor_username: str,
+    actor_display_name: str,
+) -> dict[str, object]:
+    previous_state = normalize_review_state(get_state_payload("review_state", {}))
+    incoming_state = normalize_review_state(payload)
+
+    previous_done_keys = done_review_state_keys(previous_state)
+    next_done_keys = done_review_state_keys(incoming_state)
+    previous_completed_at = previous_state.get("completedAt") if isinstance(previous_state.get("completedAt"), dict) else {}
+    incoming_completed_at = incoming_state.get("completedAt") if isinstance(incoming_state.get("completedAt"), dict) else {}
+
+    next_completed_at: dict[str, str] = {}
+    new_entries: list[dict[str, object]] = []
+    now_iso = timezone.now().isoformat()
+
+    for key in sorted(next_done_keys):
+        if key in previous_done_keys:
+            existing_timestamp = ""
+            previous_timestamp = previous_completed_at.get(key)
+            incoming_timestamp = incoming_completed_at.get(key)
+            if isinstance(previous_timestamp, str) and previous_timestamp.strip():
+                existing_timestamp = previous_timestamp.strip()
+            elif isinstance(incoming_timestamp, str) and incoming_timestamp.strip():
+                existing_timestamp = incoming_timestamp.strip()
+            if existing_timestamp:
+                next_completed_at[key] = existing_timestamp
+            continue
+
+        next_completed_at[key] = now_iso
+        new_entries.append(
+            build_review_done_audit_entry(
+                key,
+                actor_username=actor_username,
+                actor_display_name=actor_display_name,
+                occurred_at_iso=now_iso,
+            )
+        )
+
+    existing_audit_log = previous_state.get("auditLog") if isinstance(previous_state.get("auditLog"), list) else []
+    merged_audit_log = normalize_review_state_audit_log(existing_audit_log + new_entries)
+
+    normalized = {
+        "activities": incoming_state.get("activities", {}),
+        "checklist": incoming_state.get("checklist", {}),
+        "completedAt": next_completed_at,
+        "auditLog": merged_audit_log,
+    }
+    set_state_payload("review_state", normalized)
+    return normalized
+
+
 def normalize_review_state(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
-        return {"activities": {}, "checklist": {}}
-    activities = payload.get("activities") if isinstance(payload.get("activities"), dict) else {}
-    checklist = payload.get("checklist") if isinstance(payload.get("checklist"), dict) else {}
+        return {"activities": {}, "checklist": {}, "completedAt": {}, "auditLog": []}
+
+    activities = normalize_review_state_boolean_map(payload.get("activities"))
+    checklist = normalize_review_state_boolean_map(payload.get("checklist"))
+    completed_at = normalize_review_state_timestamp_map(payload.get("completedAt"))
+    audit_log_source = payload.get("auditLog") if isinstance(payload.get("auditLog"), list) else payload.get("events")
+    audit_log = normalize_review_state_audit_log(audit_log_source)
+
     return {
-        "activities": {str(key): bool(value) for key, value in activities.items()},
-        "checklist": {str(key): bool(value) for key, value in checklist.items()},
+        "activities": activities,
+        "checklist": checklist,
+        "completedAt": completed_at,
+        "auditLog": audit_log,
     }
 
 

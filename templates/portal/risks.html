@@ -32,6 +32,12 @@
           <p class="report-copy">
             Track business risks in one place, assign owners, and score each entry by probability and impact.
           </p>
+          <div class="filter-bar">
+            <label class="pill-select">
+              <span>Assignee</span>
+              <select id="risk-assignee-filter" aria-label="Filter risks by assigned user"></select>
+            </label>
+          </div>
         </section>
 
         <section class="overview" id="overview"></section>
@@ -130,7 +136,7 @@
 
                 <label class="form-field" for="risk-owner">
                   <span>Risk Owner</span>
-                  <input id="risk-owner" name="risk-owner" type="text" placeholder="Assign an owner" required>
+                  <select id="risk-owner" name="risk-owner" required></select>
                 </label>
               </div>
 

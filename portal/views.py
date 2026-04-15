@@ -27,10 +27,10 @@ from .services import (
     list_review_checklist_recommendations,
     normalize_control_state,
     normalize_mapping_payload,
-    normalize_review_state,
     replace_mapping_payload,
     replace_risk_register,
     set_state_payload,
+    update_review_state,
 )
 
 
@@ -147,6 +147,12 @@ def reviews_page(request: HttpRequest) -> HttpResponse:
 @ensure_csrf_cookie
 def review_tasks_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/review_tasks.html")
+
+
+@login_required(login_url="portal-login")
+@ensure_csrf_cookie
+def audit_log_page(request: HttpRequest) -> HttpResponse:
+    return render_portal_page(request, "portal/audit_log.html")
 
 
 @login_required(login_url="portal-login")
@@ -298,8 +304,13 @@ def review_state(request: HttpRequest) -> JsonResponse:
 
     body = parse_json_body(request)
     payload = body.get("reviewState") if isinstance(body, dict) and "reviewState" in body else body
-    normalized = normalize_review_state(payload)
-    set_state_payload("review_state", normalized)
+    username = request.user.get_username() if request.user.is_authenticated else "system"
+    display_name = request.user.get_full_name() if request.user.is_authenticated else ""
+    normalized = update_review_state(
+        payload,
+        actor_username=username or "system",
+        actor_display_name=display_name.strip() or username or "System",
+    )
     return JsonResponse({"reviewState": normalized})
 
 
