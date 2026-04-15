@@ -12,8 +12,9 @@ class UploadedPolicy(models.Model):
     document_id = models.CharField(max_length=24, unique=True)
     title = models.CharField(max_length=255)
     document_type = models.CharField(max_length=80, default="Uploaded policy")
-    owner = models.CharField(max_length=255, default="Shared portal")
     approver = models.CharField(max_length=255, default="Pending review")
+    approved_by = models.CharField(max_length=255, blank=True, default="")
+    approved_at = models.DateTimeField(blank=True, null=True)
     review_frequency = models.CharField(max_length=120, default="Not scheduled")
     path = models.CharField(max_length=255, default="")
     folder = models.CharField(max_length=120, default="Uploaded")
@@ -34,8 +35,9 @@ class UploadedPolicy(models.Model):
             "id": self.document_id,
             "title": self.title,
             "type": self.document_type,
-            "owner": self.owner,
             "approver": self.approver,
+            "approvedBy": self.approved_by,
+            "approvedAt": self.approved_at.isoformat() if self.approved_at else "",
             "reviewFrequency": self.review_frequency,
             "path": self.path,
             "folder": self.folder,

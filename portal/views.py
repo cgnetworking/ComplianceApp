@@ -17,6 +17,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 from .services import (
     ValidationError,
+    approve_uploaded_policy,
     create_review_checklist_item,
     create_uploaded_policies,
     create_vendor_responses,
@@ -377,6 +378,29 @@ def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResp
         return JsonResponse({"detail": str(error)}, status=status_code)
 
     return JsonResponse({"document": updated_document})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["POST"])
+def policy_document_approval(request: HttpRequest, document_id: str) -> JsonResponse:
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+
+    try:
+        updated_document, review_state = approve_uploaded_policy(
+            document_id,
+            actor_username=username,
+            actor_display_name=display_name or username or "System",
+        )
+    except ValidationError as error:
+        detail = str(error)
+        status_code = 404 if detail == "Uploaded policy was not found." else 400
+        if detail == "Only the assigned approver can approve this policy.":
+            status_code = 403
+        return JsonResponse({"detail": detail}, status=status_code)
+
+    return JsonResponse({"document": updated_document, "reviewState": review_state})
 
 
 @api_login_required

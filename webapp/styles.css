@@ -1790,6 +1790,49 @@ tbody tr.is-selected {
   background: rgba(124, 58, 237, 0.07);
 }
 
+.coverage-approval-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.coverage-approval-card.is-selected {
+  border-color: rgba(124, 58, 237, 0.36);
+  background: rgba(124, 58, 237, 0.07);
+}
+
+.coverage-approval-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  inline-size: 100%;
+  padding: 0;
+  text-align: left;
+}
+
+.coverage-approval-button strong {
+  margin-bottom: 8px;
+}
+
+.policy-approval-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-strong);
+  font-size: 0.9rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.policy-approval-toggle input {
+  inline-size: 18px;
+  block-size: 18px;
+  accent-color: var(--accent);
+}
+
 .vendor-list,
 .detail-stack {
   display: grid;

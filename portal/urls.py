@@ -31,6 +31,11 @@ urlpatterns = [
         views.policy_document_approver,
         name="api-policy-document-approver",
     ),
+    path(
+        "policies/<str:document_id>/approval/",
+        views.policy_document_approval,
+        name="api-policy-document-approval",
+    ),
     path("vendors/uploads/", views.upload_vendors, name="api-vendor-uploads"),
     path("risks/", views.risk_register, name="api-risks"),
     path("checklist/", views.checklist_items, name="api-checklist-items"),

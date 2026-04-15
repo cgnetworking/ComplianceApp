@@ -239,6 +239,14 @@
   }
   function bindPolicyEvents() {
     if (els.policyCoverage) {
+      els.policyCoverage.addEventListener("change", (event) => {
+        const approvalCheckbox = event.target.closest("[data-policy-approval-checkbox]");
+        if (!approvalCheckbox || !approvalCheckbox.checked || typeof handlePolicyApprovalSelection !== "function") {
+          return;
+        }
+        void handlePolicyApprovalSelection(approvalCheckbox);
+      });
+
       els.policyCoverage.addEventListener("click", (event) => {
         const target = event.target.closest("[data-policy-doc]");
         if (!target) {
@@ -817,25 +825,42 @@
       return groups;
     }, {});
   }
+  function normalizeUploadedPolicyItem(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
+    if (!id || !title || !contentHtml) {
+      return null;
+    }
+    return {
+      id,
+      title,
+      type: typeof item.type === "string" && item.type.trim() ? item.type.trim() : "Uploaded policy",
+      approver: typeof item.approver === "string" && item.approver.trim() ? item.approver.trim() : "Pending review",
+      approvedAt: typeof item.approvedAt === "string" ? item.approvedAt : "",
+      approvedBy: typeof item.approvedBy === "string" ? item.approvedBy : "",
+      reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
+        ? item.reviewFrequency.trim()
+        : "Not scheduled",
+      path: typeof item.path === "string" && item.path.trim() ? item.path.trim() : "Local upload",
+      folder: typeof item.folder === "string" && item.folder.trim() ? item.folder.trim() : "Uploaded",
+      purpose: typeof item.purpose === "string" ? item.purpose : "",
+      contentHtml,
+      isUploaded: true,
+      originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
+      uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : "",
+    };
+  }
   function loadUploadedPolicies() {
     try {
       const saved = JSON.parse(window.localStorage.getItem(uploadedPolicyKey) || "[]");
       if (!Array.isArray(saved)) {
         return [];
       }
-      return saved
-        .filter((item) => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.contentHtml === "string")
-        .map((item) => ({
-          ...item,
-          type: item.type || "Uploaded policy",
-          owner: item.owner || "Local browser",
-          approver: item.approver || "Pending review",
-          reviewFrequency: item.reviewFrequency || "Not scheduled",
-          path: item.path || "Local upload",
-          folder: item.folder || "Uploaded",
-          purpose: item.purpose || "",
-          isUploaded: true,
-        }));
+      return saved.map((item) => normalizeUploadedPolicyItem(item)).filter(Boolean);
     } catch (error) {
       return [];
     }
@@ -1116,7 +1141,7 @@
       }
     }
     if (Array.isArray(payload.uploadedDocuments)) {
-      uploadedDocuments = payload.uploadedDocuments;
+      uploadedDocuments = payload.uploadedDocuments.map((item) => normalizeUploadedPolicyItem(item)).filter(Boolean);
     }
     if (Array.isArray(payload.vendorSurveyResponses)) {
       vendorSurveyResponses = payload.vendorSurveyResponses;

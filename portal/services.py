@@ -769,6 +769,65 @@ def normalize_policy_approver_value(value: object) -> str:
     return normalized_value
 
 
+def review_state_payload_template(payload: dict[str, object] | None = None) -> dict[str, object]:
+    source = payload if isinstance(payload, dict) else {}
+    return {
+        "activities": source.get("activities", {}),
+        "checklist": source.get("checklist", {}),
+        "completedAt": source.get("completedAt", {}),
+        "auditLog": source.get("auditLog", []),
+    }
+
+
+def append_review_state_audit_entries(entries: list[object]) -> dict[str, object]:
+    normalized_entries = normalize_review_state_audit_log(entries)
+    if not normalized_entries:
+        return normalize_review_state(get_state_payload("review_state", {}))
+
+    with transaction.atomic():
+        record, _ = PortalState.objects.select_for_update().get_or_create(
+            key="review_state",
+            defaults={"payload": review_state_payload_template(normalize_review_state({}))},
+        )
+        previous_state = normalize_review_state(record.payload)
+        existing_audit_log = previous_state.get("auditLog") if isinstance(previous_state.get("auditLog"), list) else []
+        next_state = review_state_payload_template(previous_state)
+        next_state["auditLog"] = normalize_review_state_audit_log(existing_audit_log + normalized_entries)
+        record.payload = next_state
+        record.save(update_fields=["payload", "updated_at"])
+        return next_state
+
+
+def build_policy_approval_audit_entry(
+    policy: UploadedPolicy,
+    *,
+    actor_username: str,
+    actor_display_name: str,
+    occurred_at: datetime,
+) -> dict[str, object]:
+    local_approval_time = timezone.localtime(occurred_at)
+    approval_date = f"{local_approval_time.strftime('%B')} {local_approval_time.day}, {local_approval_time.year}"
+    return {
+        "id": f"audit-{uuid.uuid4().hex[:12]}",
+        "action": "policy_approved",
+        "entityType": "policy",
+        "entityId": policy.document_id,
+        "summary": f"Approved {policy.document_id} / {policy.title} on {approval_date}.",
+        "actor": {
+            "username": actor_username,
+            "displayName": actor_display_name,
+        },
+        "occurredAt": occurred_at.isoformat(),
+        "metadata": {
+            "source": "policies",
+            "policyId": policy.document_id,
+            "policyTitle": policy.title,
+            "approvedBy": actor_username,
+            "approvedAt": occurred_at.isoformat(),
+        },
+    }
+
+
 def ensure_review_checklist_recommendations_seeded() -> None:
     checklist_items = load_default_review_checklist_payload()
     if not checklist_items:
@@ -926,7 +985,6 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
             document_id=f"UPL-TEMP-{uuid.uuid4().hex[:12]}",
             title=file_name_base(uploaded_file.name),
             document_type="Uploaded policy",
-            owner="Shared portal",
             approver=PENDING_POLICY_APPROVER,
             review_frequency="Not scheduled",
             path=f"Portal upload / {uploaded_file.name}",
@@ -971,9 +1029,65 @@ def update_uploaded_policy_approver(document_id: str, approver: object) -> dict[
     except UploadedPolicy.DoesNotExist as error:
         raise ValidationError("Uploaded policy was not found.") from error
 
-    policy.approver = normalize_policy_approver_value(approver)
-    policy.save(update_fields=["approver"])
+    next_approver = normalize_policy_approver_value(approver)
+    update_fields = []
+    if normalize_string(policy.approver).lower() != next_approver.lower():
+        policy.approver = next_approver
+        policy.approved_by = ""
+        policy.approved_at = None
+        update_fields.extend(["approver", "approved_by", "approved_at"])
+    elif policy.approver != next_approver:
+        policy.approver = next_approver
+        update_fields.append("approver")
+    if update_fields:
+        policy.save(update_fields=update_fields)
     return policy.to_portal_dict()
+
+
+def approve_uploaded_policy(
+    document_id: str,
+    *,
+    actor_username: str,
+    actor_display_name: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    normalized_id = normalize_string(document_id)
+    if not normalized_id:
+        raise ValidationError("Policy id is required.")
+
+    normalized_actor_username = normalize_string(actor_username)
+    if not normalized_actor_username:
+        raise ValidationError("A valid approver is required.")
+
+    with transaction.atomic():
+        try:
+            policy = UploadedPolicy.objects.select_for_update().get(document_id=normalized_id)
+        except UploadedPolicy.DoesNotExist as error:
+            raise ValidationError("Uploaded policy was not found.") from error
+
+        assigned_approver = normalize_policy_approver_value(policy.approver)
+        if assigned_approver == PENDING_POLICY_APPROVER:
+            raise ValidationError("This policy is not assigned to an approver.")
+        if assigned_approver.lower() != normalized_actor_username.lower():
+            raise ValidationError("Only the assigned approver can approve this policy.")
+
+        if policy.approved_at:
+            review_state = normalize_review_state(get_state_payload("review_state", {}))
+            return policy.to_portal_dict(), review_state
+
+        approval_time = timezone.now()
+        policy.approved_by = normalized_actor_username
+        policy.approved_at = approval_time
+        policy.save(update_fields=["approved_by", "approved_at"])
+
+    review_state = append_review_state_audit_entries([
+        build_policy_approval_audit_entry(
+            policy,
+            actor_username=normalized_actor_username,
+            actor_display_name=normalize_string(actor_display_name, normalized_actor_username),
+            occurred_at=approval_time,
+        )
+    ])
+    return policy.to_portal_dict(), review_state
 
 
 def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]]:

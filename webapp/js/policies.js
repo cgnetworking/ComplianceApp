@@ -33,6 +33,9 @@
     }
     return typeof currentUser.username === "string" ? currentUser.username.trim() : "";
   }
+  function currentPolicyActorLabel() {
+    return currentPolicyUsername() || "Unknown user";
+  }
   function currentPolicyUserIsStaff() {
     if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
       return false;
@@ -75,10 +78,17 @@
     if (index < 0) {
       return false;
     }
-    uploadedDocuments[index] = {
+    const mergedDocument = {
       ...uploadedDocuments[index],
       ...updatedDocument,
     };
+    const normalizedDocument = typeof normalizeUploadedPolicyItem === "function"
+      ? normalizeUploadedPolicyItem(mergedDocument)
+      : mergedDocument;
+    if (!normalizedDocument) {
+      return false;
+    }
+    uploadedDocuments[index] = normalizedDocument;
     return true;
   }
   async function updatePolicyApproverViaApi(documentId, approver) {
@@ -86,6 +96,123 @@
       method: "PATCH",
       body: JSON.stringify({ approver }),
     });
+  }
+  async function approvePolicyViaApi(documentId) {
+    return apiRequest(`/policies/${encodeURIComponent(documentId)}/approval/`, {
+      method: "POST",
+    });
+  }
+  function policyApprovalDateLabel(value) {
+    const formatted = typeof formatDateWithOrdinal === "function" ? formatDateWithOrdinal(value) : "";
+    return formatted && formatted !== "-" ? formatted : "";
+  }
+  function canCurrentUserApprovePolicy(documentItem) {
+    if (!documentItem || !documentItem.isUploaded || currentPolicyUserIsPolicyReader()) {
+      return false;
+    }
+    const currentIdentity = normalizePolicyApproverIdentity(currentPolicyUsername());
+    if (!currentIdentity) {
+      return false;
+    }
+    if (documentItem.approvedAt) {
+      return false;
+    }
+    const approverIdentity = normalizePolicyApproverIdentity(documentItem.approver);
+    return approverIdentity === currentIdentity;
+  }
+  function ensurePolicyAuditLogState() {
+    if (!state.reviewState || typeof state.reviewState !== "object") {
+      state.reviewState = { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
+    }
+    if (!Array.isArray(state.reviewState.auditLog)) {
+      state.reviewState.auditLog = [];
+    }
+  }
+  function buildLocalPolicyApprovalAuditEntry(documentItem, occurredAt) {
+    const approvalDate = policyApprovalDateLabel(occurredAt) || occurredAt;
+    return {
+      id: `audit-${Math.random().toString(16).slice(2, 14)}`,
+      action: "policy_approved",
+      entityType: "policy",
+      entityId: documentItem.id,
+      summary: `Approved ${documentItem.id} / ${documentItem.title} on ${approvalDate}.`,
+      occurredAt,
+      actor: {
+        username: currentPolicyUsername() || "local-user",
+        displayName: currentPolicyActorLabel(),
+      },
+      metadata: {
+        source: "policies",
+        policyId: documentItem.id,
+        policyTitle: documentItem.title,
+        approvedBy: currentPolicyUsername() || "local-user",
+        approvedAt: occurredAt,
+      },
+    };
+  }
+  async function handlePolicyApprovalSelection(checkbox) {
+    if (!checkbox) {
+      return;
+    }
+    const documentId = typeof checkbox.dataset.policyApprovalDocument === "string"
+      ? checkbox.dataset.policyApprovalDocument.trim()
+      : "";
+    if (!documentId) {
+      checkbox.checked = false;
+      return;
+    }
+
+    const documentItem = documentsById.get(documentId);
+    if (!canCurrentUserApprovePolicy(documentItem)) {
+      checkbox.checked = false;
+      setPolicyUploadStatus("Only the assigned approver can approve this policy.", "error");
+      return;
+    }
+
+    checkbox.disabled = true;
+    setPolicyUploadStatus(`Recording approval for ${documentItem.id}...`, "info");
+    try {
+      if (isApiPersistence()) {
+        const payload = await approvePolicyViaApi(documentId);
+        const updatedDocument = payload && payload.document && typeof payload.document === "object"
+          ? payload.document
+          : null;
+        if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+          throw new Error("Approved policy response was invalid.");
+        }
+        if (payload && payload.reviewState && typeof payload.reviewState === "object") {
+          state.reviewState = normalizeReviewStateValue(payload.reviewState);
+        }
+      } else {
+        const occurredAt = new Date().toISOString();
+        if (!updateUploadedDocumentEntry({
+          id: documentId,
+          approvedAt: occurredAt,
+          approvedBy: currentPolicyUsername() || "local-user",
+        })) {
+          throw new Error("Uploaded policy was not found in local storage.");
+        }
+        ensurePolicyAuditLogState();
+        state.reviewState.auditLog = normalizeReviewAuditLogEntries(
+          state.reviewState.auditLog.concat(buildLocalPolicyApprovalAuditEntry(documentItem, occurredAt)),
+        );
+        await saveUploadedPolicies(uploadedDocuments);
+        saveReviewState();
+      }
+
+      refreshDocumentsIndex();
+      initializePolicySelection();
+      syncUrl();
+      renderPoliciesPage();
+      setPolicyUploadStatus(`Approved ${documentItem.id} / ${documentItem.title}.`, "success");
+    } catch (error) {
+      checkbox.checked = false;
+      checkbox.disabled = false;
+      const detail = error instanceof Error && error.message
+        ? error.message
+        : "Policy approval could not be recorded.";
+      setPolicyUploadStatus(detail, "error");
+    }
   }
   function policyApproverOptions(documentItem) {
     const options = [
@@ -176,7 +303,12 @@
           throw new Error("Updated policy response was invalid.");
         }
       } else {
-        if (!updateUploadedDocumentEntry({ id: documentId, approver: selectedApprover })) {
+        if (!updateUploadedDocumentEntry({
+          id: documentId,
+          approver: selectedApprover,
+          approvedAt: "",
+          approvedBy: "",
+        })) {
           throw new Error("Uploaded policy was not found in local storage.");
         }
         await saveUploadedPolicies(uploadedDocuments);
@@ -406,8 +538,9 @@
       id: formatUploadedPolicyId(number),
       title: fileNameBase(file.name),
       type: "Uploaded policy",
-      owner: "Local browser",
       approver: "Pending review",
+      approvedAt: "",
+      approvedBy: "",
       reviewFrequency: "Not scheduled",
       path: `Local upload / ${file.name}`,
       folder: "Uploaded",
@@ -646,8 +779,9 @@
     if (!els.policyCoverage) {
       return;
     }
+    const activeTab = getPolicyLibraryTab();
     if (!rows.length) {
-      if (getPolicyLibraryTab() === policyLibraryTabs.approvals) {
+      if (activeTab === policyLibraryTabs.approvals) {
         const username = normalizePolicyApproverIdentity(currentPolicyUsername());
         const message = username
           ? "No policies are currently assigned to you for approval."
@@ -670,15 +804,42 @@
             ? `${item.controlCount} mapped controls / ${escapeHtml(item.reviewFrequency)}`
             : `Not yet mapped / ${escapeHtml(item.reviewFrequency)}`;
           const coverageBadge = item.controlCount || "New";
+          const approvedDate = policyApprovalDateLabel(documentItem ? documentItem.approvedAt : "");
+          const approvalNote = approvedDate
+            ? `<div class="mini-copy">Approved ${escapeHtml(approvedDate)}</div>`
+            : "";
           if (!interactive) {
             return `
               <a class="coverage-card coverage-link" href="${href}">
                 <div>
                   <strong>${escapeHtml(item.id)} / ${escapeHtml(item.title)}</strong>
                   <div class="mini-copy">${coverageNote}</div>
+                  ${approvalNote}
                 </div>
                 <span class="doc-type">${coverageBadge}</span>
               </a>
+            `;
+          }
+          if (activeTab === policyLibraryTabs.approvals && canCurrentUserApprovePolicy(documentItem)) {
+            return `
+              <article class="coverage-card coverage-approval-card ${active ? "is-selected" : ""}">
+                <label class="policy-approval-toggle">
+                  <input
+                    type="checkbox"
+                    data-policy-approval-checkbox="true"
+                    data-policy-approval-document="${escapeHtml(item.id)}"
+                    aria-label="Approve ${escapeHtml(item.id)} / ${escapeHtml(item.title)}"
+                  >
+                  <span>Approve</span>
+                </label>
+                <button class="coverage-approval-button" type="button" data-policy-doc="${escapeHtml(item.id)}">
+                  <div>
+                    <strong>${escapeHtml(item.id)} / ${escapeHtml(item.title)}</strong>
+                    <div class="mini-copy">${coverageNote}</div>
+                    <div class="mini-copy">Waiting on your approval</div>
+                  </div>
+                </button>
+              </article>
             `;
           }
           return `
@@ -687,6 +848,7 @@
                 <strong>${escapeHtml(item.id)} / ${escapeHtml(item.title)}</strong>
                 <div class="mini-copy">${coverageNote}</div>
                 <div class="mini-copy">${escapeHtml(documentItem ? documentItem.type : "Document")}</div>
+                ${approvalNote}
               </div>
               <span class="doc-type">${coverageBadge}</span>
             </button>
@@ -743,13 +905,35 @@
       .filter((control) => !relatedControlIds.has(control.id))
       .sort(compareControlViews);
     const canMapControl = !isPolicyReader && availableControls.length > 0;
-    const documentMeta = [
-      `Approver: ${escapeHtml(documentItem.approver)}`,
-      `Source: ${escapeHtml(documentItem.path)}`,
-    ];
+    const documentMeta = [];
+    if (documentItem.isUploaded) {
+      documentMeta.push(`Approver: ${escapeHtml(normalizePolicyApproverValue(documentItem.approver))}`);
+      if (documentItem.path) {
+        documentMeta.push(`Source: ${escapeHtml(documentItem.path)}`);
+      }
+      if (documentItem.approvedAt) {
+        const approvedDate = policyApprovalDateLabel(documentItem.approvedAt) || formatDateTime(documentItem.approvedAt);
+        const approvedBy = typeof documentItem.approvedBy === "string" && documentItem.approvedBy.trim()
+          ? ` by ${documentItem.approvedBy.trim()}`
+          : "";
+        documentMeta.push(`Approved: ${escapeHtml(approvedDate)}${escapeHtml(approvedBy)}`);
+      } else {
+        documentMeta.push("Approval: Pending");
+      }
+    } else if (documentItem.path) {
+      documentMeta.push(`Source: ${escapeHtml(documentItem.path)}`);
+    }
     if (documentItem.isUploaded && documentItem.uploadedAt) {
       documentMeta.push(`Uploaded: ${escapeHtml(formatDateTime(documentItem.uploadedAt))}`);
     }
+    const documentChips = documentItem.isUploaded
+      ? ""
+      : `
+        <div class="chip-row">
+          ${documentItem.type ? `<span class="doc-type">${escapeHtml(documentItem.type)}</span>` : ""}
+          ${documentItem.reviewFrequency ? `<span class="chip">${escapeHtml(documentItem.reviewFrequency)}</span>` : ""}
+        </div>
+      `;
     const documentActions = documentItem.isUploaded && !isPolicyReader
       ? `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
       : "";
@@ -791,11 +975,7 @@
           <p class="panel-kicker">${escapeHtml(documentItem.isUploaded ? "Uploaded document" : "Policy document")}</p>
           <h3>${escapeHtml(documentItem.id)} / ${escapeHtml(documentItem.title)}</h3>
         </div>
-        <div class="chip-row">
-          <span class="doc-type">${escapeHtml(documentItem.type)}</span>
-          <span class="chip">${escapeHtml(documentItem.reviewFrequency)}</span>
-          <span class="chip">${escapeHtml(documentItem.owner)}</span>
-        </div>
+        ${documentChips}
         <p class="doc-purpose">${escapeHtml(documentItem.purpose || "No purpose summary found.")}</p>
         <div class="document-meta">
           ${documentMeta.map((item) => `<span>${item}</span>`).join("")}
@@ -1103,6 +1283,9 @@
         if (!myApproverIdentity) {
           return false;
         }
+        if (!documentItem || !documentItem.isUploaded || documentItem.approvedAt) {
+          return false;
+        }
         const approverIdentity = normalizePolicyApproverIdentity(documentItem ? documentItem.approver : "");
         if (approverIdentity !== myApproverIdentity) {
           return false;
@@ -1117,6 +1300,8 @@
         item.reviewFrequency,
         documentItem ? documentItem.type : "",
         documentItem ? documentItem.path : "",
+        documentItem ? documentItem.approvedBy || "" : "",
+        documentItem ? documentItem.approvedAt || "" : "",
         documentItem ? documentItem.originalFilename || "" : "",
       ].join(" ").toLowerCase();
       return text.includes(searchLower);
