@@ -993,6 +993,49 @@ tbody tr.is-selected {
   white-space: nowrap;
 }
 
+.recommendation-picker {
+  position: relative;
+}
+
+.recommendation-picker-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 16px 30px rgba(36, 14, 71, 0.14);
+}
+
+.recommendation-option {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 0.93rem;
+  line-height: 1.45;
+}
+
+.recommendation-option:hover,
+.recommendation-option.is-active {
+  background: rgba(124, 58, 237, 0.12);
+  color: var(--accent-strong);
+}
+
+.recommendation-option-empty {
+  padding: 11px 14px;
+  color: var(--muted-strong);
+  font-size: 0.9rem;
+}
+
 .form-field,
 .risk-level-field {
   display: grid;

@@ -64,14 +64,18 @@
               <div class="quick-add-row">
                 <label class="form-field" for="checklist-recommendation-select">
                   <span>Recommended task</span>
-                  <input
-                    id="checklist-recommendation-select"
-                    type="search"
-                    list="checklist-recommendation-options"
-                    placeholder="Search recommended tasks"
-                    autocomplete="off"
-                  >
-                  <datalist id="checklist-recommendation-options"></datalist>
+                  <div class="recommendation-picker" id="checklist-recommendation-picker">
+                    <input
+                      id="checklist-recommendation-select"
+                      type="search"
+                      placeholder="Search recommended tasks"
+                      autocomplete="off"
+                      aria-haspopup="listbox"
+                      aria-expanded="false"
+                      aria-controls="checklist-recommendation-list"
+                    >
+                    <div class="recommendation-picker-list" id="checklist-recommendation-list" role="listbox" hidden></div>
+                  </div>
                 </label>
                 <button class="ghost-button" type="button" id="checklist-recommendation-add">Quick add selected task</button>
               </div>

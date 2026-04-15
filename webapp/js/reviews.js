@@ -166,8 +166,11 @@
     const existingSignatures = new Set(getAllChecklistItems().map((item) => checklistSignature(item)));
     return getRecommendedChecklistItems().filter((item) => !existingSignatures.has(checklistSignature(item)));
   }
-  function checklistRecommendationDatalist() {
-    return document.getElementById("checklist-recommendation-options");
+  function checklistRecommendationPicker() {
+    return document.getElementById("checklist-recommendation-picker");
+  }
+  function checklistRecommendationList() {
+    return document.getElementById("checklist-recommendation-list");
   }
   function checklistRecommendationLabel(item) {
     return `${item.item} (${item.frequency} / ${item.owner})`;
@@ -181,6 +184,26 @@
       return recommendations;
     }
     return recommendations.filter((item) => item.item.toLowerCase().includes(normalizedQuery));
+  }
+  function findChecklistRecommendationById(id) {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId) {
+      return null;
+    }
+    return availableChecklistRecommendations().find((item) => item.id === normalizedId) || null;
+  }
+  function findExactChecklistRecommendationByInput(rawValue) {
+    const normalizedValue = normalizeRecommendationQuery(rawValue);
+    if (!normalizedValue) {
+      return null;
+    }
+
+    const recommendations = availableChecklistRecommendations();
+    const exactLabelMatch = recommendations.find((item) => checklistRecommendationLabel(item).toLowerCase() === normalizedValue);
+    if (exactLabelMatch) {
+      return exactLabelMatch;
+    }
+    return recommendations.find((item) => item.item.toLowerCase() === normalizedValue) || null;
   }
   function findChecklistRecommendationByInputValue(rawValue, exactOnly = false) {
     const normalizedValue = normalizeRecommendationQuery(rawValue);
@@ -202,45 +225,10 @@
     }
     return recommendations.find((item) => item.item.toLowerCase().includes(normalizedValue)) || null;
   }
-  function renderChecklistRecommendationOptions() {
-    if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
-      return;
-    }
-
-    const datalist = checklistRecommendationDatalist();
-    if (!datalist) {
-      return;
-    }
-
-    const typedValue = els.checklistRecommendationSelect.value;
-    const allRecommendations = availableChecklistRecommendations();
-    const visibleRecommendations = filteredChecklistRecommendations(allRecommendations, typedValue);
-
-    datalist.innerHTML = visibleRecommendations
-      .map((item) => `<option value="${escapeHtml(checklistRecommendationLabel(item))}"></option>`)
-      .join("");
-
-    const hasRecommendations = allRecommendations.length > 0;
-    els.checklistRecommendationSelect.disabled = !hasRecommendations;
-    els.checklistRecommendationSelect.placeholder = hasRecommendations
-      ? "Search recommended tasks"
-      : "No recommended tasks available";
-
-    const exactRecommendation = findChecklistRecommendationByInputValue(typedValue, true);
-    els.checklistRecommendationAdd.disabled = !hasRecommendations || !exactRecommendation;
-  }
-  function handleChecklistRecommendationSelected() {
-    if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
-      return;
-    }
-
-    renderChecklistRecommendationOptions();
-    const recommendation = findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value, true);
-    els.checklistRecommendationAdd.disabled = !recommendation;
+  function fillChecklistFormFromRecommendation(recommendation) {
     if (!recommendation) {
       return;
     }
-
     if (els.checklistAddCategory) {
       els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, recommendation.category);
     }
@@ -253,6 +241,167 @@
     if (els.checklistAddItem) {
       els.checklistAddItem.value = recommendation.item;
     }
+  }
+  function openChecklistRecommendationPicker() {
+    const picker = checklistRecommendationPicker();
+    const list = checklistRecommendationList();
+    if (!picker || !list) {
+      return;
+    }
+    list.hidden = false;
+    picker.classList.add("is-open");
+    if (els.checklistRecommendationSelect) {
+      els.checklistRecommendationSelect.setAttribute("aria-expanded", "true");
+    }
+  }
+  function closeChecklistRecommendationPicker() {
+    const picker = checklistRecommendationPicker();
+    const list = checklistRecommendationList();
+    if (!picker || !list) {
+      return;
+    }
+    list.hidden = true;
+    picker.classList.remove("is-open");
+    if (els.checklistRecommendationSelect) {
+      els.checklistRecommendationSelect.setAttribute("aria-expanded", "false");
+    }
+  }
+  function applyChecklistRecommendationSelection(recommendation, shouldClose = true) {
+    if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd || !recommendation) {
+      return;
+    }
+    recommendationPickerState.selectedId = recommendation.id;
+    recommendationPickerState.showAll = false;
+    els.checklistRecommendationSelect.value = checklistRecommendationLabel(recommendation);
+    els.checklistRecommendationAdd.disabled = false;
+    fillChecklistFormFromRecommendation(recommendation);
+    renderChecklistRecommendationOptions();
+    if (shouldClose) {
+      closeChecklistRecommendationPicker();
+    }
+  }
+  function bindChecklistRecommendationPickerEvents() {
+    if (!els.checklistRecommendationSelect) {
+      return;
+    }
+
+    const picker = checklistRecommendationPicker();
+    const list = checklistRecommendationList();
+    if (!picker || !list || els.checklistRecommendationSelect.dataset.recommendationPickerBound) {
+      return;
+    }
+
+    els.checklistRecommendationSelect.dataset.recommendationPickerBound = "true";
+
+    els.checklistRecommendationSelect.addEventListener("focus", () => {
+      recommendationPickerState.showAll = true;
+      renderChecklistRecommendationOptions();
+      openChecklistRecommendationPicker();
+    });
+    els.checklistRecommendationSelect.addEventListener("click", () => {
+      recommendationPickerState.showAll = true;
+      renderChecklistRecommendationOptions();
+      openChecklistRecommendationPicker();
+    });
+    els.checklistRecommendationSelect.addEventListener("blur", () => {
+      window.setTimeout(closeChecklistRecommendationPicker, 120);
+    });
+    els.checklistRecommendationSelect.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeChecklistRecommendationPicker();
+        return;
+      }
+      if (event.key !== "Enter") {
+        return;
+      }
+      const recommendation = findChecklistRecommendationById(recommendationPickerState.selectedId)
+        || findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value);
+      if (!recommendation) {
+        return;
+      }
+      applyChecklistRecommendationSelection(recommendation, true);
+      event.preventDefault();
+    });
+
+    list.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
+    list.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-recommendation-id]");
+      if (!option) {
+        return;
+      }
+      const recommendation = findChecklistRecommendationById(option.dataset.recommendationId);
+      if (!recommendation) {
+        return;
+      }
+      applyChecklistRecommendationSelection(recommendation, true);
+    });
+  }
+  function renderChecklistRecommendationOptions() {
+    if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
+      return;
+    }
+
+    const list = checklistRecommendationList();
+    if (!list) {
+      return;
+    }
+
+    bindChecklistRecommendationPickerEvents();
+
+    const typedValue = els.checklistRecommendationSelect.value;
+    const allRecommendations = availableChecklistRecommendations();
+    const queryForFilter = recommendationPickerState.showAll ? "" : typedValue;
+    const visibleRecommendations = filteredChecklistRecommendations(allRecommendations, queryForFilter);
+
+    const hasRecommendations = allRecommendations.length > 0;
+    els.checklistRecommendationSelect.disabled = !hasRecommendations;
+    els.checklistRecommendationSelect.placeholder = hasRecommendations
+      ? "Search recommended tasks"
+      : "No recommended tasks available";
+    if (!hasRecommendations) {
+      recommendationPickerState.selectedId = "";
+      els.checklistRecommendationAdd.disabled = true;
+      list.innerHTML = '<div class="recommendation-option-empty">No recommended tasks available</div>';
+      closeChecklistRecommendationPicker();
+      return;
+    }
+
+    const exactRecommendation = findExactChecklistRecommendationByInput(typedValue);
+    if (exactRecommendation) {
+      recommendationPickerState.selectedId = exactRecommendation.id;
+      fillChecklistFormFromRecommendation(exactRecommendation);
+    } else if (!typedValue.trim() || !visibleRecommendations.some((item) => item.id === recommendationPickerState.selectedId)) {
+      recommendationPickerState.selectedId = "";
+    }
+
+    if (!visibleRecommendations.length) {
+      list.innerHTML = '<div class="recommendation-option-empty">No matching recommended tasks</div>';
+    } else {
+      list.innerHTML = visibleRecommendations.map((item) => `
+        <button
+          class="recommendation-option ${item.id === recommendationPickerState.selectedId ? "is-active" : ""}"
+          type="button"
+          data-recommendation-id="${escapeHtml(item.id)}"
+          role="option"
+          aria-selected="${item.id === recommendationPickerState.selectedId ? "true" : "false"}"
+        >
+          ${escapeHtml(checklistRecommendationLabel(item))}
+        </button>
+      `).join("");
+    }
+
+    els.checklistRecommendationAdd.disabled = !recommendationPickerState.selectedId;
+  }
+  function handleChecklistRecommendationSelected() {
+    if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd) {
+      return;
+    }
+
+    recommendationPickerState.showAll = false;
+    renderChecklistRecommendationOptions();
+    openChecklistRecommendationPicker();
   }
   function refreshChecklistAddFormOptions() {
     if (!els.checklistAddCategory || !els.checklistAddFrequency || !els.checklistAddOwner) {
@@ -324,6 +473,7 @@
       return;
     }
     els.checklistAddForm.hidden = false;
+    recommendationPickerState.selectedId = "";
     refreshChecklistAddFormOptions();
     if (els.checklistAddCategory && !els.checklistAddCategory.value) {
       els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, "Custom");
@@ -355,6 +505,9 @@
     if (els.checklistRecommendationAdd) {
       els.checklistRecommendationAdd.disabled = true;
     }
+    recommendationPickerState.selectedId = "";
+    recommendationPickerState.showAll = false;
+    closeChecklistRecommendationPicker();
   }
   async function handleChecklistAddSubmit(event) {
     event.preventDefault();
@@ -389,7 +542,8 @@
     if (!els.checklistRecommendationSelect) {
       return;
     }
-    const recommendation = findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value, true);
+    const recommendation = findChecklistRecommendationById(recommendationPickerState.selectedId)
+      || findExactChecklistRecommendationByInput(els.checklistRecommendationSelect.value);
     if (!recommendation) {
       setUploadStatus(
         els.checklistAddStatus,
@@ -550,3 +704,7 @@
     }
     return [];
   }
+  const recommendationPickerState = {
+    selectedId: "",
+    showAll: false,
+  };
