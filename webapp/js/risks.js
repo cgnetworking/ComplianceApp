@@ -3,6 +3,8 @@
 
   function renderRisksPage() {
     renderRiskAssigneeFilter();
+    renderRiskStatusFilter();
+    renderRiskLevelFilter();
     const risks = filteredRisks();
     syncSelectionToVisibleRisks(risks);
     renderRiskOverview();
@@ -62,7 +64,7 @@
     }
 
     if (!risks.length) {
-      els.riskList.innerHTML = '<div class="empty-state">No risks match the current search or assignee filter.</div>';
+      els.riskList.innerHTML = '<div class="empty-state">No risks match the current search or active filters.</div>';
       return;
     }
 
@@ -274,6 +276,66 @@
       renderRisksPage();
     });
   }
+  function renderRiskStatusFilter() {
+    if (!els.riskStatusFilter) {
+      return;
+    }
+
+    const selectedStatus = state.riskStatus || "All";
+    const statusOptions = [
+      { value: "All", label: "All statuses" },
+      { value: "Open", label: "Open risks" },
+      { value: "Closed", label: "Closed risks" },
+    ];
+    els.riskStatusFilter.innerHTML = statusOptions
+      .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+      .join("");
+    els.riskStatusFilter.value = valueOrFallback(els.riskStatusFilter, selectedStatus);
+    state.riskStatus = els.riskStatusFilter.value;
+
+    if (els.riskStatusFilter.dataset.bound) {
+      return;
+    }
+    els.riskStatusFilter.dataset.bound = "true";
+    els.riskStatusFilter.addEventListener("change", (event) => {
+      state.riskStatus = event.target.value;
+      syncSelectionToVisibleRisks();
+      syncUrl();
+      renderRisksPage();
+    });
+  }
+  function renderRiskLevelFilter() {
+    if (!els.riskLevelFilter) {
+      return;
+    }
+
+    const selectedLevel = state.riskLevel || "All";
+    const levelOptions = [
+      { value: "All", label: "All levels" },
+      { value: "very-low", label: "Very low" },
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+      { value: "very-high", label: "Very high" },
+      { value: "extreme", label: "Extreme" },
+    ];
+    els.riskLevelFilter.innerHTML = levelOptions
+      .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+      .join("");
+    els.riskLevelFilter.value = valueOrFallback(els.riskLevelFilter, selectedLevel);
+    state.riskLevel = els.riskLevelFilter.value;
+
+    if (els.riskLevelFilter.dataset.bound) {
+      return;
+    }
+    els.riskLevelFilter.dataset.bound = "true";
+    els.riskLevelFilter.addEventListener("change", (event) => {
+      state.riskLevel = event.target.value;
+      syncSelectionToVisibleRisks();
+      syncUrl();
+      renderRisksPage();
+    });
+  }
   function renderRiskOwnerOptions(selectedOwner) {
     if (!els.riskOwnerInput) {
       return;
@@ -387,10 +449,21 @@
   function filteredRisks() {
     const searchLower = state.search.trim().toLowerCase();
     const assigneeFilter = typeof state.riskAssignee === "string" ? state.riskAssignee.trim() : "";
+    const statusFilter = typeof state.riskStatus === "string" ? state.riskStatus.trim() : "";
+    const levelFilter = typeof state.riskLevel === "string" ? state.riskLevel.trim() : "";
     return state.riskRegister
       .slice()
       .filter((risk) => {
         if (assigneeFilter && assigneeFilter !== "All" && risk.owner !== assigneeFilter) {
+          return false;
+        }
+        if (statusFilter === "Open" && isRiskClosed(risk)) {
+          return false;
+        }
+        if (statusFilter === "Closed" && !isRiskClosed(risk)) {
+          return false;
+        }
+        if (levelFilter && levelFilter !== "All" && riskBandKey(risk.probability, risk.impact) !== levelFilter) {
           return false;
         }
         if (!searchLower) {

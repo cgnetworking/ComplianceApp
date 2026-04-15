@@ -749,6 +749,12 @@
     if (page === "risks" && state.riskAssignee && state.riskAssignee !== "All") {
       query.set("assignee", state.riskAssignee);
     }
+    if (page === "risks" && state.riskStatus && state.riskStatus !== "All") {
+      query.set("status", state.riskStatus);
+    }
+    if (page === "risks" && state.riskLevel && state.riskLevel !== "All") {
+      query.set("level", state.riskLevel);
+    }
     if (page === "vendors" && state.selectedVendorResponseId) {
       query.set("vendor", state.selectedVendorResponseId);
     }
