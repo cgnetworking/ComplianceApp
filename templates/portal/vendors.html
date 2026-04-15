@@ -36,9 +36,16 @@
           </div>
           <div class="report-actions">
             <input id="vendor-upload-input" type="file" accept=".csv,.json,.txt,.md,.markdown,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
+            <a
+              class="ghost-button"
+              href="{% static 'downloads/vendor_due_diligence_intake_sample.csv' %}"
+              download="vendor_due_diligence_intake_form.csv"
+            >
+              Download Sample Form
+            </a>
             <button class="ghost-button" id="vendor-upload-trigger" type="button">Import Responses</button>
             <p class="helper-note upload-status" id="vendor-upload-status">
-              Upload completed questionnaires, spreadsheets, or exported response files. Text-based files generate inline previews.
+              Download the sample CSV, replace the sample answers, and import completed questionnaires or exports. Text-based files generate inline previews.
             </p>
           </div>
         </section>

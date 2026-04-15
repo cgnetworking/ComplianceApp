@@ -1019,8 +1019,8 @@
     }
     if (els.vendorUploadStatus) {
       els.vendorUploadStatus.textContent = isApiPersistence()
-        ? "Upload completed questionnaires, spreadsheets, or exported response files into the shared portal workspace. Text-based files generate inline previews."
-        : "Upload completed questionnaires, spreadsheets, or exported response files. Text-based files generate inline previews.";
+        ? "Download the sample CSV, replace the sample answers, and upload completed questionnaires or exports into the shared portal workspace. Text-based files generate inline previews."
+        : "Download the sample CSV, replace the sample answers, and upload completed questionnaires or exports. Text-based files generate inline previews.";
     }
     if (els.mappingUploadStatus) {
       els.mappingUploadStatus.textContent = isApiPersistence()
