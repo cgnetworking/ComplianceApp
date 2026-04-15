@@ -47,11 +47,6 @@
   }
 
   function auditChecklistId(entry) {
-    const metadata = entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
-    const scopedItemId = typeof metadata.scopedItemId === "string" ? metadata.scopedItemId.trim() : "";
-    if (scopedItemId) {
-      return scopedItemId;
-    }
     const entityId = typeof entry.entityId === "string" ? entry.entityId.trim() : "";
     if (!entityId) {
       return "";
@@ -63,27 +58,16 @@
     return entityId.slice(scopedSeparator + 2).trim();
   }
 
-  function auditChecklistCreatedMonth(entry, checklistItem) {
-    const metadata = entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
-    const explicitCreatedMonth = typeof metadata.checklistItemCreatedMonth === "string"
-      ? metadata.checklistItemCreatedMonth.trim()
-      : "";
-    if (explicitCreatedMonth) {
-      return explicitCreatedMonth;
-    }
-    const metadataCreatedAt = typeof metadata.checklistItemCreatedAt === "string"
-      ? metadata.checklistItemCreatedAt.trim()
-      : "";
+  function auditChecklistCreatedMonth(checklistItem) {
     const checklistCreatedAt = checklistItem && typeof checklistItem.createdAt === "string"
       ? checklistItem.createdAt.trim()
       : "";
-    const rawTimestamp = metadataCreatedAt || checklistCreatedAt;
-    if (!rawTimestamp) {
+    if (!checklistCreatedAt) {
       return "";
     }
     const parsed = typeof parseDisplayDateValue === "function"
-      ? parseDisplayDateValue(rawTimestamp)
-      : new Date(rawTimestamp);
+      ? parseDisplayDateValue(checklistCreatedAt)
+      : new Date(checklistCreatedAt);
     if (!parsed || Number.isNaN(parsed.getTime())) {
       return "";
     }
@@ -93,12 +77,13 @@
   function auditRecordLabel(entry, checklistById = null) {
     const checklistId = auditChecklistId(entry);
     if (checklistId && checklistId.startsWith("checklist-")) {
-      const metadata = entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
       const checklistItem = checklistById instanceof Map ? checklistById.get(checklistId) : null;
-      const metadataName = typeof metadata.checklistItemName === "string" ? metadata.checklistItemName.trim() : "";
-      const checklistName = metadataName || (checklistItem && typeof checklistItem.item === "string" ? checklistItem.item.trim() : "") || checklistId;
-      const createdMonth = auditChecklistCreatedMonth(entry, checklistItem);
-      return createdMonth ? `${checklistName} / Created ${createdMonth}` : checklistName;
+      if (!checklistItem || typeof checklistItem.item !== "string") {
+        return "";
+      }
+      const checklistName = checklistItem.item.trim();
+      const createdMonth = auditChecklistCreatedMonth(checklistItem);
+      return `${checklistName} / Created ${createdMonth}`;
     }
     const entityType = String(entry.entityType || "record").replaceAll("_", " ");
     const normalizedEntityType = entityType.charAt(0).toUpperCase() + entityType.slice(1);

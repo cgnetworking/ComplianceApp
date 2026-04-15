@@ -444,12 +444,11 @@
       return;
     }
 
-    const visibleRisks = Array.isArray(risks) ? risks : filteredRisks();
     const selectionExists = state.riskRegister.some((risk) => risk.id === state.selectedRiskId);
     if (selectionExists) {
       return;
     }
-    state.selectedRiskId = visibleRisks[0] ? visibleRisks[0].id : "";
+    state.selectedRiskId = "";
   }
   function isRiskClosed(risk) {
     return Boolean(risk.closedDate);
