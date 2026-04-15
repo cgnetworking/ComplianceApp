@@ -134,93 +134,6 @@ install_nginx() {
   fi
 }
 
-install_zero_trust_runtime_prerequisites() {
-  local microsoft_repo_package=""
-  local distro_id=""
-  local version_id=""
-
-  if command -v pwsh >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
-    return
-  fi
-
-  log "Installing Ubuntu prerequisites for the Zero Trust assessment"
-  run_as_root apt-get update
-  run_as_root apt-get install -y wget apt-transport-https software-properties-common gpg openssl
-
-  if command -v pwsh >/dev/null 2>&1; then
-    return
-  fi
-
-  # shellcheck disable=SC1091
-  source /etc/os-release
-  distro_id="${ID:-}"
-  version_id="${VERSION_ID:-}"
-  if [ -z "$distro_id" ] || [ -z "$version_id" ]; then
-    echo "Unable to determine platform metadata for PowerShell installation." >&2
-    exit 1
-  fi
-
-  microsoft_repo_package="$(mktemp)"
-  log "Adding the Microsoft package repository for PowerShell"
-  run_as_root wget -q -O "$microsoft_repo_package" "https://packages.microsoft.com/config/$distro_id/$version_id/packages-microsoft-prod.deb"
-  run_as_root dpkg -i "$microsoft_repo_package"
-  rm -f "$microsoft_repo_package"
-
-  run_as_root apt-get update
-  run_as_root apt-get install -y powershell
-
-  if ! command -v pwsh >/dev/null 2>&1; then
-    echo "PowerShell installation completed but the pwsh command is still unavailable." >&2
-    exit 1
-  fi
-}
-
-install_zero_trust_module_for_runtime_user() {
-  local service_user="$1"
-  local service_home=""
-  local module_version=""
-  local install_script=""
-
-  if ! command -v pwsh >/dev/null 2>&1; then
-    echo "PowerShell 7 must be installed before the ZeroTrustAssessment module can be provisioned." >&2
-    exit 1
-  fi
-
-  if ! command -v runuser >/dev/null 2>&1; then
-    echo "runuser is required to install the ZeroTrustAssessment module for the runtime account." >&2
-    exit 1
-  fi
-
-  service_home="$(getent passwd "$service_user" | cut -d: -f6)"
-  if [ -z "$service_home" ]; then
-    echo "Unable to resolve a home directory for runtime user '$service_user'." >&2
-    exit 1
-  fi
-
-  install_script=$'$ErrorActionPreference = \'Stop\'\n'
-  install_script+=$'$repository = Get-PSRepository -Name PSGallery -ErrorAction Stop\n'
-  install_script+=$'if ($repository.InstallationPolicy -ne \'Trusted\') { Set-PSRepository -Name PSGallery -InstallationPolicy Trusted }\n'
-  install_script+=$'Install-Module ZeroTrustAssessment -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -AcceptLicense\n'
-  install_script+=$'$module = Get-Module -ListAvailable ZeroTrustAssessment | Sort-Object Version -Descending | Select-Object -First 1\n'
-  install_script+=$'if ($null -eq $module) { throw \'ZeroTrustAssessment module installation could not be verified.\' }\n'
-  install_script+=$'Write-Output $module.Version.ToString()'
-
-  log "Installing ZeroTrustAssessment PowerShell module for runtime user: $service_user"
-  module_version="$(
-    run_as_root runuser -u "$service_user" -- env \
-      HOME="$service_home" \
-      USER="$service_user" \
-      LOGNAME="$service_user" \
-      pwsh -NoLogo -NoProfile -Command "$install_script"
-  )"
-
-  if [ -n "$module_version" ]; then
-    log "ZeroTrustAssessment module installed for $service_user (version $module_version)"
-  else
-    log "ZeroTrustAssessment module installed for $service_user"
-  fi
-}
-
 configure_nginx_site_link() {
   local source_conf="$ROOT_DIR/deploy/nginx/complianceapp.conf"
   local available_dir="/etc/nginx/sites-available"
@@ -595,8 +508,6 @@ setup_gunicorn_systemd_service() {
       exit 1
     fi
   fi
-
-  install_zero_trust_module_for_runtime_user "$service_user"
 
   managed_env_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')"
   managed_env_file="$managed_env_dir/${managed_env_name}.env"
@@ -1033,7 +944,6 @@ PY
 ensure_supported_platform
 ensure_python_runtime
 ensure_python_venv
-install_zero_trust_runtime_prerequisites
 install_nginx
 prompt_for_nginx_server_name
 DEFAULT_ALLOWED_HOSTS="$(merge_host_values "$DEFAULT_ALLOWED_HOSTS" "$NGINX_SERVER_NAME")"
@@ -1181,22 +1091,6 @@ echo "Activate the environment with: source \"$VENV_DIR/bin/activate\""
 echo "Gunicorn service units: ${GUNICORN_SERVICE_UNITS:-none}"
 echo "Gunicorn runtime user: ${GUNICORN_RUNTIME_USER:-none}"
 echo "Gunicorn runtime group: ${GUNICORN_RUNTIME_GROUP:-none}"
-if command -v pwsh >/dev/null 2>&1; then
-  echo "PowerShell 7: installed"
-fi
-if [ -n "$GUNICORN_RUNTIME_USER" ] && command -v pwsh >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
-  ZERO_TRUST_RUNTIME_HOME="$(getent passwd "$GUNICORN_RUNTIME_USER" | cut -d: -f6)"
-  ZERO_TRUST_MODULE_VERSION="$(
-    run_as_root runuser -u "$GUNICORN_RUNTIME_USER" -- env \
-      HOME="$ZERO_TRUST_RUNTIME_HOME" \
-      USER="$GUNICORN_RUNTIME_USER" \
-      LOGNAME="$GUNICORN_RUNTIME_USER" \
-      pwsh -NoLogo -NoProfile -Command '$module = Get-Module -ListAvailable ZeroTrustAssessment | Sort-Object Version -Descending | Select-Object -First 1; if ($null -eq $module) { "" } else { $module.Version.ToString() }'
-  )"
-  if [ -n "$ZERO_TRUST_MODULE_VERSION" ]; then
-    echo "ZeroTrustAssessment module: $ZERO_TRUST_MODULE_VERSION"
-  fi
-fi
 if [ -n "$GUNICORN_ENV_FILE" ]; then
   echo "Gunicorn environment file: $GUNICORN_ENV_FILE"
 fi

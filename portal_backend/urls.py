@@ -20,5 +20,4 @@ urlpatterns = [
     path("policies.html", portal_views.policies_page, name="portal-policies"),
     path("risks.html", portal_views.risks_page, name="portal-risks"),
     path("vendors.html", portal_views.vendors_page, name="portal-vendors"),
-    path("zero-trust.html", portal_views.zero_trust_page, name="portal-zero-trust"),
 ]

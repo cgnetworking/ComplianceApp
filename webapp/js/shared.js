@@ -665,11 +665,6 @@
       case "vendors":
         renderVendorsPage();
         break;
-      case "zero-trust":
-        if (typeof renderZeroTrustPage === "function") {
-          renderZeroTrustPage();
-        }
-        break;
       default:
         renderHomePage();
         break;
