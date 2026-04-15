@@ -30,7 +30,7 @@
         },
       },
       authentication: {
-        mode: "delegated",
+        mode: "app_only",
         useDeviceCode: false,
         appOnly: {
           tenantId: "",
@@ -168,8 +168,8 @@
         },
       },
       authentication: {
-        mode: typeof authentication.mode === "string" ? authentication.mode : "delegated",
-        useDeviceCode: Boolean(authentication.useDeviceCode),
+        mode: "app_only",
+        useDeviceCode: false,
         appOnly: {
           tenantId: typeof appOnly.tenantId === "string" ? appOnly.tenantId : "",
           clientId: typeof appOnly.clientId === "string" ? appOnly.clientId : "",
@@ -221,10 +221,29 @@
         summary: latestResult.summary && typeof latestResult.summary === "object" ? latestResult.summary : {},
       },
       history,
-      docs: value.docs && typeof value.docs === "object" ? value.docs : defaults.docs,
+      docs: value.docs && typeof value.docs === "object"
+        ? {
+            zeroTrust: typeof value.docs.zeroTrust === "string" ? value.docs.zeroTrust : "",
+            powerShellUbuntu: typeof value.docs.powerShellUbuntu === "string" ? value.docs.powerShellUbuntu : "",
+            graphAppOnlyAuth: typeof value.docs.graphAppOnlyAuth === "string" ? value.docs.graphAppOnlyAuth : "",
+          }
+        : defaults.docs,
       installInstructions:
         value.installInstructions && typeof value.installInstructions === "object"
-          ? value.installInstructions
+          ? {
+              ubuntuPowerShell:
+                value.installInstructions.ubuntuPowerShell && typeof value.installInstructions.ubuntuPowerShell === "object"
+                  ? value.installInstructions.ubuntuPowerShell
+                  : defaults.installInstructions.ubuntuPowerShell,
+              zeroTrustAssessment:
+                value.installInstructions.zeroTrustAssessment && typeof value.installInstructions.zeroTrustAssessment === "object"
+                  ? value.installInstructions.zeroTrustAssessment
+                  : defaults.installInstructions.zeroTrustAssessment,
+              graphAppOnlyAuth:
+                value.installInstructions.graphAppOnlyAuth && typeof value.installInstructions.graphAppOnlyAuth === "object"
+                  ? value.installInstructions.graphAppOnlyAuth
+                  : defaults.installInstructions.graphAppOnlyAuth,
+            }
           : defaults.installInstructions,
       entraSetupDirections: Array.isArray(value.entraSetupDirections) ? value.entraSetupDirections : [],
       updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : "",
@@ -272,8 +291,17 @@
 
   function zeroTrustAuthModeLabel(mode) {
     return String(mode || "").trim().toLowerCase() === "app_only"
-      ? "App-only"
-      : "Delegated";
+      ? "Certificate auth"
+      : "Unavailable";
+  }
+
+  function zeroTrustPrerequisitesReady(prerequisites) {
+    const value = prerequisites && typeof prerequisites === "object" ? prerequisites : {};
+    const powerShell = value.powerShell && typeof value.powerShell === "object" ? value.powerShell : {};
+    const zeroTrustModule = value.zeroTrustModule && typeof value.zeroTrustModule === "object"
+      ? value.zeroTrustModule
+      : {};
+    return Boolean(powerShell.installed) && Boolean(zeroTrustModule.installed);
   }
 
   function formatZeroTrustDate(value) {
@@ -357,12 +385,12 @@
         value: powerShell.installed ? `Installed (${powerShell.version || "version unknown"})` : "Not installed",
         note: powerShell.installed
           ? "Ubuntu prerequisites are available."
-          : "Install PowerShell 7 from Microsoft's Ubuntu package repository.",
+          : "Run scripts/local_setup.sh to install the Ubuntu prerequisites.",
       },
       {
-        label: "Authentication",
+        label: "Certificate auth",
         value: zeroTrustAuthModeLabel(authentication.mode),
-        note: authentication.statusMessage || "Authentication settings are not available.",
+        note: authentication.statusMessage || "Certificate settings are not available.",
       },
       {
         label: "Next scheduled run",
@@ -401,13 +429,13 @@
     if (pwshStatus) {
       pwshStatus.textContent = powerShell.installed
         ? `Installed (${powerShell.version || "version unknown"}).`
-        : "Not installed. Use the Ubuntu prerequisites commands above.";
+        : "Not installed. Run scripts/local_setup.sh first.";
     }
 
     if (moduleStatus) {
       moduleStatus.textContent = moduleState.installed
         ? `Installed (${moduleState.version || "version unknown"}).`
-        : "Not installed. Run Install-Module ZeroTrustAssessment -Scope CurrentUser in PowerShell 7.";
+        : "Not installed. Run scripts/local_setup.sh so the module is installed for the runtime account.";
     }
 
     if (health) {
@@ -501,7 +529,7 @@
           : "Certificate ready and trusted on this server.";
         status.classList.add("is-success");
       } else {
-        status.textContent = "No app-only certificate has been generated from this page yet.";
+        status.textContent = "No certificate has been generated from this page yet.";
         status.classList.add("is-info");
       }
     }
@@ -525,25 +553,12 @@
     const authentication = assessment.authentication || {};
     const appOnly = authentication.appOnly || {};
 
-    const authMode = document.getElementById("zero-trust-auth-mode");
-    const useDeviceCode = document.getElementById("zero-trust-use-device-code");
-    const appOnlyFields = document.getElementById("zero-trust-app-only-fields");
     const tenantId = document.getElementById("zero-trust-tenant-id");
     const clientId = document.getElementById("zero-trust-client-id");
     const certificateReference = document.getElementById("zero-trust-certificate-reference");
     const status = document.getElementById("zero-trust-auth-status");
     const saveButton = document.getElementById("zero-trust-auth-save");
 
-    if (authMode) {
-      authMode.value = authentication.mode === "app_only" ? "app_only" : "delegated";
-    }
-    if (useDeviceCode) {
-      useDeviceCode.checked = Boolean(authentication.useDeviceCode);
-      useDeviceCode.disabled = authMode && authMode.value === "app_only";
-    }
-    if (appOnlyFields) {
-      appOnlyFields.hidden = !(authMode && authMode.value === "app_only");
-    }
     if (tenantId) {
       tenantId.value = typeof appOnly.tenantId === "string" ? appOnly.tenantId : "";
     }
@@ -555,7 +570,7 @@
     }
 
     if (status) {
-      status.textContent = authentication.statusMessage || "Save settings before starting a run.";
+      status.textContent = authentication.statusMessage || "Save certificate settings before starting a run.";
       status.classList.remove("is-info", "is-success", "is-error", "is-warning");
       status.classList.add(authentication.ready ? "is-success" : "is-warning");
     }
@@ -566,15 +581,13 @@
   }
 
   function collectZeroTrustAuthenticationForm() {
-    const authMode = document.getElementById("zero-trust-auth-mode");
-    const useDeviceCode = document.getElementById("zero-trust-use-device-code");
     const tenantId = document.getElementById("zero-trust-tenant-id");
     const clientId = document.getElementById("zero-trust-client-id");
     const certificateReference = document.getElementById("zero-trust-certificate-reference");
 
     return {
-      mode: authMode && authMode.value === "app_only" ? "app_only" : "delegated",
-      useDeviceCode: Boolean(useDeviceCode && useDeviceCode.checked),
+      mode: "app_only",
+      useDeviceCode: false,
       appOnly: {
         tenantId: tenantId ? tenantId.value.trim() : "",
         clientId: clientId ? clientId.value.trim() : "",
@@ -587,7 +600,7 @@
     event.preventDefault();
 
     zeroTrustViewState.isLoading = true;
-    setZeroTrustActionStatus("Saving authentication settings...", "info");
+    setZeroTrustActionStatus("Saving certificate settings...", "info");
     renderZeroTrustPage();
 
     try {
@@ -601,9 +614,9 @@
         setZeroTrustAssessmentState(payload.zeroTrustAssessment);
       }
       zeroTrustViewState.hasLoaded = true;
-      setZeroTrustActionStatus("Authentication settings saved.", "success");
+      setZeroTrustActionStatus("Certificate settings saved.", "success");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to save authentication settings.";
+      const message = error instanceof Error ? error.message : "Unable to save certificate settings.";
       setZeroTrustActionStatus(message, "error");
     } finally {
       zeroTrustViewState.isLoading = false;
@@ -717,6 +730,7 @@
     const schedule = assessment.schedule || {};
     const latestResult = assessment.latestResult || {};
     const authentication = assessment.authentication || {};
+    const prerequisites = assessment.prerequisites || {};
 
     const runStatus = document.getElementById("zero-trust-run-status");
     const scheduleStatus = document.getElementById("zero-trust-schedule-status");
@@ -758,11 +772,12 @@
     }
 
     const platformSupported = Boolean(assessment.platform && assessment.platform.supported);
+    const prerequisitesReady = zeroTrustPrerequisitesReady(prerequisites);
     const authenticationReady = typeof authentication.ready === "boolean" ? authentication.ready : true;
     const running = String(run.status || "").trim().toLowerCase() === "running";
 
     if (runButton) {
-      runButton.disabled = !platformSupported || !authenticationReady || running || zeroTrustViewState.isLoading;
+      runButton.disabled = !platformSupported || !prerequisitesReady || !authenticationReady || running || zeroTrustViewState.isLoading;
     }
     if (refreshButton) {
       refreshButton.disabled = zeroTrustViewState.isLoading;
@@ -813,9 +828,17 @@
       renderZeroTrustPage();
       return;
     }
+    if (!zeroTrustPrerequisitesReady(assessment.prerequisites)) {
+      setZeroTrustActionStatus(
+        "Ubuntu prerequisites are incomplete. Run scripts/local_setup.sh before starting the assessment.",
+        "warning"
+      );
+      renderZeroTrustPage();
+      return;
+    }
     if (assessment.authentication && assessment.authentication.ready === false) {
       setZeroTrustActionStatus(
-        assessment.authentication.statusMessage || "Authentication settings are incomplete.",
+        assessment.authentication.statusMessage || "Certificate settings are incomplete.",
         "warning"
       );
       renderZeroTrustPage();
@@ -832,15 +855,7 @@
         setZeroTrustAssessmentState(payload.zeroTrustAssessment);
       }
       zeroTrustViewState.hasLoaded = true;
-      const mode = assessment.authentication && assessment.authentication.mode === "app_only"
-        ? "app-only"
-        : "delegated";
-      setZeroTrustActionStatus(
-        mode === "app-only"
-          ? "Assessment started in app-only mode."
-          : "Assessment started in delegated mode. Complete Microsoft sign-in prompts if they appear.",
-        "success"
-      );
+      setZeroTrustActionStatus("Assessment started with certificate authentication.", "success");
       scheduleZeroTrustPolling(7000);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start Zero Trust assessment.";
@@ -860,7 +875,6 @@
     const runButton = document.getElementById("zero-trust-run-trigger");
     const refreshButton = document.getElementById("zero-trust-refresh-trigger");
     const authForm = document.getElementById("zero-trust-auth-form");
-    const authMode = document.getElementById("zero-trust-auth-mode");
     const generateCertificateButton = document.getElementById("zero-trust-certificate-generate");
 
     if (tabBar) {
@@ -889,12 +903,6 @@
     if (authForm) {
       authForm.addEventListener("submit", (event) => {
         void saveZeroTrustAuthentication(event);
-      });
-    }
-
-    if (authMode) {
-      authMode.addEventListener("change", () => {
-        renderZeroTrustPage();
       });
     }
 

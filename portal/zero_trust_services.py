@@ -42,7 +42,7 @@ ZERO_TRUST_PUBLIC_CERTIFICATE_FILENAME = "ZeroTrustAssessmentPublicKey.cer"
 ZERO_TRUST_CERTIFICATE_VALID_DAYS = 825
 
 ZERO_TRUST_DOC_URL = "https://learn.microsoft.com/en-us/security/zero-trust/assessment/get-started"
-POWERSHELL_UBUNTU_DOC_URL = (
+POWERSHELL_INSTALL_DOC_URL = (
     "https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu?view=powershell-7.6"
 )
 GRAPH_APP_ONLY_DOC_URL = "https://learn.microsoft.com/en-us/powershell/microsoftgraph/app-only?view=graph-powershell-1.0"
@@ -194,7 +194,7 @@ def _normalize_generated_certificate(value: object) -> dict[str, object]:
 
 def _default_authentication_config() -> dict[str, object]:
     return {
-        "mode": "delegated",
+        "mode": "app_only",
         "useDeviceCode": False,
         "appOnly": {
             "tenantId": "",
@@ -210,10 +210,6 @@ def _normalize_authentication_config(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         return defaults
 
-    mode = _normalize_string(value.get("mode"), "delegated").lower()
-    if mode not in {"delegated", "app_only"}:
-        mode = "delegated"
-
     app_only_payload = value.get("appOnly") if isinstance(value.get("appOnly"), dict) else {}
     generated_certificate_payload = (
         app_only_payload.get("generatedCertificate")
@@ -222,8 +218,8 @@ def _normalize_authentication_config(value: object) -> dict[str, object]:
     )
 
     return {
-        "mode": mode,
-        "useDeviceCode": _normalize_bool(value.get("useDeviceCode"), False),
+        "mode": "app_only",
+        "useDeviceCode": False,
         "appOnly": {
             "tenantId": _normalize_string(app_only_payload.get("tenantId")),
             "clientId": _normalize_string(app_only_payload.get("clientId")),
@@ -247,28 +243,18 @@ def _validate_guid(value: str, label: str) -> str:
 
 def _validate_authentication_config(value: object) -> dict[str, object]:
     normalized = _normalize_authentication_config(value)
-    if normalized["mode"] != "app_only":
-        return normalized
-
     app_only = normalized["appOnly"]
     app_only["tenantId"] = _validate_guid(str(app_only.get("tenantId") or ""), "Tenant ID")
     app_only["clientId"] = _validate_guid(str(app_only.get("clientId") or ""), "Client ID")
 
     certificate_reference = _normalize_string(app_only.get("certificateReference"))
     if not certificate_reference:
-        raise ValueError("Certificate reference is required for app-only mode.")
+        raise ValueError("Certificate reference is required for certificate authentication.")
     app_only["certificateReference"] = certificate_reference
     return normalized
 
 
 def _authentication_readiness(authentication: dict[str, object]) -> dict[str, object]:
-    mode = _normalize_string(authentication.get("mode"), "delegated").lower()
-    if mode != "app_only":
-        return {
-            "ready": True,
-            "message": "Delegated user sign-in mode is enabled.",
-        }
-
     app_only = authentication.get("appOnly") if isinstance(authentication.get("appOnly"), dict) else {}
     missing_fields: list[str] = []
     if not _normalize_string(app_only.get("tenantId")):
@@ -281,12 +267,12 @@ def _authentication_readiness(authentication: dict[str, object]) -> dict[str, ob
     if missing_fields:
         return {
             "ready": False,
-            "message": f"App-only mode is missing: {', '.join(missing_fields)}.",
+            "message": f"Certificate authentication is missing: {', '.join(missing_fields)}.",
         }
 
     return {
         "ready": True,
-        "message": "App-only configuration is set.",
+        "message": "Certificate authentication is configured.",
     }
 
 
@@ -435,7 +421,7 @@ def _read_os_release() -> dict[str, str]:
     return values
 
 
-def detect_ubuntu_platform() -> dict[str, object]:
+def detect_linux_platform() -> dict[str, object]:
     system_name = platform.system().strip() or "Unknown"
     platform_payload: dict[str, object] = {
         "supported": False,
@@ -446,7 +432,7 @@ def detect_ubuntu_platform() -> dict[str, object]:
     }
 
     if system_name.lower() != "linux":
-        platform_payload["reason"] = "This feature supports Ubuntu on Linux only."
+        platform_payload["reason"] = "This feature supports Ubuntu only."
         return platform_payload
 
     os_release = _read_os_release()
@@ -480,7 +466,7 @@ def _run_capture(command: list[str], timeout_seconds: int = 20) -> tuple[int, st
 
 
 def detect_zero_trust_prerequisites(platform_payload: dict[str, object] | None = None) -> dict[str, object]:
-    platform_info = platform_payload if isinstance(platform_payload, dict) else detect_ubuntu_platform()
+    platform_info = platform_payload if isinstance(platform_payload, dict) else detect_linux_platform()
 
     prerequisites = {
         "powerShell": {
@@ -522,6 +508,35 @@ def detect_zero_trust_prerequisites(platform_payload: dict[str, object] | None =
     return prerequisites
 
 
+def _prerequisite_readiness(prerequisites: dict[str, object]) -> dict[str, object]:
+    power_shell = prerequisites.get("powerShell") if isinstance(prerequisites.get("powerShell"), dict) else {}
+    zero_trust_module = (
+        prerequisites.get("zeroTrustModule")
+        if isinstance(prerequisites.get("zeroTrustModule"), dict)
+        else {}
+    )
+
+    missing_items: list[str] = []
+    if not _normalize_bool(power_shell.get("installed"), False):
+        missing_items.append("PowerShell 7")
+    if not _normalize_bool(zero_trust_module.get("installed"), False):
+        missing_items.append("ZeroTrustAssessment module")
+
+    if missing_items:
+        return {
+            "ready": False,
+            "message": (
+                "Ubuntu prerequisites are incomplete. "
+                f"Run `scripts/local_setup.sh` to install: {', '.join(missing_items)}."
+            ),
+        }
+
+    return {
+        "ready": True,
+        "message": "Ubuntu prerequisites are installed.",
+    }
+
+
 def _is_path_within_root(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -561,10 +576,7 @@ def _prepare_run_context(
     }
 
     authentication = _normalize_authentication_config(state.get("authentication"))
-    if authentication.get("mode") == "app_only":
-        state["run"]["message"] = "Assessment is running with app-only authentication."
-    elif bool(authentication.get("useDeviceCode")):
-        state["run"]["message"] = "Assessment is running in delegated mode with device code sign-in."
+    state["run"]["message"] = "Assessment is running with certificate authentication."
 
     return {
         "runId": run_id,
@@ -680,7 +692,7 @@ def _run_checked_command(
             cwd=str(cwd) if isinstance(cwd, Path) else None,
         )
     except FileNotFoundError as error:
-        raise ValueError(f"Required command `{command[0]}` is not available on this Ubuntu server.") from error
+        raise ValueError(f"Required command `{command[0]}` is not available on this server.") from error
     except subprocess.SubprocessError as error:
         raise ValueError(f"Unable to run `{command[0]}` while preparing the certificate: {error}") from error
 
@@ -738,9 +750,9 @@ def _import_certificate_into_powershell_store(pfx_path: Path, password: str) -> 
 
 def _generate_trusted_app_only_certificate() -> dict[str, object]:
     if not shutil.which("openssl"):
-        raise ValueError("OpenSSL is required. Install it on Ubuntu with `sudo apt-get install -y openssl`.")
+        raise ValueError("OpenSSL is required. Install it on this server before generating the certificate.")
     if not shutil.which("pwsh"):
-        raise ValueError("PowerShell 7 (`pwsh`) is required before generating the app-only certificate.")
+        raise ValueError("PowerShell 7 (`pwsh`) is required before generating the certificate.")
 
     certificate_id = f"cert-{timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     certificate_directory = (ZERO_TRUST_CERTIFICATES_ROOT / certificate_id).resolve()
@@ -850,7 +862,7 @@ def _set_generated_certificate_metadata(authentication: dict[str, object], metad
 
 
 def generate_zero_trust_certificate() -> dict[str, object]:
-    platform_info = detect_ubuntu_platform()
+    platform_info = detect_linux_platform()
     if not platform_info.get("supported"):
         raise ValueError(_normalize_string(platform_info.get("reason"), "Ubuntu is required."))
     _require_runtime_service_owner()
@@ -897,18 +909,12 @@ def get_zero_trust_public_certificate_path() -> Path | None:
 
 
 def _build_connect_command(authentication: dict[str, object]) -> str:
-    mode = _normalize_string(authentication.get("mode"), "delegated").lower()
-    if mode != "app_only":
-        if _normalize_bool(authentication.get("useDeviceCode"), False):
-            return "Connect-ZtAssessment -UseDeviceCode"
-        return "Connect-ZtAssessment"
-
     app_only = authentication.get("appOnly") if isinstance(authentication.get("appOnly"), dict) else {}
     tenant_id = _validate_guid(str(app_only.get("tenantId") or ""), "Tenant ID")
     client_id = _validate_guid(str(app_only.get("clientId") or ""), "Client ID")
     certificate_reference = _normalize_string(app_only.get("certificateReference"))
     if not certificate_reference:
-        raise ValueError("Certificate reference is required for app-only mode.")
+        raise ValueError("Certificate reference is required for certificate authentication.")
 
     return " ".join(
         [
@@ -929,7 +935,6 @@ def _build_powershell_script(report_directory: Path, authentication: dict[str, o
     return "\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
-            "Install-Module ZeroTrustAssessment -Scope CurrentUser -Force -AllowClobber",
             connect_command,
             f"Invoke-ZtAssessment -Path '{escaped_directory}'",
         ]
@@ -1094,7 +1099,7 @@ def _run_assessment_in_background(run_context: dict[str, object]) -> None:
             message = f"Assessment failed with exit code {return_code}."
     except FileNotFoundError:
         status = "failed"
-        message = "PowerShell 7 (`pwsh`) is not installed. Open the prerequisites tab and install it on Ubuntu first."
+        message = "PowerShell 7 (`pwsh`) is not installed. Run `scripts/local_setup.sh` first."
     except ValueError as error:
         status = "failed"
         message = str(error)
@@ -1123,7 +1128,7 @@ def _start_run(
     trigger: str,
     require_due_schedule: bool,
 ) -> bool:
-    platform_info = detect_ubuntu_platform()
+    platform_info = detect_linux_platform()
     if not platform_info.get("supported"):
         return False
     if _runtime_service_requirement_error():
@@ -1143,12 +1148,35 @@ def _start_run(
             return False
 
         schedule = state["schedule"]
+        prerequisites = detect_zero_trust_prerequisites(platform_info)
+        prerequisite_readiness = _prerequisite_readiness(prerequisites)
+        if not bool(prerequisite_readiness.get("ready")):
+            state["run"] = {
+                "status": "failed",
+                "message": _normalize_string(
+                    prerequisite_readiness.get("message"),
+                    "Ubuntu prerequisites are incomplete.",
+                ),
+                "runId": "",
+                "trigger": trigger,
+                "startedAt": "",
+                "finishedAt": "",
+                "runDirectory": "",
+                "logPath": "",
+            }
+            record.payload = state
+            record.save(update_fields=["payload"])
+            return False
+
         authentication = _normalize_authentication_config(state.get("authentication"))
         readiness = _authentication_readiness(authentication)
         if not bool(readiness.get("ready")):
             state["run"] = {
                 "status": "failed",
-                "message": _normalize_string(readiness.get("message"), "Authentication settings are incomplete."),
+                "message": _normalize_string(
+                    readiness.get("message"),
+                    "Certificate settings are incomplete.",
+                ),
                 "runId": "",
                 "trigger": trigger,
                 "startedAt": "",
@@ -1213,7 +1241,7 @@ def trigger_due_zero_trust_assessment_if_needed() -> bool:
 
 
 def start_zero_trust_assessment_run(*, trigger: str = "manual") -> dict[str, object]:
-    platform_info = detect_ubuntu_platform()
+    platform_info = detect_linux_platform()
     if not platform_info.get("supported"):
         with transaction.atomic():
             record, _ = PortalState.objects.select_for_update().get_or_create(
@@ -1266,25 +1294,15 @@ def start_zero_trust_assessment_run(*, trigger: str = "manual") -> dict[str, obj
 def _install_instructions() -> dict[str, object]:
     return {
         "ubuntuPowerShell": {
-            "source": POWERSHELL_UBUNTU_DOC_URL,
-            "commands": [
-                "sudo apt-get update",
-                "sudo apt-get install -y wget apt-transport-https software-properties-common",
-                "source /etc/os-release",
-                "wget -q https://packages.microsoft.com/config/ubuntu/$VERSION_ID/packages-microsoft-prod.deb",
-                "sudo dpkg -i packages-microsoft-prod.deb",
-                "rm packages-microsoft-prod.deb",
-                "sudo apt-get update",
-                "sudo apt-get install -y powershell",
-                "pwsh",
-            ],
+            "source": POWERSHELL_INSTALL_DOC_URL,
+            "commands": [],
         },
         "zeroTrustAssessment": {
             "source": ZERO_TRUST_DOC_URL,
             "commands": [
-                "Install-Module ZeroTrustAssessment -Scope CurrentUser",
-                "Connect-ZtAssessment",
-                "Invoke-ZtAssessment",
+                "pwsh",
+                "Connect-ZtAssessment -ClientId YOUR_APP_ID -TenantId YOUR_TENANT_ID -Certificate YOUR_CERT_SUBJECT",
+                "Invoke-ZtAssessment -Path /path/to/output",
             ],
         },
         "graphAppOnlyAuth": {
@@ -1340,8 +1358,8 @@ def _entra_setup_directions() -> list[dict[str, object]]:
         {
             "title": "Configure this portal and validate",
             "details": [
-                "In this page, switch Authentication mode to App-only.",
-                "Set Tenant ID and Client ID, then keep the auto-populated certificate reference from the generated cert (or provide your own trusted certificate reference).",
+                "In this page, enter Tenant ID and Client ID.",
+                "Keep the auto-populated certificate reference from the generated cert, or provide your own trusted certificate reference.",
                 "Run the assessment and verify success in the run history and report output.",
             ],
         },
@@ -1390,7 +1408,7 @@ def get_zero_trust_assessment_payload(*, auto_run_due: bool = False) -> dict[str
         trigger_due_zero_trust_assessment_if_needed()
 
     state = _read_zero_trust_state()
-    platform_info = detect_ubuntu_platform()
+    platform_info = detect_linux_platform()
     prerequisites = detect_zero_trust_prerequisites(platform_info)
     authentication = _normalize_authentication_config(state.get("authentication"))
     readiness = _authentication_readiness(authentication)
@@ -1410,7 +1428,7 @@ def get_zero_trust_assessment_payload(*, auto_run_due: bool = False) -> dict[str
         "history": state["history"],
         "docs": {
             "zeroTrust": ZERO_TRUST_DOC_URL,
-            "powerShellUbuntu": POWERSHELL_UBUNTU_DOC_URL,
+            "powerShellUbuntu": POWERSHELL_INSTALL_DOC_URL,
             "graphAppOnlyAuth": GRAPH_APP_ONLY_DOC_URL,
         },
         "installInstructions": _install_instructions(),

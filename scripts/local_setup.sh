@@ -24,7 +24,6 @@ GUNICORN_RUNTIME_APP_DIR=""
 GUNICORN_RUNTIME_VENV_DIR=""
 APP_HEALTHCHECK_URL=""
 CREATE_SELF_SIGNED_CERT="false"
-PG_SERVICE_FORMULA=""
 PSQL_ADMIN_CMD=""
 
 log() {
@@ -69,6 +68,10 @@ ensure_supported_platform() {
     echo "Unsupported platform: this setup only supports Ubuntu 24.04+." >&2
     exit 1
   fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Unsupported platform: apt-get is required." >&2
+    exit 1
+  fi
 
   local version_id="${VERSION_ID:-}"
   local major=0
@@ -82,64 +85,14 @@ ensure_supported_platform() {
   fi
 }
 
-detect_package_manager() {
-  if command -v brew >/dev/null 2>&1; then
-    echo "brew"
-    return
-  fi
-  if command -v apt-get >/dev/null 2>&1; then
-    echo "apt"
-    return
-  fi
-  if command -v dnf >/dev/null 2>&1; then
-    echo "dnf"
-    return
-  fi
-  if command -v yum >/dev/null 2>&1; then
-    echo "yum"
-    return
-  fi
-  if command -v pacman >/dev/null 2>&1; then
-    echo "pacman"
-    return
-  fi
-  echo ""
-}
-
 ensure_python_runtime() {
   if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     return
   fi
 
-  local manager
-  manager="$(detect_package_manager)"
-  case "$manager" in
-    brew)
-      log "Installing Python with Homebrew"
-      brew install python
-      ;;
-    apt)
-      log "Installing Python runtime and Python 3.12 venv support with apt-get"
-      run_as_root apt-get update
-      run_as_root apt-get install -y python3 python3-pip python3.12-venv
-      ;;
-    dnf)
-      log "Installing Python runtime with dnf"
-      run_as_root dnf install -y python3 python3-pip
-      ;;
-    yum)
-      log "Installing Python runtime with yum"
-      run_as_root yum install -y python3 python3-pip
-      ;;
-    pacman)
-      log "Installing Python runtime with pacman"
-      run_as_root pacman -Sy --noconfirm python python-pip
-      ;;
-    *)
-      echo "Python is not installed and no supported package manager was found." >&2
-      exit 1
-      ;;
-  esac
+  log "Installing Python runtime and Python 3.12 venv support with apt-get"
+  run_as_root apt-get update
+  run_as_root apt-get install -y python3 python3-pip python3.12-venv
 
   if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     if command -v python3 >/dev/null 2>&1; then
@@ -156,52 +109,9 @@ install_postgresql() {
     return
   fi
 
-  local manager
-  manager="$(detect_package_manager)"
-  case "$manager" in
-    brew)
-      log "Installing PostgreSQL with Homebrew"
-      if brew list --versions postgresql@16 >/dev/null 2>&1; then
-        PG_SERVICE_FORMULA="postgresql@16"
-      elif brew list --versions postgresql >/dev/null 2>&1; then
-        PG_SERVICE_FORMULA="postgresql"
-      else
-        if brew install postgresql@16 >/dev/null 2>&1; then
-          PG_SERVICE_FORMULA="postgresql@16"
-        else
-          brew install postgresql
-          PG_SERVICE_FORMULA="postgresql"
-        fi
-      fi
-      ;;
-    apt)
-      log "Installing PostgreSQL with apt-get"
-      run_as_root apt-get update
-      run_as_root apt-get install -y postgresql postgresql-contrib
-      ;;
-    dnf)
-      log "Installing PostgreSQL with dnf"
-      run_as_root dnf install -y postgresql-server postgresql
-      if command -v postgresql-setup >/dev/null 2>&1; then
-        run_as_root postgresql-setup --initdb || true
-      fi
-      ;;
-    yum)
-      log "Installing PostgreSQL with yum"
-      run_as_root yum install -y postgresql-server postgresql
-      if command -v postgresql-setup >/dev/null 2>&1; then
-        run_as_root postgresql-setup --initdb || true
-      fi
-      ;;
-    pacman)
-      log "Installing PostgreSQL with pacman"
-      run_as_root pacman -Sy --noconfirm postgresql
-      ;;
-    *)
-      echo "Unable to install PostgreSQL automatically. Install PostgreSQL 14+ and rerun this script." >&2
-      exit 1
-      ;;
-  esac
+  log "Installing PostgreSQL with apt-get"
+  run_as_root apt-get update
+  run_as_root apt-get install -y postgresql postgresql-contrib
 
   if ! command -v psql >/dev/null 2>&1; then
     echo "PostgreSQL installation did not provide the psql command." >&2
@@ -214,39 +124,100 @@ install_nginx() {
     return
   fi
 
-  local manager
-  manager="$(detect_package_manager)"
-  case "$manager" in
-    brew)
-      log "Installing NGINX with Homebrew"
-      brew install nginx
-      ;;
-    apt)
-      log "Installing NGINX with apt-get"
-      run_as_root apt-get update
-      run_as_root apt-get install -y nginx
-      ;;
-    dnf)
-      log "Installing NGINX with dnf"
-      run_as_root dnf install -y nginx
-      ;;
-    yum)
-      log "Installing NGINX with yum"
-      run_as_root yum install -y nginx
-      ;;
-    pacman)
-      log "Installing NGINX with pacman"
-      run_as_root pacman -Sy --noconfirm nginx
-      ;;
-    *)
-      echo "Unable to install NGINX automatically. Install NGINX manually and rerun this script." >&2
-      exit 1
-      ;;
-  esac
+  log "Installing NGINX with apt-get"
+  run_as_root apt-get update
+  run_as_root apt-get install -y nginx
 
   if ! command -v nginx >/dev/null 2>&1; then
     echo "NGINX installation did not provide the nginx command." >&2
     exit 1
+  fi
+}
+
+install_zero_trust_runtime_prerequisites() {
+  local microsoft_repo_package=""
+  local distro_id=""
+  local version_id=""
+
+  if command -v pwsh >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+    return
+  fi
+
+  log "Installing Ubuntu prerequisites for the Zero Trust assessment"
+  run_as_root apt-get update
+  run_as_root apt-get install -y wget apt-transport-https software-properties-common gpg openssl
+
+  if command -v pwsh >/dev/null 2>&1; then
+    return
+  fi
+
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  distro_id="${ID:-}"
+  version_id="${VERSION_ID:-}"
+  if [ -z "$distro_id" ] || [ -z "$version_id" ]; then
+    echo "Unable to determine platform metadata for PowerShell installation." >&2
+    exit 1
+  fi
+
+  microsoft_repo_package="$(mktemp)"
+  log "Adding the Microsoft package repository for PowerShell"
+  run_as_root wget -q -O "$microsoft_repo_package" "https://packages.microsoft.com/config/$distro_id/$version_id/packages-microsoft-prod.deb"
+  run_as_root dpkg -i "$microsoft_repo_package"
+  rm -f "$microsoft_repo_package"
+
+  run_as_root apt-get update
+  run_as_root apt-get install -y powershell
+
+  if ! command -v pwsh >/dev/null 2>&1; then
+    echo "PowerShell installation completed but the pwsh command is still unavailable." >&2
+    exit 1
+  fi
+}
+
+install_zero_trust_module_for_runtime_user() {
+  local service_user="$1"
+  local service_home=""
+  local module_version=""
+  local install_script=""
+
+  if ! command -v pwsh >/dev/null 2>&1; then
+    echo "PowerShell 7 must be installed before the ZeroTrustAssessment module can be provisioned." >&2
+    exit 1
+  fi
+
+  if ! command -v runuser >/dev/null 2>&1; then
+    echo "runuser is required to install the ZeroTrustAssessment module for the runtime account." >&2
+    exit 1
+  fi
+
+  service_home="$(getent passwd "$service_user" | cut -d: -f6)"
+  if [ -z "$service_home" ]; then
+    echo "Unable to resolve a home directory for runtime user '$service_user'." >&2
+    exit 1
+  fi
+
+  install_script=$'$ErrorActionPreference = \'Stop\'\n'
+  install_script+=$'$repository = Get-PSRepository -Name PSGallery -ErrorAction Stop\n'
+  install_script+=$'if ($repository.InstallationPolicy -ne \'Trusted\') { Set-PSRepository -Name PSGallery -InstallationPolicy Trusted }\n'
+  install_script+=$'Install-Module ZeroTrustAssessment -Repository PSGallery -Scope CurrentUser -Force -AllowClobber -AcceptLicense\n'
+  install_script+=$'$module = Get-Module -ListAvailable ZeroTrustAssessment | Sort-Object Version -Descending | Select-Object -First 1\n'
+  install_script+=$'if ($null -eq $module) { throw \'ZeroTrustAssessment module installation could not be verified.\' }\n'
+  install_script+=$'Write-Output $module.Version.ToString()'
+
+  log "Installing ZeroTrustAssessment PowerShell module for runtime user: $service_user"
+  module_version="$(
+    run_as_root runuser -u "$service_user" -- env \
+      HOME="$service_home" \
+      USER="$service_user" \
+      LOGNAME="$service_user" \
+      pwsh -NoLogo -NoProfile -Command "$install_script"
+  )"
+
+  if [ -n "$module_version" ]; then
+    log "ZeroTrustAssessment module installed for $service_user (version $module_version)"
+  else
+    log "ZeroTrustAssessment module installed for $service_user"
   fi
 }
 
@@ -261,18 +232,11 @@ configure_nginx_site_link() {
   local primary_server_name=""
   local tls_cert_path=""
   local tls_key_path=""
-  local manager
   local rendered_conf
 
   if [ ! -f "$source_conf" ]; then
     echo "Expected NGINX config file at $source_conf." >&2
     exit 1
-  fi
-
-  manager="$(detect_package_manager)"
-  if [ ! -d "$available_dir" ] && [ ! -d "$enabled_dir" ] && [ "$manager" != "apt" ]; then
-    log "Skipping NGINX sites-available/sites-enabled symlink setup on non-APT layout."
-    return
   fi
 
   primary_server_name="${NGINX_SERVER_NAME%% *}"
@@ -380,10 +344,6 @@ start_nginx_service() {
       exit 1
     fi
     return
-  fi
-
-  if command -v brew >/dev/null 2>&1; then
-    brew services start nginx || true
   fi
 }
 
@@ -502,37 +462,13 @@ create_self_signed_nginx_cert() {
 }
 
 ensure_rsync_installed() {
-  local manager=""
-
   if command -v rsync >/dev/null 2>&1; then
     return
   fi
 
-  manager="$(detect_package_manager)"
-  case "$manager" in
-    apt)
-      log "Installing rsync"
-      run_as_root apt-get update
-      run_as_root apt-get install -y rsync
-      ;;
-    dnf)
-      log "Installing rsync"
-      run_as_root dnf install -y rsync
-      ;;
-    yum)
-      log "Installing rsync"
-      run_as_root yum install -y rsync
-      ;;
-    pacman)
-      log "Installing rsync"
-      run_as_root pacman -Sy --noconfirm rsync
-      ;;
-    *)
-      echo "rsync is required to stage the runtime app bundle." >&2
-      echo "Install rsync and rerun setup." >&2
-      exit 1
-      ;;
-  esac
+  log "Installing rsync"
+  run_as_root apt-get update
+  run_as_root apt-get install -y rsync
 
   if ! command -v rsync >/dev/null 2>&1; then
     echo "rsync is unavailable after attempted install." >&2
@@ -660,6 +596,8 @@ setup_gunicorn_systemd_service() {
     fi
   fi
 
+  install_zero_trust_module_for_runtime_user "$service_user"
+
   managed_env_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')"
   managed_env_file="$managed_env_dir/${managed_env_name}.env"
   run_as_root install -d -m 0750 -o root -g "$service_group" "$managed_env_dir"
@@ -753,22 +691,6 @@ ensure_python_venv() {
 }
 
 start_postgresql() {
-  if [ -n "$PG_SERVICE_FORMULA" ] && command -v brew >/dev/null 2>&1; then
-    brew services start "$PG_SERVICE_FORMULA" || true
-    return
-  fi
-
-  if command -v brew >/dev/null 2>&1; then
-    if brew list --versions postgresql@16 >/dev/null 2>&1; then
-      brew services start postgresql@16 || true
-      return
-    fi
-    if brew list --versions postgresql >/dev/null 2>&1; then
-      brew services start postgresql || true
-      return
-    fi
-  fi
-
   if command -v systemctl >/dev/null 2>&1; then
     run_as_root systemctl enable --now postgresql || run_as_root systemctl start postgresql || true
     return
@@ -1111,6 +1033,7 @@ PY
 ensure_supported_platform
 ensure_python_runtime
 ensure_python_venv
+install_zero_trust_runtime_prerequisites
 install_nginx
 prompt_for_nginx_server_name
 DEFAULT_ALLOWED_HOSTS="$(merge_host_values "$DEFAULT_ALLOWED_HOSTS" "$NGINX_SERVER_NAME")"
@@ -1258,6 +1181,22 @@ echo "Activate the environment with: source \"$VENV_DIR/bin/activate\""
 echo "Gunicorn service units: ${GUNICORN_SERVICE_UNITS:-none}"
 echo "Gunicorn runtime user: ${GUNICORN_RUNTIME_USER:-none}"
 echo "Gunicorn runtime group: ${GUNICORN_RUNTIME_GROUP:-none}"
+if command -v pwsh >/dev/null 2>&1; then
+  echo "PowerShell 7: installed"
+fi
+if [ -n "$GUNICORN_RUNTIME_USER" ] && command -v pwsh >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+  ZERO_TRUST_RUNTIME_HOME="$(getent passwd "$GUNICORN_RUNTIME_USER" | cut -d: -f6)"
+  ZERO_TRUST_MODULE_VERSION="$(
+    run_as_root runuser -u "$GUNICORN_RUNTIME_USER" -- env \
+      HOME="$ZERO_TRUST_RUNTIME_HOME" \
+      USER="$GUNICORN_RUNTIME_USER" \
+      LOGNAME="$GUNICORN_RUNTIME_USER" \
+      pwsh -NoLogo -NoProfile -Command '$module = Get-Module -ListAvailable ZeroTrustAssessment | Sort-Object Version -Descending | Select-Object -First 1; if ($null -eq $module) { "" } else { $module.Version.ToString() }'
+  )"
+  if [ -n "$ZERO_TRUST_MODULE_VERSION" ]; then
+    echo "ZeroTrustAssessment module: $ZERO_TRUST_MODULE_VERSION"
+  fi
+fi
 if [ -n "$GUNICORN_ENV_FILE" ]; then
   echo "Gunicorn environment file: $GUNICORN_ENV_FILE"
 fi
