@@ -205,6 +205,15 @@
         return;
       }
 
+      const owner = event.target.closest("[data-control-owner]");
+      if (owner) {
+        updateControlOwner(owner.dataset.controlOwner, owner.value);
+        populateFilters();
+        syncSelectionToVisibleControls();
+        syncUrlAndRender();
+        return;
+      }
+
       const toggle = event.target.closest("[data-control-excluded]");
       if (!toggle) {
         return;
@@ -1047,8 +1056,6 @@
           reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
             ? item.reviewFrequency.trim()
             : "Annual",
-          rationale: "",
-          evidence: "",
           documentIds: [],
           policyDocumentIds: [],
           preferredDocumentId: "",

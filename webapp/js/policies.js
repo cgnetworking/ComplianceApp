@@ -391,7 +391,6 @@
             <span class="chip">${escapeHtml(control.effectiveImplementationModel)}</span>
             <span class="chip">${escapeHtml(control.reviewFrequency)}</span>
           </div>
-          <p class="detail-subline">${escapeHtml(control.rationale)}</p>
           <div>
             <button class="ghost-button" type="button" data-clear-policy-context="true">Back to Full Policy List</button>
           </div>

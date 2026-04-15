@@ -102,16 +102,15 @@
 
       <div class="detail-grid">
         <article class="detail-card">
-          <strong>Rationale</strong>
-          <div class="mini-copy">${escapeHtml(control.rationale)}</div>
-        </article>
-        <article class="detail-card">
-          <strong>Evidence</strong>
-          <div class="mini-copy">${escapeHtml(control.evidence)}</div>
-        </article>
-        <article class="detail-card">
           <strong>Owner</strong>
-          <div class="mini-copy">${escapeHtml(control.owner)}</div>
+          <label class="form-field">
+            <input
+              type="text"
+              data-control-owner="${escapeHtml(control.id)}"
+              value="${escapeHtml(control.owner)}"
+              placeholder="Assign owner (name or username)"
+            >
+          </label>
         </article>
         <article class="detail-card">
           <strong>Review frequency</strong>
@@ -194,6 +193,9 @@
   function normalizeControlReviewFrequency(value) {
     return typeof value === "string" ? value.trim() : "";
   }
+  function normalizeControlOwner(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
   function normalizeControlPolicyDocumentIds(value) {
     if (!Array.isArray(value)) {
       return [];
@@ -268,6 +270,8 @@
     const baseApplicability = normalizeControlApplicability(control.applicability);
     const storedReviewFrequency = normalizeControlReviewFrequency(stored.reviewFrequency);
     const baseReviewFrequency = normalizeControlReviewFrequency(control.reviewFrequency);
+    const storedOwner = normalizeControlOwner(stored.owner);
+    const baseOwner = normalizeControlOwner(control.owner);
     const baseExcluded = isBaseExcluded(control);
     const legacyLocalExcluded = Boolean(stored.excluded) && !baseExcluded && storedApplicability !== "Applicable";
     const effectiveApplicability = (baseExcluded || storedApplicability === "Excluded" || legacyLocalExcluded)
@@ -276,8 +280,9 @@
     const effectiveExcluded = effectiveApplicability === "Excluded";
     const effectiveReviewFrequency = storedReviewFrequency || baseReviewFrequency;
     const exclusionReason = effectiveExcluded
-      ? (typeof stored.reason === "string" ? stored.reason : "") || (baseExcluded ? control.rationale : "")
+      ? (typeof stored.reason === "string" ? stored.reason : "")
       : "";
+    const effectiveOwner = storedOwner || baseOwner;
 
     return {
       ...control,
@@ -293,6 +298,7 @@
       effectiveReviewFrequency: effectiveReviewFrequency,
       effectiveImplementationModel: effectiveExcluded ? "Excluded" : control.implementationModel,
       exclusionReason: exclusionReason,
+      owner: effectiveOwner,
     };
   }
   function isBaseExcluded(control) {
@@ -302,6 +308,7 @@
     const applicability = normalizeControlApplicability(nextState.applicability);
     const reason = typeof nextState.reason === "string" ? nextState.reason : "";
     const reviewFrequency = normalizeControlReviewFrequency(nextState.reviewFrequency);
+    const owner = normalizeControlOwner(nextState.owner);
     const hasPolicyDocumentOverride = Array.isArray(nextState.policyDocumentIds);
     const policyDocumentIds = normalizeControlPolicyDocumentIds(nextState.policyDocumentIds);
     const preferredDocumentId = normalizeControlPreferredDocumentId(nextState.preferredDocumentId);
@@ -315,6 +322,9 @@
     }
     if (reviewFrequency) {
       entry.reviewFrequency = reviewFrequency;
+    }
+    if (owner) {
+      entry.owner = owner;
     }
     if (hasPolicyDocumentOverride) {
       entry.policyDocumentIds = policyDocumentIds;
@@ -361,6 +371,21 @@
     const nextState = {
       ...existing,
       reviewFrequency: normalizedFrequency === baseReviewFrequency ? "" : normalizedFrequency,
+    };
+    saveControlStateEntry(controlId, nextState);
+  }
+  function updateControlOwner(controlId, owner) {
+    const control = controlsById.get(controlId);
+    if (!control) {
+      return;
+    }
+
+    const existing = state.controlState[controlId] || {};
+    const normalizedOwner = normalizeControlOwner(owner);
+    const baseOwner = normalizeControlOwner(control.owner);
+    const nextState = {
+      ...existing,
+      owner: normalizedOwner === baseOwner ? "" : normalizedOwner,
     };
     saveControlStateEntry(controlId, nextState);
   }
@@ -473,8 +498,7 @@
         view.id,
         view.name,
         view.domain,
-        view.rationale,
-        view.evidence,
+        view.owner,
         view.effectiveImplementationModel,
         view.effectiveApplicability,
         view.effectiveReviewFrequency,

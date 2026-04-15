@@ -169,8 +169,6 @@ def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
                 "implementationModel": normalize_string(item.get("implementationModel"), "Implemented"),
                 "owner": normalize_string(item.get("owner")),
                 "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Annual"),
-                "rationale": normalize_string(item.get("rationale")),
-                "evidence": normalize_string(item.get("evidence")),
                 "documentIds": document_ids,
                 "policyDocumentIds": policy_document_ids,
                 "preferredDocumentId": preferred_document_id,
@@ -983,6 +981,7 @@ def normalize_control_state(payload: object) -> dict[str, object]:
         raw_applicability = str(value.get("applicability") or "").strip()
         applicability = raw_applicability if raw_applicability in ALLOWED_CONTROL_APPLICABILITY else ""
         review_frequency = str(value.get("reviewFrequency") or "").strip()
+        owner = normalize_string(value.get("owner"))
         has_policy_document_override = isinstance(value.get("policyDocumentIds"), list)
         policy_document_ids: list[str] = []
         if has_policy_document_override:
@@ -997,12 +996,14 @@ def normalize_control_state(payload: object) -> dict[str, object]:
         if preferred_document_id and has_policy_document_override and preferred_document_id not in policy_document_ids:
             preferred_document_id = ""
 
-        if excluded or reason or applicability or review_frequency or has_policy_document_override or preferred_document_id:
+        if excluded or reason or applicability or review_frequency or owner or has_policy_document_override or preferred_document_id:
             entry: dict[str, object] = {"excluded": excluded, "reason": reason}
             if applicability:
                 entry["applicability"] = applicability
             if review_frequency:
                 entry["reviewFrequency"] = review_frequency
+            if owner:
+                entry["owner"] = owner
             if has_policy_document_override:
                 entry["policyDocumentIds"] = policy_document_ids
             if preferred_document_id:

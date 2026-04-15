@@ -649,7 +649,7 @@
       {
         label: "Governance",
         color: "#7442b8",
-        matchers: ["policy", "objectives", "statement of applicability", "internal audit", "management review", "compliance", "training"],
+        matchers: ["policy", "objectives", "statement of applicability", "internal audit", "audit", "management review", "compliance", "training"],
       },
       {
         label: "Access reviews",

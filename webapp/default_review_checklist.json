@@ -166,5 +166,12 @@
     "item": "Conduct management review of ISMS performance and improvement actions.",
     "frequency": "Annual",
     "owner": "CTO"
+  },
+  {
+    "id": "checklist-25",
+    "category": "Compliance",
+    "item": "Perform external audit activities and review finding closure status.",
+    "frequency": "Annual",
+    "owner": "Head of IT"
   }
 ]
