@@ -100,6 +100,16 @@ def normalize_string(value: object, fallback: str = "") -> str:
     return normalized if normalized else fallback
 
 
+def normalize_iso_date_string(value: object) -> str:
+    normalized = normalize_string(value)
+    if not normalized:
+        return ""
+    try:
+        return date.fromisoformat(normalized).isoformat()
+    except ValueError:
+        return ""
+
+
 def normalize_string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -256,6 +266,7 @@ def normalize_mapping_checklist(value: object) -> list[dict[str, object]]:
                 "category": normalize_string(item.get("category")),
                 "item": normalize_string(item.get("item")),
                 "frequency": normalize_string(item.get("frequency")),
+                "startDate": normalize_iso_date_string(item.get("startDate")),
                 "owner": normalize_string(item.get("owner")),
             }
         )
@@ -531,6 +542,7 @@ def ensure_review_checklist_recommendations_seeded() -> None:
                 "category": normalize_string(item.get("category"), "Custom"),
                 "item": item_text,
                 "frequency": normalize_string(item.get("frequency"), "Annual"),
+                "start_date": parse_optional_iso_date(normalize_iso_date_string(item.get("startDate"))),
                 "owner": normalize_string(item.get("owner"), "Shared portal"),
             },
         )
@@ -546,6 +558,7 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
 
     category = normalize_string(payload.get("category"), "Custom")
     frequency = normalize_string(payload.get("frequency"), "Annual")
+    start_date = parse_optional_iso_date(payload.get("startDate"))
     owner = normalize_string(payload.get("owner"), "Shared portal")
 
     for _ in range(5):
@@ -556,6 +569,7 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
                 category=category,
                 item=item_text,
                 frequency=frequency,
+                start_date=start_date,
                 owner=owner,
             )
             return created.to_portal_dict()

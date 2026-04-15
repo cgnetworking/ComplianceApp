@@ -127,6 +127,7 @@ class ReviewChecklistItem(models.Model):
     category = models.CharField(max_length=120, default="Custom")
     item = models.TextField()
     frequency = models.CharField(max_length=120, default="Annual")
+    start_date = models.DateField(blank=True, null=True)
     owner = models.CharField(max_length=255, default="Shared portal")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -143,6 +144,7 @@ class ReviewChecklistItem(models.Model):
             "category": self.category,
             "item": self.item,
             "frequency": self.frequency,
+            "startDate": self.start_date.isoformat() if self.start_date else "",
             "owner": self.owner,
         }
 
@@ -152,6 +154,7 @@ class ReviewChecklistRecommendation(models.Model):
     category = models.CharField(max_length=120, default="Custom")
     item = models.TextField()
     frequency = models.CharField(max_length=120, default="Annual")
+    start_date = models.DateField(blank=True, null=True)
     owner = models.CharField(max_length=255, default="Shared portal")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -168,6 +171,7 @@ class ReviewChecklistRecommendation(models.Model):
             "category": self.category,
             "item": self.item,
             "frequency": self.frequency,
+            "startDate": self.start_date.isoformat() if self.start_date else "",
             "owner": self.owner,
         }
 

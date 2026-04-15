@@ -30,13 +30,13 @@ class RiskRecordAdmin(admin.ModelAdmin):
 
 @admin.register(ReviewChecklistItem)
 class ReviewChecklistItemAdmin(admin.ModelAdmin):
-    list_display = ("external_id", "category", "frequency", "owner", "updated_at")
+    list_display = ("external_id", "category", "frequency", "start_date", "owner", "updated_at")
     search_fields = ("external_id", "category", "item", "frequency", "owner")
 
 
 @admin.register(ReviewChecklistRecommendation)
 class ReviewChecklistRecommendationAdmin(admin.ModelAdmin):
-    list_display = ("external_id", "category", "frequency", "owner", "updated_at")
+    list_display = ("external_id", "category", "frequency", "start_date", "owner", "updated_at")
     search_fields = ("external_id", "category", "item", "frequency", "owner")
 
 

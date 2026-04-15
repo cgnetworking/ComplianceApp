@@ -20,10 +20,17 @@
           category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Custom",
           item: checklistItem,
           frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
+          startDate: typeof normalizeChecklistStartDate === "function" ? normalizeChecklistStartDate(item.startDate) : "",
           owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
         };
       })
       .filter(Boolean);
+  }
+  function reviewTaskScheduleLabel(item) {
+    if (typeof checklistFrequencyWithAnchorLabel === "function") {
+      return checklistFrequencyWithAnchorLabel(item.frequency, item.startDate);
+    }
+    return item.frequency;
   }
 
   function renderReviewTasksPage() {
@@ -49,7 +56,7 @@
             <div class="activity-top">
               <div>
                 <strong>${escapeHtml(item.item)}</strong>
-                <div class="mini-copy">${escapeHtml(item.frequency)} / ${escapeHtml(item.owner)}</div>
+                <div class="mini-copy">${escapeHtml(reviewTaskScheduleLabel(item))} / ${escapeHtml(item.owner)}</div>
               </div>
               <button class="ghost-button" type="button" data-review-task-delete="${escapeHtml(item.id)}">Remove</button>
             </div>

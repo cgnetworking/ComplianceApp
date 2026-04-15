@@ -132,6 +132,7 @@
     checklistAddCategory: document.getElementById("checklist-add-category"),
     checklistAddItem: document.getElementById("checklist-add-item"),
     checklistAddFrequency: document.getElementById("checklist-add-frequency"),
+    checklistAddStartDate: document.getElementById("checklist-add-start-date"),
     checklistAddOwner: document.getElementById("checklist-add-owner"),
     checklistRecommendationSelect: document.getElementById("checklist-recommendation-select"),
     checklistRecommendationAdd: document.getElementById("checklist-recommendation-add"),
