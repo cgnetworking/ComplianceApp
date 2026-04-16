@@ -262,27 +262,15 @@
   }
   function openChecklistRecommendationPicker() {
     const picker = checklistRecommendationPicker();
+    const input = els.checklistRecommendationSelect;
     const list = checklistRecommendationList();
-    if (!picker || !list) {
-      return;
-    }
-    list.hidden = false;
-    picker.classList.add("is-open");
-    if (els.checklistRecommendationSelect) {
-      els.checklistRecommendationSelect.setAttribute("aria-expanded", "true");
-    }
+    openSharedSearchablePicker(picker, input, list);
   }
   function closeChecklistRecommendationPicker() {
     const picker = checklistRecommendationPicker();
+    const input = els.checklistRecommendationSelect;
     const list = checklistRecommendationList();
-    if (!picker || !list) {
-      return;
-    }
-    list.hidden = true;
-    picker.classList.remove("is-open");
-    if (els.checklistRecommendationSelect) {
-      els.checklistRecommendationSelect.setAttribute("aria-expanded", "false");
-    }
+    closeSharedSearchablePicker(picker, input, list);
   }
   function applyChecklistRecommendationSelection(recommendation, shouldClose = true) {
     if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd || !recommendation) {
@@ -304,56 +292,41 @@
     }
 
     const picker = checklistRecommendationPicker();
+    const input = els.checklistRecommendationSelect;
     const list = checklistRecommendationList();
-    if (!picker || !list || els.checklistRecommendationSelect.dataset.recommendationPickerBound) {
+    if (!picker || !input || !list) {
       return;
     }
-
-    els.checklistRecommendationSelect.dataset.recommendationPickerBound = "true";
-
-    els.checklistRecommendationSelect.addEventListener("focus", () => {
-      recommendationPickerState.showAll = true;
-      renderChecklistRecommendationOptions();
-      openChecklistRecommendationPicker();
-    });
-    els.checklistRecommendationSelect.addEventListener("click", () => {
-      recommendationPickerState.showAll = true;
-      renderChecklistRecommendationOptions();
-      openChecklistRecommendationPicker();
-    });
-    els.checklistRecommendationSelect.addEventListener("blur", () => {
-      window.setTimeout(closeChecklistRecommendationPicker, 120);
-    });
-    els.checklistRecommendationSelect.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    bindSharedSearchablePickerEvents({
+      picker,
+      input,
+      list,
+      boundDatasetKey: "recommendationPickerBound",
+      optionSelector: "[data-recommendation-id]",
+      onOpen: () => {
+        recommendationPickerState.showAll = true;
+        renderChecklistRecommendationOptions();
+        openChecklistRecommendationPicker();
+      },
+      onClose: () => {
         closeChecklistRecommendationPicker();
-        return;
-      }
-      if (event.key !== "Enter") {
-        return;
-      }
-      const recommendation = findChecklistRecommendationById(recommendationPickerState.selectedId)
-        || findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value);
-      if (!recommendation) {
-        return;
-      }
-      applyChecklistRecommendationSelection(recommendation, true);
-      event.preventDefault();
-    });
-
-    list.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    list.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-recommendation-id]");
-      if (!option) {
-        return;
-      }
-      const recommendation = findChecklistRecommendationById(option.dataset.recommendationId);
-      if (!recommendation) {
-        return;
-      }
-      applyChecklistRecommendationSelection(recommendation, true);
+      },
+      onEnter: () => {
+        const recommendation = findChecklistRecommendationById(recommendationPickerState.selectedId)
+          || findChecklistRecommendationByInputValue(input.value);
+        if (!recommendation) {
+          return false;
+        }
+        applyChecklistRecommendationSelection(recommendation, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        const recommendation = findChecklistRecommendationById(option.dataset.recommendationId);
+        if (!recommendation) {
+          return;
+        }
+        applyChecklistRecommendationSelection(recommendation, true);
+      },
     });
   }
   function renderChecklistRecommendationOptions() {
@@ -381,7 +354,15 @@
     if (!hasRecommendations) {
       recommendationPickerState.selectedId = "";
       els.checklistRecommendationAdd.disabled = true;
-      list.innerHTML = '<div class="recommendation-option-empty">No recommended tasks available</div>';
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute: "data-recommendation-id",
+        emptyMessage: "No recommended tasks available",
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => checklistRecommendationLabel(item),
+      });
       closeChecklistRecommendationPicker();
       return;
     }
@@ -394,21 +375,15 @@
       recommendationPickerState.selectedId = "";
     }
 
-    if (!visibleRecommendations.length) {
-      list.innerHTML = '<div class="recommendation-option-empty">No matching recommended tasks</div>';
-    } else {
-      list.innerHTML = visibleRecommendations.map((item) => `
-        <button
-          class="recommendation-option ${item.id === recommendationPickerState.selectedId ? "is-active" : ""}"
-          type="button"
-          data-recommendation-id="${escapeHtml(item.id)}"
-          role="option"
-          aria-selected="${item.id === recommendationPickerState.selectedId ? "true" : "false"}"
-        >
-          ${escapeHtml(checklistRecommendationLabel(item))}
-        </button>
-      `).join("");
-    }
+    renderSharedSearchablePickerOptions({
+      list,
+      options: visibleRecommendations,
+      selectedId: recommendationPickerState.selectedId,
+      optionDataAttribute: "data-recommendation-id",
+      emptyMessage: "No matching recommended tasks",
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => checklistRecommendationLabel(item),
+    });
 
     els.checklistRecommendationAdd.disabled = !recommendationPickerState.selectedId;
   }

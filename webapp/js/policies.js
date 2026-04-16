@@ -965,23 +965,13 @@
     const mapper = policyControlMapper();
     const input = policyControlPickerInput(mapper);
     const list = policyControlPickerList(mapper);
-    if (!mapper || !input || !list || input.disabled) {
-      return;
-    }
-    list.hidden = false;
-    mapper.classList.add("is-open");
-    input.setAttribute("aria-expanded", "true");
+    openSharedSearchablePicker(mapper, input, list);
   }
   function closePolicyControlPicker() {
     const mapper = policyControlMapper();
     const input = policyControlPickerInput(mapper);
     const list = policyControlPickerList(mapper);
-    if (!mapper || !input || !list) {
-      return;
-    }
-    list.hidden = true;
-    mapper.classList.remove("is-open");
-    input.setAttribute("aria-expanded", "false");
+    closeSharedSearchablePicker(mapper, input, list);
   }
   function applyPolicyControlPickerSelection(control, shouldClose = true) {
     const mapper = policyControlMapper();
@@ -1003,57 +993,41 @@
     const mapper = policyControlMapper();
     const input = policyControlPickerInput(mapper);
     const list = policyControlPickerList(mapper);
-    if (!mapper || !input || !list || input.dataset.policyControlPickerBound) {
+    if (!mapper || !input || !list) {
       return;
     }
-
-    input.dataset.policyControlPickerBound = "true";
-
-    input.addEventListener("focus", () => {
-      policyControlPickerState.showAll = true;
-      renderPolicyControlOptions();
-      openPolicyControlPicker();
-    });
-    input.addEventListener("click", () => {
-      policyControlPickerState.showAll = true;
-      renderPolicyControlOptions();
-      openPolicyControlPicker();
-    });
-    input.addEventListener("blur", () => {
-      window.setTimeout(closePolicyControlPicker, 120);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    bindSharedSearchablePickerEvents({
+      picker: mapper,
+      input,
+      list,
+      boundDatasetKey: "policyControlPickerBound",
+      optionSelector: "[data-policy-control-id]",
+      onOpen: () => {
+        policyControlPickerState.showAll = true;
+        renderPolicyControlOptions();
+        openPolicyControlPicker();
+      },
+      onClose: () => {
         closePolicyControlPicker();
-        return;
-      }
-      if (event.key !== "Enter") {
-        return;
-      }
-      const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
-      const selectedControl = findPolicyControlOptionById(documentId, policyControlPickerState.selectedControlId)
-        || findPolicyControlOptionByInputValue(documentId, input.value);
-      if (!selectedControl) {
-        return;
-      }
-      applyPolicyControlPickerSelection(selectedControl, true);
-      event.preventDefault();
-    });
-
-    list.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    list.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-policy-control-id]");
-      if (!option) {
-        return;
-      }
-      const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
-      const selectedControl = findPolicyControlOptionById(documentId, option.dataset.policyControlId);
-      if (!selectedControl) {
-        return;
-      }
-      applyPolicyControlPickerSelection(selectedControl, true);
+      },
+      onEnter: () => {
+        const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+        const selectedControl = findPolicyControlOptionById(documentId, policyControlPickerState.selectedControlId)
+          || findPolicyControlOptionByInputValue(documentId, input.value);
+        if (!selectedControl) {
+          return false;
+        }
+        applyPolicyControlPickerSelection(selectedControl, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+        const selectedControl = findPolicyControlOptionById(documentId, option.dataset.policyControlId);
+        if (!selectedControl) {
+          return;
+        }
+        applyPolicyControlPickerSelection(selectedControl, true);
+      },
     });
   }
   function renderPolicyControlOptions() {
@@ -1081,7 +1055,15 @@
       policyControlPickerState.selectedControlId = "";
       addButton.disabled = true;
       input.value = "";
-      list.innerHTML = '<div class="recommendation-option-empty">No additional controls available</div>';
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute: "data-policy-control-id",
+        emptyMessage: "No additional controls available",
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => policyControlLabel(item),
+      });
       closePolicyControlPicker();
       return;
     }
@@ -1093,21 +1075,15 @@
       policyControlPickerState.selectedControlId = "";
     }
 
-    if (!visibleOptions.length) {
-      list.innerHTML = '<div class="recommendation-option-empty">No matching controls</div>';
-    } else {
-      list.innerHTML = visibleOptions.map((item) => `
-        <button
-          class="recommendation-option ${item.id === policyControlPickerState.selectedControlId ? "is-active" : ""}"
-          type="button"
-          data-policy-control-id="${escapeHtml(item.id)}"
-          role="option"
-          aria-selected="${item.id === policyControlPickerState.selectedControlId ? "true" : "false"}"
-        >
-          ${escapeHtml(policyControlLabel(item))}
-        </button>
-      `).join("");
-    }
+    renderSharedSearchablePickerOptions({
+      list,
+      options: visibleOptions,
+      selectedId: policyControlPickerState.selectedControlId,
+      optionDataAttribute: "data-policy-control-id",
+      emptyMessage: "No matching controls",
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => policyControlLabel(item),
+    });
 
     addButton.disabled = !policyControlPickerState.selectedControlId;
   }

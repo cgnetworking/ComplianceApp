@@ -359,23 +359,13 @@
     const mapper = controlPolicyMapper();
     const input = controlPolicyPickerInput(mapper);
     const list = controlPolicyPickerList(mapper);
-    if (!mapper || !input || !list || input.disabled) {
-      return;
-    }
-    list.hidden = false;
-    mapper.classList.add("is-open");
-    input.setAttribute("aria-expanded", "true");
+    openSharedSearchablePicker(mapper, input, list);
   }
   function closeControlPolicyPicker() {
     const mapper = controlPolicyMapper();
     const input = controlPolicyPickerInput(mapper);
     const list = controlPolicyPickerList(mapper);
-    if (!mapper || !input || !list) {
-      return;
-    }
-    list.hidden = true;
-    mapper.classList.remove("is-open");
-    input.setAttribute("aria-expanded", "false");
+    closeSharedSearchablePicker(mapper, input, list);
   }
   function applyControlPolicyPickerSelection(documentItem, shouldClose = true) {
     const mapper = controlPolicyMapper();
@@ -397,57 +387,41 @@
     const mapper = controlPolicyMapper();
     const input = controlPolicyPickerInput(mapper);
     const list = controlPolicyPickerList(mapper);
-    if (!mapper || !input || !list || input.dataset.controlPolicyPickerBound) {
+    if (!mapper || !input || !list) {
       return;
     }
-
-    input.dataset.controlPolicyPickerBound = "true";
-
-    input.addEventListener("focus", () => {
-      controlPolicyPickerState.showAll = true;
-      renderControlPolicyOptions();
-      openControlPolicyPicker();
-    });
-    input.addEventListener("click", () => {
-      controlPolicyPickerState.showAll = true;
-      renderControlPolicyOptions();
-      openControlPolicyPicker();
-    });
-    input.addEventListener("blur", () => {
-      window.setTimeout(closeControlPolicyPicker, 120);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    bindSharedSearchablePickerEvents({
+      picker: mapper,
+      input,
+      list,
+      boundDatasetKey: "controlPolicyPickerBound",
+      optionSelector: "[data-control-policy-document-id]",
+      onOpen: () => {
+        controlPolicyPickerState.showAll = true;
+        renderControlPolicyOptions();
+        openControlPolicyPicker();
+      },
+      onClose: () => {
         closeControlPolicyPicker();
-        return;
-      }
-      if (event.key !== "Enter") {
-        return;
-      }
-      const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
-      const selectedItem = findControlPolicyOptionById(controlId, controlPolicyPickerState.selectedDocumentId)
-        || findControlPolicyOptionByInputValue(controlId, input.value);
-      if (!selectedItem) {
-        return;
-      }
-      applyControlPolicyPickerSelection(selectedItem, true);
-      event.preventDefault();
-    });
-
-    list.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    list.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-control-policy-document-id]");
-      if (!option) {
-        return;
-      }
-      const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
-      const selectedItem = findControlPolicyOptionById(controlId, option.dataset.controlPolicyDocumentId);
-      if (!selectedItem) {
-        return;
-      }
-      applyControlPolicyPickerSelection(selectedItem, true);
+      },
+      onEnter: () => {
+        const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
+        const selectedItem = findControlPolicyOptionById(controlId, controlPolicyPickerState.selectedDocumentId)
+          || findControlPolicyOptionByInputValue(controlId, input.value);
+        if (!selectedItem) {
+          return false;
+        }
+        applyControlPolicyPickerSelection(selectedItem, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
+        const selectedItem = findControlPolicyOptionById(controlId, option.dataset.controlPolicyDocumentId);
+        if (!selectedItem) {
+          return;
+        }
+        applyControlPolicyPickerSelection(selectedItem, true);
+      },
     });
   }
   function renderControlPolicyOptions() {
@@ -475,7 +449,15 @@
       controlPolicyPickerState.selectedDocumentId = "";
       addButton.disabled = true;
       input.value = "";
-      list.innerHTML = '<div class="recommendation-option-empty">No additional policy documents available</div>';
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute: "data-control-policy-document-id",
+        emptyMessage: "No additional policy documents available",
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => controlPolicyLabel(item),
+      });
       closeControlPolicyPicker();
       return;
     }
@@ -487,21 +469,15 @@
       controlPolicyPickerState.selectedDocumentId = "";
     }
 
-    if (!visibleOptions.length) {
-      list.innerHTML = '<div class="recommendation-option-empty">No matching policy documents</div>';
-    } else {
-      list.innerHTML = visibleOptions.map((item) => `
-        <button
-          class="recommendation-option ${item.id === controlPolicyPickerState.selectedDocumentId ? "is-active" : ""}"
-          type="button"
-          data-control-policy-document-id="${escapeHtml(item.id)}"
-          role="option"
-          aria-selected="${item.id === controlPolicyPickerState.selectedDocumentId ? "true" : "false"}"
-        >
-          ${escapeHtml(controlPolicyLabel(item))}
-        </button>
-      `).join("");
-    }
+    renderSharedSearchablePickerOptions({
+      list,
+      options: visibleOptions,
+      selectedId: controlPolicyPickerState.selectedDocumentId,
+      optionDataAttribute: "data-control-policy-document-id",
+      emptyMessage: "No matching policy documents",
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => controlPolicyLabel(item),
+    });
 
     addButton.disabled = !controlPolicyPickerState.selectedDocumentId;
   }

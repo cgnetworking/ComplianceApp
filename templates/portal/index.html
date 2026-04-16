@@ -8,24 +8,17 @@
 {% endblock %}
 
 {% block content %}
-  <section class="report-header">
-    <p class="section-kicker">Home</p>
-    <h1>Compliance workspace</h1>
-    <p class="report-copy">
-      Jump into the control register, review calendar, and mapped policy set from separate pages. Search from here opens the control register directly.
-    </p>
-  </section>
+  {% include "portal/_report_header.html" with
+    kicker="Home"
+    title="Compliance workspace"
+    copy="Jump into the control register, review calendar, and mapped policy set from separate pages. Search from here opens the control register directly."
+    hide_filter_bar=True %}
 
   <section class="overview" id="overview"></section>
 
   <section class="page-grid page-grid-home">
     <article class="panel">
-      <div class="panel-head">
-        <div>
-          <p class="panel-kicker">Quick links</p>
-          <h2>Primary work areas</h2>
-        </div>
-      </div>
+      {% include "portal/_panel_head.html" with kicker="Quick links" title="Primary work areas" only %}
       <div class="link-grid">
         <a class="link-card" href="{% url 'portal-controls' %}">
           <strong>Controls</strong>
@@ -55,32 +48,17 @@
     </article>
 
     <article class="panel">
-      <div class="panel-head">
-        <div>
-          <p class="panel-kicker">Upcoming work</p>
-          <h2>Next review activities</h2>
-        </div>
-      </div>
+      {% include "portal/_panel_head.html" with kicker="Upcoming work" title="Next review activities" only %}
       <div id="home-upcoming"></div>
     </article>
 
     <article class="panel">
-      <div class="panel-head">
-        <div>
-          <p class="panel-kicker">Control footprint</p>
-          <h2>Domain distribution</h2>
-        </div>
-      </div>
+      {% include "portal/_panel_head.html" with kicker="Control footprint" title="Domain distribution" only %}
       <div id="home-domains"></div>
     </article>
 
     <article class="panel">
-      <div class="panel-head">
-        <div>
-          <p class="panel-kicker">Policy surface</p>
-          <h2>Most-mapped policies</h2>
-        </div>
-      </div>
+      {% include "portal/_panel_head.html" with kicker="Policy surface" title="Most-mapped policies" only %}
       <div id="home-policies"></div>
     </article>
   </section>

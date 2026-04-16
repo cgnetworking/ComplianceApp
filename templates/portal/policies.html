@@ -8,41 +8,29 @@
 {% endblock %}
 
 {% block content %}
-  <section class="report-header report-header-split">
-    <div>
-      <p class="section-kicker">Policies</p>
-      <h1>Policy Library</h1>
-      <p class="report-copy">
-        Open policy content uploaded to the portal. Policy/control mappings can be edited from this page or from the Controls tab.
-      </p>
-    </div>
-    <div class="report-actions">
-      <input id="policy-upload-input" type="file" accept=".md,.markdown,.txt,.html,.htm" multiple hidden>
-      <button class="ghost-button" id="policy-upload-trigger" type="button">Upload Policy</button>
-      <p class="helper-note upload-status" id="policy-upload-status">
-        Add markdown, text, or HTML policy files to the shared database.
-      </p>
-    </div>
-  </section>
+  {% include "portal/_report_header.html" with
+    split_layout=True
+    header_class="report-header-split"
+    kicker="Policies"
+    title="Policy Library"
+    copy="Open policy content uploaded to the portal. Policy/control mappings can be edited from this page or from the Controls tab."
+    action_input_id="policy-upload-input"
+    action_input_accept=".md,.markdown,.txt,.html,.htm"
+    action_button_id="policy-upload-trigger"
+    action_button_label="Upload Policy"
+    status_text="Add markdown, text, or HTML policy files to the shared database."
+    status_id="policy-upload-status" %}
 
   <section class="banner-panel" id="selected-control-banner"></section>
 
   <section class="page-grid page-grid-policies">
     <article class="panel">
-      <div class="panel-head panel-head-actions policy-panel-head">
-        <div>
-          <p class="panel-kicker">Policy library</p>
-          <h2>Policy documents</h2>
-        </div>
-        <div class="policy-subtabs" id="policy-library-tabs" role="tablist" aria-label="Policy views">
-          <button class="policy-subtab is-active" type="button" data-policy-library-tab="all" role="tab" aria-selected="true">
-            All policies
-          </button>
-          <button class="policy-subtab" type="button" data-policy-library-tab="approvals" role="tab" aria-selected="false">
-            My approvals
-          </button>
-        </div>
-      </div>
+      {% include "portal/_panel_head.html" with
+        kicker="Policy library"
+        title="Policy documents"
+        panel_head_class="panel-head-actions policy-panel-head"
+        actions_template="portal/_policy_library_tabs.html"
+        only %}
       <div id="policy-coverage"></div>
     </article>
 

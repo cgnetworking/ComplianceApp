@@ -835,6 +835,116 @@
   function populateSelect(select, values) {
     select.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
   }
+  function openSharedSearchablePicker(picker, input, list) {
+    if (!picker || !input || !list || input.disabled) {
+      return;
+    }
+    list.hidden = false;
+    picker.classList.add("is-open");
+    input.setAttribute("aria-expanded", "true");
+  }
+  function closeSharedSearchablePicker(picker, input, list) {
+    if (!picker || !input || !list) {
+      return;
+    }
+    list.hidden = true;
+    picker.classList.remove("is-open");
+    input.setAttribute("aria-expanded", "false");
+  }
+  function bindSharedSearchablePickerEvents({
+    picker,
+    input,
+    list,
+    boundDatasetKey,
+    optionSelector,
+    onOpen,
+    onClose,
+    onEnter,
+    onOptionClick,
+  }) {
+    if (!picker || !input || !list || !boundDatasetKey || input.dataset[boundDatasetKey]) {
+      return;
+    }
+    input.dataset[boundDatasetKey] = "true";
+
+    const requestOpen = () => {
+      if (typeof onOpen === "function") {
+        onOpen();
+      }
+    };
+    const requestClose = () => {
+      if (typeof onClose === "function") {
+        onClose();
+      }
+    };
+
+    input.addEventListener("focus", requestOpen);
+    input.addEventListener("click", requestOpen);
+    input.addEventListener("blur", () => {
+      window.setTimeout(requestClose, 120);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        requestClose();
+        return;
+      }
+      if (event.key !== "Enter") {
+        return;
+      }
+      const handled = typeof onEnter === "function" ? Boolean(onEnter(event)) : false;
+      if (handled) {
+        event.preventDefault();
+      }
+    });
+
+    list.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
+    list.addEventListener("click", (event) => {
+      if (!optionSelector || typeof onOptionClick !== "function") {
+        return;
+      }
+      const option = event.target.closest(optionSelector);
+      if (!option) {
+        return;
+      }
+      onOptionClick(option, event);
+    });
+  }
+  function renderSharedSearchablePickerOptions({
+    list,
+    options,
+    selectedId,
+    optionDataAttribute,
+    emptyMessage,
+    getOptionId,
+    getOptionLabel,
+  }) {
+    if (!list) {
+      return;
+    }
+    if (!Array.isArray(options) || !options.length) {
+      list.innerHTML = `<div class="recommendation-option-empty">${escapeHtml(emptyMessage || "")}</div>`;
+      return;
+    }
+
+    const normalizedSelectedId = String(selectedId || "");
+    list.innerHTML = options.map((item) => {
+      const optionId = String(getOptionId(item) || "");
+      const isSelected = optionId === normalizedSelectedId;
+      return `
+        <button
+          class="recommendation-option ${isSelected ? "is-active" : ""}"
+          type="button"
+          ${optionDataAttribute}="${escapeHtml(optionId)}"
+          role="option"
+          aria-selected="${isSelected ? "true" : "false"}"
+        >
+          ${escapeHtml(getOptionLabel(item))}
+        </button>
+      `;
+    }).join("");
+  }
   function valueOrFallback(select, value) {
     const exists = Array.from(select.options).some((option) => option.value === value);
     return exists ? value : select.options[0].value;

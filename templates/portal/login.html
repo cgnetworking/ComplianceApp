@@ -18,13 +18,11 @@
         </div>
       </div>
 
-      <div class="report-header">
-        <p class="section-kicker">Authentication</p>
-        <h1>Sign in to the portal</h1>
-        <p class="report-copy">
-          Use your organization SSO for normal access, or a local Django account for break-glass admin access.
-        </p>
-      </div>
+      {% include "portal/_report_header.html" with
+        kicker="Authentication"
+        title="Sign in to the portal"
+        copy="Use your organization SSO for normal access, or a local Django account for break-glass admin access."
+        hide_filter_bar=True %}
 
       {% if auth_error_message %}
         <p class="helper-note is-warning">{{ auth_error_message }}</p>
