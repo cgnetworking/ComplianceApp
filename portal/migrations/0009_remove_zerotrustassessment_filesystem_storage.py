@@ -52,11 +52,11 @@ class Migration(migrations.Migration):
             name="pfx_path",
         ),
         migrations.RemoveField(
-            model_name="zerotrustrun",
+            model_name="zerotrustassessmentrun",
             name="staged_path",
         ),
         migrations.RemoveField(
-            model_name="zerotrustrun",
+            model_name="zerotrustassessmentrun",
             name="cleaned_up_at",
         ),
     ]
