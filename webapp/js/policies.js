@@ -224,31 +224,37 @@
     }
 
     checkbox.disabled = true;
-    setPolicyUploadStatus(`Recording approval for ${documentItem.id}...`, "info");
     try {
-      const payload = await approvePolicyViaApi(documentId);
-      const updatedDocument = payload && payload.document && typeof payload.document === "object"
-        ? payload.document
-        : null;
-      if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
-        throw new Error("Approved policy response was invalid.");
-      }
-      if (payload && payload.reviewState && typeof payload.reviewState === "object") {
-        state.reviewState = normalizeReviewStateValue(payload.reviewState);
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: `Recording approval for ${documentItem.id}...`,
+          success: `Approved ${documentItem.id} / ${documentItem.title}.`,
+          error: "Policy approval could not be recorded.",
+        },
+        async () => {
+          const payload = await approvePolicyViaApi(documentId);
+          const updatedDocument = payload && payload.document && typeof payload.document === "object"
+            ? payload.document
+            : null;
+          if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+            throw new Error("Approved policy response was invalid.");
+          }
+          if (payload && payload.reviewState && typeof payload.reviewState === "object") {
+            state.reviewState = normalizeReviewStateValue(payload.reviewState);
+          }
 
-      refreshDocumentsIndex();
-      initializePolicySelection();
-      syncUrl();
-      renderPoliciesPage();
-      setPolicyUploadStatus(`Approved ${documentItem.id} / ${documentItem.title}.`, "success");
+          refreshDocumentsIndex();
+          initializePolicySelection();
+          syncUrl();
+          renderPoliciesPage();
+        }
+      );
     } catch (error) {
       checkbox.checked = false;
       checkbox.disabled = false;
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Policy approval could not be recorded.";
-      setPolicyUploadStatus(detail, "error");
     }
   }
   function policyApproverOptions(documentItem) {
@@ -329,26 +335,33 @@
       return;
     }
 
-    setPolicyUploadStatus(`Updating approver for ${documentItem.id}...`, "info");
     try {
-      const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
-      const updatedDocument = payload && payload.document && typeof payload.document === "object"
-        ? payload.document
-        : null;
-      if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
-        throw new Error("Updated policy response was invalid.");
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: `Updating approver for ${documentItem.id}...`,
+          success: "Policy approver updated.",
+          error: "Policy approver could not be updated.",
+        },
+        async () => {
+          const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
+          const updatedDocument = payload && payload.document && typeof payload.document === "object"
+            ? payload.document
+            : null;
+          if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+            throw new Error("Updated policy response was invalid.");
+          }
 
-      refreshDocumentsIndex();
-      initializePolicySelection();
-      syncUrl();
-      renderPoliciesPage();
-      setPolicyUploadStatus("Policy approver updated.", "success");
+          refreshDocumentsIndex();
+          initializePolicySelection();
+          syncUrl();
+          renderPoliciesPage();
+        }
+      );
     } catch (error) {
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Policy approver could not be updated.";
-      setPolicyUploadStatus(detail, "error");
+      // Status is already updated by the shared helper.
     }
   }
 
@@ -400,60 +413,73 @@
     if (!files.length) {
       return;
     }
-
-    setPolicyUploadStatus(
-      files.length === 1 ? `Uploading ${files[0].name}...` : `Uploading ${files.length} policy files...`,
-    );
-
     try {
-      const result = await uploadPoliciesToApi(files);
-      if (!result.documents.length) {
-        setPolicyUploadStatus(result.messages[0] || "No supported policy files were selected.", "error");
-        return;
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: () => (files.length === 1 ? `Uploading ${files[0].name}...` : `Uploading ${files.length} policy files...`),
+          success: (result) => {
+            if (!result.documents.length) {
+              return null;
+            }
+            const message = result.documents.length === 1
+              ? `Uploaded ${result.documents[0].title}.`
+              : `Uploaded ${result.documents.length} policies.`;
+            return [message].concat(result.messages).join(" ");
+          },
+          error: "Policy upload failed.",
+        },
+        async () => {
+          const result = await uploadPoliciesToApi(files);
+          if (!result.documents.length) {
+            throw new Error(result.messages[0] || "No supported policy files were selected.");
+          }
 
-      const nextUploadedDocuments = uploadedDocuments.concat(result.documents);
-      uploadedDocuments = nextUploadedDocuments;
-      refreshDocumentsIndex();
+          uploadedDocuments = uploadedDocuments.concat(result.documents);
+          refreshDocumentsIndex();
 
-      state.policyContextControlId = "";
-      state.search = "";
-      state.activeDocumentId = result.documents[result.documents.length - 1].id;
-      if (els.searchInput) {
-        els.searchInput.value = "";
-      }
-      syncUrl();
-      renderPoliciesPage();
-
-      const message = result.documents.length === 1
-        ? `Uploaded ${result.documents[0].title}.`
-        : `Uploaded ${result.documents.length} policies.`;
-      setPolicyUploadStatus([message].concat(result.messages).join(" "), "success");
+          state.policyContextControlId = "";
+          state.search = "";
+          state.activeDocumentId = result.documents[result.documents.length - 1].id;
+          if (els.searchInput) {
+            els.searchInput.value = "";
+          }
+          syncUrl();
+          renderPoliciesPage();
+          return result;
+        }
+      );
     } catch (error) {
-      setPolicyUploadStatus(error.message || "Policy upload failed.", "error");
+      // The shared helper already set the error status.
     }
   }
   async function handleMappingUpload(files) {
     if (!files.length) {
       return;
     }
-
-    const selectedFile = files[0];
-    setMappingUploadStatus(`Uploading mapping from ${selectedFile.name}...`, "info");
-
     try {
-      const payload = await uploadMappingToApi(selectedFile);
-      applyMappingPayload(payload.mapping);
-      initializeSelection();
-      syncUrl();
-      renderPage();
-
-      setMappingUploadStatus(
-        `Mapping uploaded (${data.controls.length} controls, ${data.documents.length} documents).`,
-        "success"
+      const selectedFile = files[0];
+      await runAsyncOperation(
+        (message, tone) => {
+          setMappingUploadStatus(message, tone);
+        },
+        {
+          pending: `Uploading mapping from ${selectedFile.name}...`,
+          success: () => `Mapping uploaded (${data.controls.length} controls, ${data.documents.length} documents).`,
+          error: "Mapping upload failed.",
+        },
+        async () => {
+          const payload = await uploadMappingToApi(selectedFile);
+          applyMappingPayload(payload.mapping);
+          initializeSelection();
+          syncUrl();
+          renderPage();
+        }
       );
     } catch (error) {
-      setMappingUploadStatus(error.message || "Mapping upload failed.", "error");
+      // The shared helper already set the error status.
     }
   }
   async function uploadMappingToApi(file) {
@@ -504,23 +530,31 @@
       return;
     }
 
-    setPolicyUploadStatus(`Deleting ${documentItem.id}...`, "info");
-
     try {
-      await deletePolicyFromApi(selectedDocumentId);
-      const nextUploadedDocuments = uploadedDocuments.filter((item) => item.id !== selectedDocumentId);
-      uploadedDocuments = nextUploadedDocuments;
-      refreshDocumentsIndex();
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: `Deleting ${documentItem.id}...`,
+          success: `Deleted ${documentItem.id} / ${documentItem.title}.`,
+          error: "Unable to delete the selected policy.",
+        },
+        async () => {
+          await deletePolicyFromApi(selectedDocumentId);
+          uploadedDocuments = uploadedDocuments.filter((item) => item.id !== selectedDocumentId);
+          refreshDocumentsIndex();
 
-      if (state.activeDocumentId === selectedDocumentId) {
-        state.activeDocumentId = "";
-      }
-      initializePolicySelection();
-      syncUrl();
-      renderPoliciesPage();
-      setPolicyUploadStatus(`Deleted ${documentItem.id} / ${documentItem.title}.`, "success");
+          if (state.activeDocumentId === selectedDocumentId) {
+            state.activeDocumentId = "";
+          }
+          initializePolicySelection();
+          syncUrl();
+          renderPoliciesPage();
+        }
+      );
     } catch (error) {
-      setPolicyUploadStatus(error.message || "Unable to delete the selected policy.", "error");
+      // The shared helper already set the error status.
     }
   }
   function setPolicyUploadStatus(message, tone) {

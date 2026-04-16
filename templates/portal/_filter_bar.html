@@ -1,0 +1,29 @@
+<div class="filter-bar">
+  {% if domain_label %}
+    {% include "portal/_pill_select.html" with label=domain_label select_id=domain_filter_id select_aria=domain_filter_aria only %}
+  {% endif %}
+  {% if applicability_label %}
+    {% include "portal/_pill_select.html" with label=applicability_label select_id=applicability_filter_id select_aria=applicability_filter_aria only %}
+  {% endif %}
+  {% if review_label %}
+    {% include "portal/_pill_select.html" with label=review_label select_id=review_filter_id select_aria=review_filter_aria only %}
+  {% endif %}
+  {% if assignee_label %}
+    {% include "portal/_pill_select.html" with label=assignee_label select_id=assignee_filter_id select_aria=assignee_filter_aria only %}
+  {% endif %}
+  {% if status_label %}
+    {% include "portal/_pill_select.html" with label=status_label select_id=status_filter_id select_aria=status_filter_aria only %}
+  {% endif %}
+  {% if risk_level_label %}
+    {% include "portal/_pill_select.html" with label=risk_level_label select_id=risk_level_filter_id select_aria=risk_level_filter_aria only %}
+  {% endif %}
+  {% if clear_filters_label %}
+    <button class="ghost-button" id="{{ clear_filters_id }}" type="button">{{ clear_filters_label }}</button>
+  {% endif %}
+  {% if upload_input_id %}
+    <input id="{{ upload_input_id }}" type="file" accept="{{ upload_accept }}" hidden>
+  {% endif %}
+  {% if upload_trigger_label %}
+    <button class="ghost-button" id="{{ upload_trigger_id }}" type="button">{{ upload_trigger_label }}</button>
+  {% endif %}
+</div>

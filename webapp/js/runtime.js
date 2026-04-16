@@ -49,8 +49,6 @@
     PR: 2,
     UPL: 3,
   };
-  const apiBaseUrl = resolveApiBaseUrl();
-  const loginUrl = resolveLoginUrl();
   const controlsById = new Map();
   let uploadedDocuments = [];
   let vendorSurveyResponses = [];
@@ -219,45 +217,6 @@
     } catch (error) {
       // Keep owners derived from the current risk register if the API cannot provide them.
     }
-  }
-
-  function normalizeAssignableUsers(items) {
-    if (!Array.isArray(items)) {
-      return [];
-    }
-
-    const seen = new Set();
-    return items
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const username = typeof item.username === "string" ? item.username.trim() : "";
-        if (!username || seen.has(username)) {
-          return null;
-        }
-        seen.add(username);
-        const displayName = typeof item.displayName === "string" && item.displayName.trim()
-          ? item.displayName.trim()
-          : username;
-        return { username, displayName };
-      })
-      .filter(Boolean)
-      .sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true, sensitivity: "base" }));
-  }
-
-  function deriveAssignableUsers() {
-    const seen = new Set();
-    return state.riskRegister
-      .map((risk) => (risk && typeof risk.owner === "string" ? risk.owner.trim() : ""))
-      .filter((owner) => {
-        if (!owner || seen.has(owner)) {
-          return false;
-        }
-        seen.add(owner);
-        return true;
-      })
-      .map((owner) => ({ username: owner, displayName: owner }));
   }
 
 void init();

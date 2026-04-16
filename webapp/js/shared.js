@@ -522,121 +522,6 @@
       els.riskForm.addEventListener("submit", handleRiskFormSubmit);
     }
   }
-  function bindFilePicker(trigger, input, onFilesSelected) {
-    if (!trigger || !input) {
-      return;
-    }
-    trigger.addEventListener("click", () => {
-      input.click();
-    });
-    input.addEventListener("change", async (event) => {
-      const files = Array.from(event.target.files || []);
-      event.target.value = "";
-      await onFilesSelected(files);
-    });
-  }
-  function buildReviewStateMonthKey(itemId, monthIndex) {
-    const normalizedItemId = typeof itemId === "string" ? itemId.trim() : "";
-    if (!normalizedItemId) {
-      return "";
-    }
-    const parsedMonth = Number(monthIndex);
-    const normalizedMonth = Number.isInteger(parsedMonth) && parsedMonth >= 0 && parsedMonth <= 11
-      ? parsedMonth
-      : today.getMonth();
-    return `m${normalizedMonth}::${normalizedItemId}`;
-  }
-  function isMonthScopedReviewStateKey(value) {
-    return typeof value === "string" && /^m(?:[0-9]|1[01])::.+$/.test(value);
-  }
-  function normalizeReviewStateMapByMonth(value) {
-    if (!value || typeof value !== "object") {
-      return {};
-    }
-    const normalized = {};
-    Object.entries(value).forEach(([rawKey, rawValue]) => {
-      const key = String(rawKey || "").trim();
-      if (!key) {
-        return;
-      }
-      const isChecked = Boolean(rawValue);
-      if (isMonthScopedReviewStateKey(key)) {
-        normalized[key] = isChecked;
-        return;
-      }
-      if (!isChecked) {
-        return;
-      }
-      const monthScopedKey = buildReviewStateMonthKey(key, today.getMonth());
-      if (monthScopedKey) {
-        normalized[monthScopedKey] = true;
-      }
-    });
-    return normalized;
-  }
-  function normalizeReviewStateTimestampMap(value) {
-    if (!value || typeof value !== "object") {
-      return {};
-    }
-
-    const normalized = {};
-    Object.entries(value).forEach(([rawKey, rawValue]) => {
-      const key = String(rawKey || "").trim();
-      const parsed = new Date(rawValue);
-      if (!key || Number.isNaN(parsed.getTime())) {
-        return;
-      }
-      if (isMonthScopedReviewStateKey(key)) {
-        normalized[key] = parsed.toISOString();
-        return;
-      }
-      const monthScopedKey = buildReviewStateMonthKey(key, today.getMonth());
-      if (monthScopedKey) {
-        normalized[monthScopedKey] = parsed.toISOString();
-      }
-    });
-    return normalized;
-  }
-  function normalizeReviewAuditLogEntries(value) {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") {
-          return null;
-        }
-        return {
-          id: typeof entry.id === "string" ? entry.id : "",
-          action: typeof entry.action === "string" && entry.action.trim() ? entry.action.trim() : "state_changed",
-          entityType: typeof entry.entityType === "string" && entry.entityType.trim() ? entry.entityType.trim() : "record",
-          entityId: typeof entry.entityId === "string" ? entry.entityId.trim() : "",
-          summary: typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.",
-          occurredAt: typeof entry.occurredAt === "string" ? entry.occurredAt : "",
-          actor: entry.actor && typeof entry.actor === "object"
-            ? {
-                username: typeof entry.actor.username === "string" ? entry.actor.username.trim() : "",
-                displayName: typeof entry.actor.displayName === "string" ? entry.actor.displayName.trim() : "",
-              }
-            : {},
-          metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
-        };
-      })
-      .filter(Boolean)
-      .slice(-2000);
-  }
-  function normalizeReviewStateValue(value) {
-    if (!value || typeof value !== "object") {
-      return { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
-    }
-    return {
-      activities: normalizeReviewStateMapByMonth(value.activities),
-      checklist: normalizeReviewStateMapByMonth(value.checklist),
-      completedAt: normalizeReviewStateTimestampMap(value.completedAt),
-      auditLog: normalizeReviewAuditLogEntries(value.auditLog || value.events),
-    };
-  }
   function isReviewTaskCompleted(itemId, monthIndex = state.monthIndex) {
     const key = buildReviewStateMonthKey(itemId, monthIndex);
     if (!key) {
@@ -697,58 +582,60 @@
     const wasCompleted = Boolean(previousChecklistValue || previousActivityValue);
 
     state.reviewStateSaving = true;
-    if (typeof setReviewPersistenceStatus === "function") {
-      setReviewPersistenceStatus("Saving review activity...", "info");
-    }
+    return runAsyncOperation(
+      (message, tone) => {
+        if (typeof setReviewPersistenceStatus === "function") {
+          setReviewPersistenceStatus(message, tone);
+        }
+      },
+      {
+        pending: "Saving review activity...",
+        success: "Review activity saved.",
+        error: "Unable to save review activity.",
+      },
+      async () => {
+        try {
+          state.reviewState.checklist[key] = checked;
+          state.reviewState.activities[key] = checked;
+          if (checked) {
+            if (!wasCompleted || !state.reviewState.completedAt[key]) {
+              state.reviewState.completedAt[key] = new Date().toISOString();
+            }
+          } else {
+            delete state.reviewState.completedAt[key];
+          }
+          renderReviewsPage();
+          renderReviewCompletionIndicators();
 
-    state.reviewState.checklist[key] = checked;
-    state.reviewState.activities[key] = checked;
-    if (checked) {
-      if (!wasCompleted || !state.reviewState.completedAt[key]) {
-        state.reviewState.completedAt[key] = new Date().toISOString();
-      }
-    } else {
-      delete state.reviewState.completedAt[key];
-    }
-    renderReviewsPage();
-    renderReviewCompletionIndicators();
+          await saveReviewState();
+          renderReviewsPage();
+          renderReviewCompletionIndicators();
+          return true;
+        } catch (error) {
+          if (hadChecklistValue) {
+            state.reviewState.checklist[key] = previousChecklistValue;
+          } else {
+            delete state.reviewState.checklist[key];
+          }
+          if (hadActivityValue) {
+            state.reviewState.activities[key] = previousActivityValue;
+          } else {
+            delete state.reviewState.activities[key];
+          }
+          if (hadCompletedAtValue) {
+            state.reviewState.completedAt[key] = previousCompletedAtValue;
+          } else {
+            delete state.reviewState.completedAt[key];
+          }
 
-    try {
-      await saveReviewState();
-      if (typeof setReviewPersistenceStatus === "function") {
-        setReviewPersistenceStatus("Review activity saved.", "success");
+          renderReviewsPage();
+          renderReviewCompletionIndicators();
+          throw error;
+        } finally {
+          state.reviewStateSaving = false;
+        }
       }
-      renderReviewsPage();
-      renderReviewCompletionIndicators();
-    } catch (error) {
-      if (hadChecklistValue) {
-        state.reviewState.checklist[key] = previousChecklistValue;
-      } else {
-        delete state.reviewState.checklist[key];
-      }
-      if (hadActivityValue) {
-        state.reviewState.activities[key] = previousActivityValue;
-      } else {
-        delete state.reviewState.activities[key];
-      }
-      if (hadCompletedAtValue) {
-        state.reviewState.completedAt[key] = previousCompletedAtValue;
-      } else {
-        delete state.reviewState.completedAt[key];
-      }
-
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Unable to save review activity.";
-      if (typeof setReviewPersistenceStatus === "function") {
-        setReviewPersistenceStatus(detail, "error");
-      }
-      renderReviewsPage();
-      renderReviewCompletionIndicators();
-      throw error;
-    } finally {
-      state.reviewStateSaving = false;
-    }
+    );
   }
   function syncSearchSelection() {
     if (page === "policies") {
@@ -779,36 +666,6 @@
     syncUrl();
     renderer();
     applyRowSelectionAccessibility();
-  }
-  function isRowActivationKey(event) {
-    return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
-  }
-  function isInteractiveTarget(target) {
-    return Boolean(target && target.closest && target.closest("a, button, input, select, textarea, [data-policy-link]"));
-  }
-  function decorateSelectableRows(container, rowSelector, activeSelector) {
-    if (!container) {
-      return;
-    }
-    container.querySelectorAll(rowSelector).forEach((row) => {
-      row.setAttribute("tabindex", "0");
-      row.setAttribute("role", "button");
-      row.setAttribute("aria-pressed", row.matches(activeSelector) ? "true" : "false");
-    });
-  }
-  function observeSelectableRows(container, rowSelector, activeSelector, observedFlagName) {
-    if (!container || container.dataset[observedFlagName] === "true") {
-      return;
-    }
-    container.dataset[observedFlagName] = "true";
-    const observer = new MutationObserver(() => {
-      decorateSelectableRows(container, rowSelector, activeSelector);
-    });
-    observer.observe(container, { childList: true, subtree: true });
-  }
-  function applyRowSelectionAccessibility() {
-    decorateSelectableRows(els.controlsBody, "[data-control-row]", ".is-selected");
-    decorateSelectableRows(els.riskList, "[data-risk-row]", ".is-selected");
   }
   function renderPage() {
     switch (page) {
@@ -1008,105 +865,6 @@
       return groups;
     }, {});
   }
-  function normalizeUploadedPolicyItem(item) {
-    if (!item || typeof item !== "object") {
-      return null;
-    }
-    const id = typeof item.id === "string" ? item.id.trim() : "";
-    const title = typeof item.title === "string" ? item.title.trim() : "";
-    const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
-    if (!id || !title) {
-      return null;
-    }
-    const contentAvailable = typeof item.contentAvailable === "boolean"
-      ? item.contentAvailable
-      : Boolean(contentHtml.trim());
-    const contentLoaded = typeof item.contentLoaded === "boolean"
-      ? item.contentLoaded
-      : Boolean(contentHtml.trim());
-    return {
-      id,
-      title,
-      type: typeof item.type === "string" && item.type.trim() ? item.type.trim() : "Uploaded policy",
-      approver: typeof item.approver === "string" && item.approver.trim() ? item.approver.trim() : "Pending review",
-      approvedAt: typeof item.approvedAt === "string" ? item.approvedAt : "",
-      approvedBy: typeof item.approvedBy === "string" ? item.approvedBy : "",
-      reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
-        ? item.reviewFrequency.trim()
-        : "Not scheduled",
-      path: typeof item.path === "string" && item.path.trim() ? item.path.trim() : "Uploaded file",
-      folder: typeof item.folder === "string" && item.folder.trim() ? item.folder.trim() : "Uploaded",
-      purpose: typeof item.purpose === "string" ? item.purpose : "",
-      contentHtml,
-      contentAvailable,
-      contentLoaded,
-      isUploaded: true,
-      originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
-      uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : "",
-    };
-  }
-  function normalizeMappingDocumentItem(item) {
-    if (!item || typeof item !== "object") {
-      return null;
-    }
-    const id = typeof item.id === "string" ? item.id.trim() : "";
-    const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : id;
-    if (!id || !title) {
-      return null;
-    }
-    const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
-    const contentAvailable = typeof item.contentAvailable === "boolean"
-      ? item.contentAvailable
-      : Boolean(contentHtml.trim());
-    const contentLoaded = typeof item.contentLoaded === "boolean"
-      ? item.contentLoaded
-      : Boolean(contentHtml.trim());
-    return {
-      id,
-      title,
-      type: typeof item.type === "string" ? item.type : "",
-      owner: typeof item.owner === "string" ? item.owner : "",
-      approver: typeof item.approver === "string" ? item.approver : "",
-      reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
-        ? item.reviewFrequency.trim()
-        : "Not scheduled",
-      path: typeof item.path === "string" ? item.path : "",
-      folder: typeof item.folder === "string" ? item.folder : "",
-      purpose: typeof item.purpose === "string" ? item.purpose : "",
-      contentHtml,
-      contentAvailable,
-      contentLoaded,
-      isUploaded: Boolean(item.isUploaded),
-      originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
-    };
-  }
-  async function saveReviewState() {
-    const payload = await apiRequest("/state/review/", {
-      method: "PUT",
-      body: JSON.stringify({ reviewState: state.reviewState }),
-    });
-
-    if (!payload || !payload.reviewState || typeof payload.reviewState !== "object" || Array.isArray(payload.reviewState)) {
-      throw new Error("Review state save response was invalid.");
-    }
-
-    state.reviewState = normalizeReviewStateValue(payload.reviewState);
-    return state.reviewState;
-  }
-  async function saveControlState() {
-    const payload = await apiRequest("/state/control/", {
-      method: "PUT",
-      body: JSON.stringify({ controlState: state.controlState }),
-    });
-
-    if (!payload || !payload.controlState || typeof payload.controlState !== "object" || Array.isArray(payload.controlState)) {
-      throw new Error("Control state save response was invalid.");
-    }
-
-    state.controlState = payload.controlState;
-    pruneControlState();
-    return state.controlState;
-  }
   function setUploadStatus(element, message, tone) {
     if (!element) {
       return;
@@ -1117,102 +875,6 @@
     if (tone) {
       element.classList.add(`is-${tone}`);
     }
-  }
-  function emptySummary() {
-    return {
-      controlCount: 0,
-      documentCount: 0,
-      policyCount: 0,
-      activityCount: 0,
-      checklistCount: 0,
-      domainCounts: {},
-      documentReviewFrequencies: {},
-      checklistFrequencies: {},
-    };
-  }
-  function normalizeDataPayload(payload) {
-    if (!payload || typeof payload !== "object") {
-      return;
-    }
-
-    payload.generatedAt = typeof payload.generatedAt === "string" && payload.generatedAt.trim()
-      ? payload.generatedAt
-      : new Date().toISOString();
-    payload.sourceSnapshot = payload.sourceSnapshot && typeof payload.sourceSnapshot === "object"
-      ? payload.sourceSnapshot
-      : {};
-
-    const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
-    payload.summary = {
-      ...emptySummary(),
-      ...summary,
-      domainCounts: summary.domainCounts && typeof summary.domainCounts === "object" ? summary.domainCounts : {},
-      documentReviewFrequencies: summary.documentReviewFrequencies && typeof summary.documentReviewFrequencies === "object"
-        ? summary.documentReviewFrequencies
-        : {},
-      checklistFrequencies: summary.checklistFrequencies && typeof summary.checklistFrequencies === "object"
-        ? summary.checklistFrequencies
-        : {},
-    };
-
-    payload.controls = Array.isArray(payload.controls) ? payload.controls : [];
-    payload.documents = Array.isArray(payload.documents) ? payload.documents : [];
-    payload.activities = Array.isArray(payload.activities) ? payload.activities : [];
-    payload.checklist = Array.isArray(payload.checklist) ? payload.checklist : [];
-    payload.policyCoverage = Array.isArray(payload.policyCoverage) ? payload.policyCoverage : [];
-  }
-  function applyMappingPayload(payload) {
-    const mappingPayload = payload && typeof payload === "object" ? payload : {};
-    normalizeDataPayload(mappingPayload);
-
-    data.generatedAt = mappingPayload.generatedAt;
-    data.sourceSnapshot = mappingPayload.sourceSnapshot;
-    data.summary = mappingPayload.summary;
-    data.controls = mappingPayload.controls;
-    data.documents = mappingPayload.documents
-      .map((item) => normalizeMappingDocumentItem(item))
-      .filter(Boolean);
-    data.activities = mappingPayload.activities;
-    data.checklist = mappingPayload.checklist;
-    data.policyCoverage = mappingPayload.policyCoverage;
-
-    refreshControlsIndex();
-    refreshDocumentsIndex();
-    pruneControlState();
-  }
-  function refreshControlsIndex() {
-    controlsById.clear();
-    data.controls.forEach((control) => {
-      if (!control || typeof control !== "object" || typeof control.id !== "string") {
-        return;
-      }
-      if (!Array.isArray(control.documentIds)) {
-        control.documentIds = [];
-      }
-      if (!Array.isArray(control.policyDocumentIds)) {
-        control.policyDocumentIds = Array.isArray(control.documentIds) ? control.documentIds : [];
-      }
-      controlsById.set(control.id, control);
-    });
-  }
-  function pruneControlState() {
-    Object.keys(state.controlState).forEach((controlId) => {
-      if (!controlsById.has(controlId)) {
-        delete state.controlState[controlId];
-      }
-    });
-  }
-  function resolveApiBaseUrl() {
-    if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl === "string") {
-      return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
-    }
-    return "/api";
-  }
-  function resolveLoginUrl() {
-    if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.loginUrl === "string") {
-      return window.ISMS_PORTAL_CONFIG.loginUrl;
-    }
-    return "/login/";
   }
   function updateRuntimeMode() {
     if (!els.runtimeMode) {
@@ -1236,116 +898,6 @@
     if (els.mappingUploadStatus) {
       els.mappingUploadStatus.textContent = "Upload an optional mapping file (.json or .csv), or map policies manually from Controls and Policies.";
     }
-  }
-  function refreshDocumentsIndex() {
-    documentsById.clear();
-    data.documents.concat(uploadedDocuments).forEach((documentItem) => {
-      documentsById.set(documentItem.id, documentItem);
-    });
-  }
-  async function loadRemoteState() {
-    try {
-      const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
-      applyRemoteState(payload);
-    } catch (error) {
-      console.error("Failed to load portal state from the API.", error);
-    }
-  }
-  function applyRemoteState(payload) {
-    if (!payload || typeof payload !== "object") {
-      return;
-    }
-
-    if (payload.mapping && typeof payload.mapping === "object") {
-      const remoteControls = Array.isArray(payload.mapping.controls) ? payload.mapping.controls : [];
-      if (remoteControls.length) {
-        applyMappingPayload(payload.mapping);
-      }
-    }
-    if (Array.isArray(payload.uploadedDocuments)) {
-      uploadedDocuments = payload.uploadedDocuments.map((item) => normalizeUploadedPolicyItem(item)).filter(Boolean);
-    }
-    if (Array.isArray(payload.vendorSurveyResponses)) {
-      vendorSurveyResponses = payload.vendorSurveyResponses;
-      state.vendorResponsesLoaded = true;
-    }
-    if (Array.isArray(payload.riskRegister)) {
-      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
-    }
-    if (Array.isArray(payload.assignableUsers) && typeof normalizeAssignableUsers === "function") {
-      const assignableUsers = normalizeAssignableUsers(payload.assignableUsers);
-      if (assignableUsers.length) {
-        state.assignableUsers = assignableUsers;
-      }
-    }
-    if (Array.isArray(payload.checklistItems)) {
-      state.checklistItems = normalizeChecklistItems(payload.checklistItems);
-    }
-    if (Array.isArray(payload.recommendedChecklistItems)) {
-      state.recommendedChecklistItems = normalizeChecklistItems(payload.recommendedChecklistItems);
-    }
-    if (payload.reviewState && typeof payload.reviewState === "object") {
-      state.reviewState = normalizeReviewStateValue(payload.reviewState);
-    }
-    if (payload.controlState && typeof payload.controlState === "object") {
-      state.controlState = payload.controlState;
-    }
-
-    refreshControlsIndex();
-    refreshDocumentsIndex();
-    pruneControlState();
-  }
-  async function apiRequest(path, options) {
-    const requestOptions = options || {};
-    const method = requestOptions.method || "GET";
-    const headers = new Headers(requestOptions.headers || {});
-    const isFormData = typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
-
-    if (!headers.has("Accept")) {
-      headers.set("Accept", "application/json");
-    }
-    if (requestOptions.body && !isFormData && !headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-
-    const csrfToken = readCookie("csrftoken");
-    if (csrfToken && !/^(GET|HEAD|OPTIONS|TRACE)$/i.test(method)) {
-      headers.set("X-CSRFToken", csrfToken);
-    }
-
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...requestOptions,
-      method,
-      headers,
-      credentials: "same-origin",
-    });
-
-    if (response.status === 401) {
-      const next = `${window.location.pathname}${window.location.search}`;
-      window.location.href = `${loginUrl}?next=${encodeURIComponent(next)}`;
-      throw new Error("Authentication required.");
-    }
-
-    const responseText = await response.text();
-    let payload = null;
-    if (responseText) {
-      try {
-        payload = JSON.parse(responseText);
-      } catch (error) {
-        payload = null;
-      }
-    }
-
-    if (!response.ok) {
-      throw new Error((payload && (payload.detail || payload.message)) || `Request failed (${response.status}).`);
-    }
-
-    return payload;
-  }
-  function readCookie(name) {
-    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]*)`));
-    return match ? decodeURIComponent(match[1]) : "";
   }
   function portalWorkspaceLabel() {
     return "shared portal workspace";

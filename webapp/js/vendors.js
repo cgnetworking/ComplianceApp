@@ -249,36 +249,33 @@
     if (!files.length) {
       return;
     }
-
-    setUploadStatus(
-      els.vendorUploadStatus,
-      `Importing ${files.length} vendor response file${files.length === 1 ? "" : "s"}...`,
-      "info"
-    );
-
     try {
-      const additions = await uploadVendorsToApi(files);
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.vendorUploadStatus, message, tone);
+        },
+        {
+          pending: `Importing ${files.length} vendor response file${files.length === 1 ? "" : "s"}...`,
+          success: (additions) => `${additions.length} vendor response file${additions.length === 1 ? "" : "s"} imported into the intake queue.`,
+          error: "Unable to import the selected vendor response file.",
+        },
+        async () => {
+          const additions = await uploadVendorsToApi(files);
 
-      vendorSurveyResponses = additions
-        .concat(vendorSurveyResponses)
-        .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
-        .slice(0, 60);
-      state.vendorResponsesLoaded = true;
+          vendorSurveyResponses = additions
+            .concat(vendorSurveyResponses)
+            .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
+            .slice(0, 60);
+          state.vendorResponsesLoaded = true;
 
-      syncVendorSelection();
-      syncUrl();
-      renderVendorsPage();
-      setUploadStatus(
-        els.vendorUploadStatus,
-        `${additions.length} vendor response file${additions.length === 1 ? "" : "s"} imported into the intake queue.`,
-        "success"
+          syncVendorSelection();
+          syncUrl();
+          renderVendorsPage();
+          return additions;
+        }
       );
     } catch (error) {
-      setUploadStatus(
-        els.vendorUploadStatus,
-        error instanceof Error ? error.message : "Unable to import the selected vendor response file.",
-        "error"
-      );
+      // The shared helper already set the error status.
     }
   }
   async function uploadVendorsToApi(files) {

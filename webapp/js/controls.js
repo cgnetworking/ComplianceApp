@@ -690,7 +690,6 @@
 
     const previousControlState = cloneControlStateSnapshot();
     const mutationVersion = ++controlStateMutationVersion;
-    setControlPersistenceStatus("Saving control changes...", "info");
 
     if (!Object.keys(entry).length) {
       delete state.controlState[controlId];
@@ -698,23 +697,30 @@
       state.controlState[controlId] = entry;
     }
 
-    try {
-      await saveControlState();
-      if (mutationVersion === controlStateMutationVersion) {
-        setControlPersistenceStatus("Control changes saved.", "success");
+    return runAsyncOperation(
+      (message, tone) => {
+        if (mutationVersion === controlStateMutationVersion) {
+          setControlPersistenceStatus(message, tone);
+        }
+      },
+      {
+        pending: "Saving control changes...",
+        success: (saved) => (saved ? "Control changes saved." : null),
+        error: "Unable to save control changes.",
+      },
+      async () => {
+        try {
+          await saveControlState();
+          return mutationVersion === controlStateMutationVersion;
+        } catch (error) {
+          if (mutationVersion !== controlStateMutationVersion) {
+            return false;
+          }
+          state.controlState = previousControlState;
+          throw error;
+        }
       }
-      return mutationVersion === controlStateMutationVersion;
-    } catch (error) {
-      if (mutationVersion !== controlStateMutationVersion) {
-        return false;
-      }
-      state.controlState = previousControlState;
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Unable to save control changes.";
-      setControlPersistenceStatus(detail, "error");
-      throw error;
-    }
+    );
   }
   async function setControlApplicability(controlId, applicability) {
     const control = controlsById.get(controlId);

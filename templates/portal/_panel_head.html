@@ -1,0 +1,9 @@
+<div class="panel-head{% if panel_head_class %} {{ panel_head_class }}{% endif %}">
+  <div>
+    <p class="panel-kicker"{% if kicker_id %} id="{{ kicker_id }}"{% endif %}>{{ kicker }}</p>
+    <h2{% if title_id %} id="{{ title_id }}"{% endif %}>{{ title }}</h2>
+  </div>
+  {% if action_label %}
+    <button class="{{ action_button_class|default:'ghost-button' }}" id="{{ action_id }}" type="{{ action_type|default:'button' }}">{{ action_label }}</button>
+  {% endif %}
+</div>

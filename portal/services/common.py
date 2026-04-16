@@ -14,14 +14,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 
-from .models import (
-    PortalState,
-    ReviewChecklistItem,
-    ReviewChecklistRecommendation,
-    RiskRecord,
-    UploadedPolicy,
-    VendorResponse,
-)
+from ..models import PortalState
 
 
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
@@ -88,26 +81,13 @@ ANNEX_A_CONTROL_DOMAIN_BY_FAMILY = {
     "8": "Technological",
 }
 ALLOWED_CONTROL_APPLICABILITY = {"Applicable", "Excluded"}
-CSV_CONTROL_ID_FIELDS = (
-    "controlid",
-    "id",
-    "control",
-    "controlnumber",
-    "annexacontrol",
-)
+CSV_CONTROL_ID_FIELDS = ("controlid", "id", "control", "controlnumber", "annexacontrol")
 CSV_CONTROL_NAME_FIELDS = ("controlname", "name", "controltitle")
 CSV_CONTROL_DOMAIN_FIELDS = ("controldomain", "domain")
 CSV_CONTROL_APPLICABILITY_FIELDS = ("controlapplicability", "applicability", "status")
 CSV_CONTROL_OWNER_FIELDS = ("controlowner", "owner")
 CSV_CONTROL_REVIEW_FREQUENCY_FIELDS = ("controlreviewfrequency", "reviewfrequency", "frequency")
-CSV_DOCUMENT_IDS_FIELDS = (
-    "policydocumentids",
-    "documentids",
-    "policyids",
-    "documents",
-    "mappedpolicies",
-    "mappeddocuments",
-)
+CSV_DOCUMENT_IDS_FIELDS = ("policydocumentids", "documentids", "policyids", "documents", "mappedpolicies", "mappeddocuments")
 CSV_DOCUMENT_ID_FIELDS = ("policydocumentid", "documentid", "policyid")
 CSV_PREFERRED_DOCUMENT_ID_FIELDS = ("preferreddocumentid", "primarydocumentid", "defaultdocumentid")
 CSV_DOCUMENT_TITLE_FIELDS = ("documenttitle", "policytitle", "doctitle")
@@ -697,309 +677,6 @@ def parse_mapping_text(raw_text: str, extension: str) -> object:
         raise ValidationError("Uploaded mapping must be valid JSON when using a .json file.") from error
 
 
-def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
-    extension = file_extension(file.name)
-    if extension not in SUPPORTED_MAPPING_EXTENSIONS:
-        raise ValidationError("Upload a JSON or CSV mapping file (.json, .csv).")
-
-    parsed_payload = parse_mapping_text(decode_upload(file), extension)
-    normalized_payload = normalize_mapping_payload(parsed_payload)
-    set_state_payload("mapping_state", normalized_payload)
-    return normalized_payload
-
-
-def get_mapping_payload() -> dict[str, object]:
-    payload = get_state_payload("mapping_state", {})
-    return normalize_mapping_payload(payload)
-
-
-def list_review_checklist_items() -> list[dict[str, str]]:
-    return [item.to_portal_dict() for item in ReviewChecklistItem.objects.all()]
-
-
-def list_review_checklist_recommendations() -> list[dict[str, str]]:
-    return [item.to_portal_dict() for item in ReviewChecklistRecommendation.objects.all()]
-
-
-def list_assignable_users() -> list[dict[str, str]]:
-    user_model = get_user_model()
-    username_field = getattr(user_model, "USERNAME_FIELD", "username")
-    assignable_users: list[dict[str, str]] = []
-    for user in user_model.objects.filter(is_active=True).order_by(username_field):
-        username = normalize_string(getattr(user, username_field, ""))
-        if not username:
-            continue
-        first_name = normalize_string(getattr(user, "first_name", ""))
-        last_name = normalize_string(getattr(user, "last_name", ""))
-        full_name = " ".join(part for part in [first_name, last_name] if part).strip()
-        email = normalize_string(getattr(user, "email", ""))
-        assignable_users.append(
-            {
-                "username": username,
-                "displayName": full_name or email or username,
-            }
-        )
-    return assignable_users
-
-
-def normalize_bootstrap_page(value: object) -> str:
-    normalized = normalize_string(value).lower()
-    return normalized if normalized in BOOTSTRAP_PAGES else ""
-
-
-def serialize_policy_document_payload(
-    document: dict[str, object],
-    *,
-    include_content: bool,
-) -> dict[str, object]:
-    payload = dict(document) if isinstance(document, dict) else {}
-    content_html = normalize_string(payload.get("contentHtml"))
-    payload["contentAvailable"] = bool(content_html)
-    payload["contentLoaded"] = include_content
-    payload["contentHtml"] = content_html if include_content else ""
-    return payload
-
-
-def get_mapping_bootstrap_payload(*, include_document_content: bool) -> dict[str, object]:
-    mapping_payload = get_mapping_payload()
-    mapping_documents = [
-        serialize_policy_document_payload(item, include_content=include_document_content)
-        for item in mapping_payload.get("documents", [])
-        if isinstance(item, dict)
-    ]
-    next_payload = dict(mapping_payload)
-    next_payload["documents"] = mapping_documents
-    return next_payload
-
-
-def list_uploaded_documents(*, include_content: bool) -> list[dict[str, object]]:
-    return [
-        serialize_policy_document_payload(item.to_portal_dict(), include_content=include_content)
-        for item in UploadedPolicy.objects.all()
-    ]
-
-
-def get_policy_document(document_id: str, *, include_content: bool = True) -> dict[str, object]:
-    normalized_id = normalize_string(document_id)
-    if not normalized_id:
-        raise ValidationError("Policy id is required.")
-
-    try:
-        uploaded = UploadedPolicy.objects.get(document_id=normalized_id)
-    except UploadedPolicy.DoesNotExist:
-        uploaded = None
-
-    if uploaded is not None:
-        return serialize_policy_document_payload(uploaded.to_portal_dict(), include_content=include_content)
-
-    mapping_payload = get_mapping_payload()
-    mapping_documents = mapping_payload.get("documents")
-    if isinstance(mapping_documents, list):
-        for item in mapping_documents:
-            if not isinstance(item, dict):
-                continue
-            if normalize_string(item.get("id")) == normalized_id:
-                return serialize_policy_document_payload(item, include_content=include_content)
-
-    raise ValidationError("Policy document was not found.")
-
-
-def resolve_assignable_username(identifier: str) -> str:
-    normalized_identifier = normalize_string(identifier)
-    if not normalized_identifier:
-        return ""
-
-    user_model = get_user_model()
-    username_field = getattr(user_model, "USERNAME_FIELD", "username")
-    user = user_model.objects.filter(is_active=True).filter(**{f"{username_field}__iexact": normalized_identifier}).first()
-    if user is None:
-        has_email_field = any(getattr(field, "name", "") == "email" for field in user_model._meta.get_fields())
-        if has_email_field:
-            user = user_model.objects.filter(is_active=True, email__iexact=normalized_identifier).first()
-    if user is None:
-        return ""
-
-    return normalize_string(getattr(user, username_field, ""))
-
-
-def normalize_policy_approver_value(value: object) -> str:
-    normalized = normalize_string(value)
-    if not normalized:
-        return PENDING_POLICY_APPROVER
-    if normalized.lower() == PENDING_POLICY_APPROVER.lower():
-        return PENDING_POLICY_APPROVER
-
-    resolved_username = resolve_assignable_username(normalized)
-    normalized_value = resolved_username or normalized
-    if len(normalized_value) > 255:
-        raise ValidationError("Approver value is too long.")
-    return normalized_value
-
-
-def review_state_payload_template(payload: dict[str, object] | None = None) -> dict[str, object]:
-    source = payload if isinstance(payload, dict) else {}
-    return {
-        "activities": source.get("activities", {}),
-        "checklist": source.get("checklist", {}),
-        "completedAt": source.get("completedAt", {}),
-        "auditLog": source.get("auditLog", []),
-    }
-
-
-def append_review_state_audit_entries(entries: list[object]) -> dict[str, object]:
-    normalized_entries = normalize_review_state_audit_log(entries)
-    if not normalized_entries:
-        return normalize_review_state(get_state_payload("review_state", {}))
-
-    with transaction.atomic():
-        record, _ = PortalState.objects.select_for_update().get_or_create(
-            key="review_state",
-            defaults={"payload": review_state_payload_template(normalize_review_state({}))},
-        )
-        previous_state = normalize_review_state(record.payload)
-        existing_audit_log = previous_state.get("auditLog") if isinstance(previous_state.get("auditLog"), list) else []
-        next_state = review_state_payload_template(previous_state)
-        next_state["auditLog"] = normalize_review_state_audit_log(existing_audit_log + normalized_entries)
-        record.payload = next_state
-        record.save(update_fields=["payload", "updated_at"])
-        return next_state
-
-
-def build_policy_approval_audit_entry(
-    policy: UploadedPolicy,
-    *,
-    actor_username: str,
-    actor_display_name: str,
-    occurred_at: datetime,
-) -> dict[str, object]:
-    local_approval_time = timezone.localtime(occurred_at)
-    approval_date = f"{local_approval_time.strftime('%B')} {local_approval_time.day}, {local_approval_time.year}"
-    return {
-        "id": f"audit-{uuid.uuid4().hex[:12]}",
-        "action": "policy_approved",
-        "entityType": "policy",
-        "entityId": policy.document_id,
-        "summary": f"Approved {policy.document_id} / {policy.title} on {approval_date}.",
-        "actor": {
-            "username": actor_username,
-            "displayName": actor_display_name,
-        },
-        "occurredAt": occurred_at.isoformat(),
-        "metadata": {
-            "source": "policies",
-            "policyId": policy.document_id,
-            "policyTitle": policy.title,
-            "approvedBy": actor_username,
-            "approvedAt": occurred_at.isoformat(),
-        },
-    }
-
-
-def create_review_checklist_item(payload: object) -> dict[str, str]:
-    if not isinstance(payload, dict):
-        raise ValidationError("Checklist item payload must be an object.")
-
-    item_text = normalize_string(payload.get("item"))
-    if not item_text:
-        raise ValidationError("Checklist item text is required.")
-
-    category = normalize_string(payload.get("category"), "Custom")
-    frequency = normalize_string(payload.get("frequency"), "Annual")
-    start_date = parse_optional_iso_date(payload.get("startDate"))
-    owner = normalize_string(payload.get("owner"), "Shared portal")
-
-    for _ in range(5):
-        external_id = f"checklist-{uuid.uuid4().hex[:12]}"
-        if not ReviewChecklistItem.objects.filter(external_id=external_id).exists():
-            created = ReviewChecklistItem.objects.create(
-                external_id=external_id,
-                category=category,
-                item=item_text,
-                frequency=frequency,
-                start_date=start_date,
-                owner=owner,
-            )
-            return created.to_portal_dict()
-
-    raise ValidationError("Unable to create checklist item id. Retry the request.")
-
-
-def delete_review_checklist_item(external_id: str) -> dict[str, str]:
-    normalized_id = normalize_string(external_id)
-    if not normalized_id:
-        raise ValidationError("Checklist item id is required.")
-
-    try:
-        checklist_item = ReviewChecklistItem.objects.get(external_id=normalized_id)
-    except ReviewChecklistItem.DoesNotExist as error:
-        raise ValidationError("Checklist item was not found.") from error
-
-    deleted_item = checklist_item.to_portal_dict()
-    checklist_item.delete()
-
-    review_state = normalize_review_state(get_state_payload("review_state", {}))
-    checklist_state = review_state.get("checklist") if isinstance(review_state.get("checklist"), dict) else {}
-    activity_state = review_state.get("activities") if isinstance(review_state.get("activities"), dict) else {}
-    completed_at_state = review_state.get("completedAt") if isinstance(review_state.get("completedAt"), dict) else {}
-    audit_log = review_state.get("auditLog") if isinstance(review_state.get("auditLog"), list) else []
-
-    def keep_state_entry(key: str) -> bool:
-        return key != normalized_id and not key.endswith(f"::{normalized_id}")
-
-    filtered_checklist_state = {str(key): bool(value) for key, value in checklist_state.items() if keep_state_entry(str(key))}
-    filtered_activity_state = {str(key): bool(value) for key, value in activity_state.items() if keep_state_entry(str(key))}
-    filtered_completed_at_state = {
-        str(key): str(value)
-        for key, value in completed_at_state.items()
-        if keep_state_entry(str(key))
-    }
-
-    if (
-        filtered_checklist_state != checklist_state
-        or filtered_activity_state != activity_state
-        or filtered_completed_at_state != completed_at_state
-    ):
-        set_state_payload(
-            "review_state",
-            {
-                "activities": filtered_activity_state,
-                "checklist": filtered_checklist_state,
-                "completedAt": filtered_completed_at_state,
-                "auditLog": audit_log,
-            },
-        )
-
-    return deleted_item
-
-
-def get_bootstrap_payload(*, policy_reader: bool = False, page: str = "") -> dict[str, object]:
-    normalized_page = normalize_bootstrap_page(page)
-    include_all_sections = normalized_page == ""
-    include_document_content = include_all_sections
-
-    payload: dict[str, object] = {
-        "persistenceMode": "api",
-        "mapping": get_mapping_bootstrap_payload(include_document_content=include_document_content),
-        "uploadedDocuments": list_uploaded_documents(include_content=include_document_content),
-    }
-
-    if policy_reader:
-        return payload
-
-    payload["assignableUsers"] = list_assignable_users()
-    if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_REVIEW_STATE:
-        payload["checklistItems"] = list_review_checklist_items()
-        payload["recommendedChecklistItems"] = list_review_checklist_recommendations()
-        payload["reviewState"] = normalize_review_state(get_state_payload("review_state", {}))
-    if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
-        payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
-    if include_all_sections:
-        payload["vendorSurveyResponses"] = list_vendor_responses()
-    if include_all_sections or normalized_page == "risks":
-        payload["riskRegister"] = list_risk_register()
-    return payload
-
-
 def get_state_payload(key: str, default: dict[str, object]) -> dict[str, object]:
     try:
         record = PortalState.objects.get(key=key)
@@ -1013,257 +690,38 @@ def set_state_payload(key: str, payload: dict[str, object]) -> dict[str, object]
     return record.payload
 
 
-def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, object]], list[str]]:
-    created_items: list[UploadedPolicy] = []
-    messages: list[str] = []
-
-    for uploaded_file in files:
-        extension = file_extension(uploaded_file.name)
-        if extension not in SUPPORTED_POLICY_EXTENSIONS:
-            messages.append(
-                f"{uploaded_file.name} was skipped because only markdown, text, and HTML files are supported."
-            )
-            continue
-
-        raw_text = decode_upload(uploaded_file)
-        content_html = sanitize_uploaded_html(raw_text) if extension in {"html", "htm"} else markdown_to_html(raw_text)
-        policy = UploadedPolicy.objects.create(
-            document_id=f"UPL-TEMP-{uuid.uuid4().hex[:12]}",
-            title=file_name_base(uploaded_file.name),
-            document_type="Uploaded policy",
-            approver=PENDING_POLICY_APPROVER,
-            review_frequency="Not scheduled",
-            path=f"Portal upload / {uploaded_file.name}",
-            folder="Uploaded",
-            purpose=extract_purpose_from_markdown(raw_text) or f"Uploaded from {uploaded_file.name}.",
-            content_html=content_html or "<p>No content was found in the uploaded file.</p>",
-            raw_text=raw_text,
-            original_filename=uploaded_file.name,
-        )
-        policy.document_id = format_uploaded_policy_id(policy.pk or 0)
-        policy.save(update_fields=["document_id"])
-        created_items.append(policy)
-
-    if not created_items and messages:
-        raise ValidationError(messages[0])
-
-    return [item.to_portal_dict() for item in created_items], messages
-
-
-def delete_uploaded_policy(document_id: str) -> dict[str, object]:
-    normalized_id = normalize_string(document_id)
-    if not normalized_id:
-        raise ValidationError("Policy id is required.")
-
-    try:
-        policy = UploadedPolicy.objects.get(document_id=normalized_id)
-    except UploadedPolicy.DoesNotExist as error:
-        raise ValidationError("Uploaded policy was not found.") from error
-
-    deleted_payload = policy.to_portal_dict()
-    policy.delete()
-    return deleted_payload
-
-
-def update_uploaded_policy_approver(document_id: str, approver: object) -> dict[str, object]:
-    normalized_id = normalize_string(document_id)
-    if not normalized_id:
-        raise ValidationError("Policy id is required.")
-
-    try:
-        policy = UploadedPolicy.objects.get(document_id=normalized_id)
-    except UploadedPolicy.DoesNotExist as error:
-        raise ValidationError("Uploaded policy was not found.") from error
-
-    next_approver = normalize_policy_approver_value(approver)
-    update_fields = []
-    if normalize_string(policy.approver).lower() != next_approver.lower():
-        policy.approver = next_approver
-        policy.approved_by = ""
-        policy.approved_at = None
-        update_fields.extend(["approver", "approved_by", "approved_at"])
-    elif policy.approver != next_approver:
-        policy.approver = next_approver
-        update_fields.append("approver")
-    if update_fields:
-        policy.save(update_fields=update_fields)
-    return policy.to_portal_dict()
-
-
-def approve_uploaded_policy(
-    document_id: str,
-    *,
-    actor_username: str,
-    actor_display_name: str,
-) -> tuple[dict[str, object], dict[str, object]]:
-    normalized_id = normalize_string(document_id)
-    if not normalized_id:
-        raise ValidationError("Policy id is required.")
-
-    normalized_actor_username = normalize_string(actor_username)
-    if not normalized_actor_username:
-        raise ValidationError("A valid approver is required.")
-
-    with transaction.atomic():
-        try:
-            policy = UploadedPolicy.objects.select_for_update().get(document_id=normalized_id)
-        except UploadedPolicy.DoesNotExist as error:
-            raise ValidationError("Uploaded policy was not found.") from error
-
-        assigned_approver = normalize_policy_approver_value(policy.approver)
-        if assigned_approver == PENDING_POLICY_APPROVER:
-            raise ValidationError("This policy is not assigned to an approver.")
-        if assigned_approver.lower() != normalized_actor_username.lower():
-            raise ValidationError("Only the assigned approver can approve this policy.")
-
-        if policy.approved_at:
-            review_state = normalize_review_state(get_state_payload("review_state", {}))
-            return policy.to_portal_dict(), review_state
-
-        approval_time = timezone.now()
-        policy.approved_by = normalized_actor_username
-        policy.approved_at = approval_time
-        policy.save(update_fields=["approved_by", "approved_at"])
-
-    review_state = append_review_state_audit_entries([
-        build_policy_approval_audit_entry(
-            policy,
-            actor_username=normalized_actor_username,
-            actor_display_name=normalize_string(actor_display_name, normalized_actor_username),
-            occurred_at=approval_time,
-        )
-    ])
-    return policy.to_portal_dict(), review_state
-
-
-def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]]:
-    created_items: list[VendorResponse] = []
-
-    for uploaded_file in files:
-        extension = file_extension(uploaded_file.name)
-        raw_text = decode_upload(uploaded_file).replace("\x00", "").strip() if is_text_like_file(uploaded_file, extension) else ""
-        preview_text = build_preview_text(raw_text, 1400, 20)
-        response = VendorResponse.objects.create(
-            external_id=f"vendor-{uuid.uuid4().hex[:16]}",
-            vendor_name=infer_vendor_name(uploaded_file.name, raw_text, extension),
-            file_name=uploaded_file.name,
-            extension=extension or "file",
-            mime_type=uploaded_file.content_type or "Unknown",
-            file_size=uploaded_file.size or 0,
-            preview_text=preview_text,
-            summary=summarize_vendor_survey(uploaded_file.name, raw_text, extension, preview_text),
-            status="Preview ready" if preview_text else "Metadata only",
-            raw_text=raw_text,
-        )
-        created_items.append(response)
-
-    return [item.to_portal_dict() for item in created_items]
-
-
-def list_vendor_responses() -> list[dict[str, object]]:
-    return [item.to_portal_dict() for item in VendorResponse.objects.all()]
-
-
-def list_risk_register() -> list[dict[str, object]]:
-    return [item.to_portal_dict() for item in RiskRecord.objects.all()]
-
-
-def risk_record_model_values(record: dict[str, object]) -> dict[str, object]:
-    return {
-        "risk": record["risk"],
-        "probability": record["probability"],
-        "impact": record["impact"],
-        "initial_risk_level": record["initial_risk_level"],
-        "date": record["date"],
-        "owner": record["owner"],
-        "closed_date": record["closed_date"],
-        "created_at": record["created_at"],
-        "updated_at": record["updated_at"],
-    }
-
-
-def upsert_risk_register(items: list[object]) -> list[dict[str, object]]:
-    if not isinstance(items, list):
-        raise ValidationError("Risk register payload must be a list.")
-
-    with transaction.atomic():
-        for item in items:
-            record = normalize_risk_record(item)
-            RiskRecord.objects.update_or_create(
-                external_id=record["external_id"],
-                defaults=risk_record_model_values(record),
-            )
-
-    return list_risk_register()
-
-
-def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
-    return upsert_risk_register(items)
-
-
-def create_risk_record(payload: object) -> dict[str, object]:
-    record = normalize_risk_record(payload)
-    if RiskRecord.objects.filter(external_id=record["external_id"]).exists():
-        raise ValidationError("Risk record already exists.")
-
-    created = RiskRecord.objects.create(
-        external_id=record["external_id"],
-        **risk_record_model_values(record),
-    )
-    return created.to_portal_dict()
-
-
-def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
-    normalized_external_id = normalize_string(external_id)
-    if not normalized_external_id:
-        raise ValidationError("Risk id is required.")
-    if not isinstance(payload, dict):
-        raise ValidationError("Risk payload must be an object.")
-
-    try:
-        existing = RiskRecord.objects.get(external_id=normalized_external_id)
-    except RiskRecord.DoesNotExist as error:
-        raise ValidationError("Risk record was not found.") from error
-
-    payload_id = normalize_string(payload.get("id"))
-    if payload_id and payload_id != normalized_external_id:
-        raise ValidationError("Risk id does not match request path.")
-
-    merged_payload = existing.to_portal_dict()
-    merged_payload.update(payload)
-    merged_payload["id"] = normalized_external_id
-    normalized_record = normalize_risk_record(merged_payload)
-    next_values = risk_record_model_values(normalized_record)
-
-    for field_name in RISK_RECORD_MODEL_FIELDS:
-        setattr(existing, field_name, next_values[field_name])
-    existing.save(update_fields=list(RISK_RECORD_MODEL_FIELDS))
-    return existing.to_portal_dict()
-
-
-def delete_risk_record(external_id: str) -> dict[str, object]:
-    normalized_external_id = normalize_string(external_id)
-    if not normalized_external_id:
-        raise ValidationError("Risk id is required.")
-
-    try:
-        record = RiskRecord.objects.get(external_id=normalized_external_id)
-    except RiskRecord.DoesNotExist as error:
-        raise ValidationError("Risk record was not found.") from error
-
-    deleted = record.to_portal_dict()
-    record.delete()
-    return deleted
-
-
 def normalize_review_state_boolean_map(value: object) -> dict[str, bool]:
     if not isinstance(value, dict):
         return {}
-    return {
-        str(key).strip(): bool(item)
-        for key, item in value.items()
-        if str(key).strip()
-    }
+    return {str(key).strip(): bool(item) for key, item in value.items() if str(key).strip()}
+
+
+def parse_iso_date(value: object) -> date:
+    if not value:
+        raise ValidationError("Date is required.")
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError as error:
+        raise ValidationError("Invalid date value.") from error
+
+
+def parse_optional_iso_date(value: object) -> date | None:
+    if not value:
+        return None
+    return parse_iso_date(value)
+
+
+def parse_iso_datetime(value: object, fallback: datetime) -> datetime:
+    if not value:
+        return fallback
+    raw_value = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(raw_value)
+    except ValueError as error:
+        raise ValidationError("Invalid timestamp value.") from error
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed, dt_timezone.utc)
+    return parsed
 
 
 def normalize_review_state_timestamp_map(value: object) -> dict[str, str]:
@@ -1391,71 +849,6 @@ def build_review_done_audit_entry(
     }
 
 
-def done_review_state_keys(payload: dict[str, object]) -> set[str]:
-    checklist = payload.get("checklist") if isinstance(payload.get("checklist"), dict) else {}
-    activities = payload.get("activities") if isinstance(payload.get("activities"), dict) else {}
-    keys = set(checklist.keys()) | set(activities.keys())
-    return {
-        key
-        for key in keys
-        if bool(checklist.get(key)) or bool(activities.get(key))
-    }
-
-
-def update_review_state(
-    payload: object,
-    *,
-    actor_username: str,
-    actor_display_name: str,
-) -> dict[str, object]:
-    previous_state = normalize_review_state(get_state_payload("review_state", {}))
-    incoming_state = normalize_review_state(payload)
-
-    previous_done_keys = done_review_state_keys(previous_state)
-    next_done_keys = done_review_state_keys(incoming_state)
-    previous_completed_at = previous_state.get("completedAt") if isinstance(previous_state.get("completedAt"), dict) else {}
-    incoming_completed_at = incoming_state.get("completedAt") if isinstance(incoming_state.get("completedAt"), dict) else {}
-
-    next_completed_at: dict[str, str] = {}
-    new_entries: list[dict[str, object]] = []
-    now_iso = timezone.now().isoformat()
-
-    for key in sorted(next_done_keys):
-        if key in previous_done_keys:
-            existing_timestamp = ""
-            previous_timestamp = previous_completed_at.get(key)
-            incoming_timestamp = incoming_completed_at.get(key)
-            if isinstance(previous_timestamp, str) and previous_timestamp.strip():
-                existing_timestamp = previous_timestamp.strip()
-            elif isinstance(incoming_timestamp, str) and incoming_timestamp.strip():
-                existing_timestamp = incoming_timestamp.strip()
-            if existing_timestamp:
-                next_completed_at[key] = existing_timestamp
-            continue
-
-        next_completed_at[key] = now_iso
-        new_entries.append(
-            build_review_done_audit_entry(
-                key,
-                actor_username=actor_username,
-                actor_display_name=actor_display_name,
-                occurred_at_iso=now_iso,
-            )
-        )
-
-    existing_audit_log = previous_state.get("auditLog") if isinstance(previous_state.get("auditLog"), list) else []
-    merged_audit_log = normalize_review_state_audit_log(existing_audit_log + new_entries)
-
-    normalized = {
-        "activities": incoming_state.get("activities", {}),
-        "checklist": incoming_state.get("checklist", {}),
-        "completedAt": next_completed_at,
-        "auditLog": merged_audit_log,
-    }
-    set_state_payload("review_state", normalized)
-    return normalized
-
-
 def normalize_review_state(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         return {"activities": {}, "checklist": {}, "completedAt": {}, "auditLog": []}
@@ -1518,6 +911,79 @@ def normalize_control_state(payload: object) -> dict[str, object]:
     return normalized
 
 
+def normalize_risk_factor(value: object) -> int:
+    try:
+        level = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return level if 1 <= level <= 5 else 0
+
+
+def normalize_risk_score(value: object) -> int:
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return score if 1 <= score <= 25 else 0
+
+
+def risk_factors_from_legacy_score(score: int) -> tuple[int, int]:
+    if not score:
+        return 0, 0
+    if score <= 5:
+        return score, score
+    return closest_risk_factor_pair(score)
+
+
+def closest_risk_factor_pair(score: int) -> tuple[int, int]:
+    target = min(max(score, 1), 25)
+    candidates: list[tuple[int, int, int, int, int, int]] = []
+    for probability in range(1, 6):
+        for impact in range(1, 6):
+            product = probability * impact
+            if product < target:
+                continue
+            candidates.append(
+                (
+                    product - target,
+                    abs(probability - impact),
+                    -product,
+                    -max(probability, impact),
+                    probability,
+                    impact,
+                )
+            )
+    if not candidates:
+        return 5, 5
+    best = min(candidates)
+    return best[4], best[5]
+
+
+def infer_missing_risk_factor(known_factor: int, score: int, fallback: int) -> int:
+    if known_factor and score and score % known_factor == 0:
+        derived = score // known_factor
+        if 1 <= derived <= 5:
+            return derived
+    return fallback if 1 <= fallback <= 5 else 0
+
+
+def resolve_risk_factors(probability: int, impact: int, legacy_score: int) -> tuple[int, int]:
+    if probability and impact:
+        return probability, impact
+    if not legacy_score:
+        return probability, impact
+
+    fallback_probability, fallback_impact = risk_factors_from_legacy_score(legacy_score)
+    if probability and not impact:
+        impact = infer_missing_risk_factor(probability, legacy_score, fallback_impact)
+    elif impact and not probability:
+        probability = infer_missing_risk_factor(impact, legacy_score, fallback_probability)
+    else:
+        probability = fallback_probability if not probability else probability
+        impact = fallback_impact if not impact else impact
+    return probability, impact
+
+
 def normalize_risk_record(item: object) -> dict[str, object]:
     if not isinstance(item, dict):
         raise ValidationError("Each risk record must be an object.")
@@ -1552,108 +1018,6 @@ def normalize_risk_record(item: object) -> dict[str, object]:
         "created_at": created_at,
         "updated_at": updated_at,
     }
-
-
-def parse_iso_date(value: object) -> date:
-    if not value:
-        raise ValidationError("Date is required.")
-    try:
-        return date.fromisoformat(str(value))
-    except ValueError as error:
-        raise ValidationError("Invalid date value.") from error
-
-
-def parse_optional_iso_date(value: object) -> date | None:
-    if not value:
-        return None
-    return parse_iso_date(value)
-
-
-def parse_iso_datetime(value: object, fallback: datetime) -> datetime:
-    if not value:
-        return fallback
-    raw_value = str(value).replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(raw_value)
-    except ValueError as error:
-        raise ValidationError("Invalid timestamp value.") from error
-    if timezone.is_naive(parsed):
-        return timezone.make_aware(parsed, dt_timezone.utc)
-    return parsed
-
-
-def normalize_risk_factor(value: object) -> int:
-    try:
-        level = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return level if 1 <= level <= 5 else 0
-
-
-def normalize_risk_score(value: object) -> int:
-    try:
-        score = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return score if 1 <= score <= 25 else 0
-
-
-def resolve_risk_factors(probability: int, impact: int, legacy_score: int) -> tuple[int, int]:
-    if probability and impact:
-        return probability, impact
-    if not legacy_score:
-        return probability, impact
-
-    fallback_probability, fallback_impact = risk_factors_from_legacy_score(legacy_score)
-    if probability and not impact:
-        impact = infer_missing_risk_factor(probability, legacy_score, fallback_impact)
-    elif impact and not probability:
-        probability = infer_missing_risk_factor(impact, legacy_score, fallback_probability)
-    else:
-        probability = fallback_probability if not probability else probability
-        impact = fallback_impact if not impact else impact
-    return probability, impact
-
-
-def infer_missing_risk_factor(known_factor: int, score: int, fallback: int) -> int:
-    if known_factor and score and score % known_factor == 0:
-        derived = score // known_factor
-        if 1 <= derived <= 5:
-            return derived
-    return fallback if 1 <= fallback <= 5 else 0
-
-
-def risk_factors_from_legacy_score(score: int) -> tuple[int, int]:
-    if not score:
-        return 0, 0
-    if score <= 5:
-        # Legacy records stored one 1-5 level; map conservatively in both dimensions.
-        return score, score
-    return closest_risk_factor_pair(score)
-
-
-def closest_risk_factor_pair(score: int) -> tuple[int, int]:
-    target = min(max(score, 1), 25)
-    candidates: list[tuple[int, int, int, int, int, int]] = []
-    for probability in range(1, 6):
-        for impact in range(1, 6):
-            product = probability * impact
-            if product < target:
-                continue
-            candidates.append(
-                (
-                    product - target,
-                    abs(probability - impact),
-                    -product,
-                    -max(probability, impact),
-                    probability,
-                    impact,
-                )
-            )
-    if not candidates:
-        return 5, 5
-    best = min(candidates)
-    return best[4], best[5]
 
 
 def format_uploaded_policy_id(number: int) -> str:

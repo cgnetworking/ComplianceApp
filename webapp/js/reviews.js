@@ -167,35 +167,6 @@
   function getRecommendedChecklistItems() {
     return normalizeChecklistItems(state.recommendedChecklistItems);
   }
-  function normalizeChecklistItems(items) {
-    if (!Array.isArray(items)) {
-      return [];
-    }
-
-    const seenIds = new Set();
-    return items
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const id = typeof item.id === "string" ? item.id.trim() : "";
-        const checklistItem = typeof item.item === "string" ? item.item.trim() : "";
-        if (!id || !checklistItem || seenIds.has(id)) {
-          return null;
-        }
-        seenIds.add(id);
-        return {
-          id,
-          category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Custom",
-          item: checklistItem,
-          frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
-          startDate: normalizeChecklistStartDate(item.startDate),
-          owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
-          createdAt: normalizeChecklistCreatedAt(item.createdAt),
-        };
-      })
-      .filter(Boolean);
-  }
   function checklistSignature(item) {
     return [
       String(item.category || "").trim().toLowerCase(),
@@ -620,15 +591,28 @@
     );
   }
   async function submitChecklistItem(payload, options) {
-    const statusMessage = options && options.statusMessage ? options.statusMessage : "Saving checklist item...";
-    setUploadStatus(els.checklistAddStatus, statusMessage, "info");
     try {
-      await createChecklistItem(payload);
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.checklistAddStatus, message, tone);
+        },
+        {
+          pending: options && options.statusMessage ? options.statusMessage : "Saving checklist item...",
+          success: (result) => {
+            if (options && options.closeFormOnSuccess) {
+              return null;
+            }
+            return options && options.successMessage ? options.successMessage : "Checklist item saved.";
+          },
+          error: "Checklist item could not be saved to the database.",
+        },
+        async () => {
+          await createChecklistItem(payload);
+        }
+      );
       if (options && options.closeFormOnSuccess) {
         hideChecklistAddForm();
       } else {
-        const successMessage = options && options.successMessage ? options.successMessage : "Checklist item saved.";
-        setUploadStatus(els.checklistAddStatus, successMessage, "success");
         if (els.checklistRecommendationSelect) {
           els.checklistRecommendationSelect.value = "";
         }
@@ -639,10 +623,6 @@
       }
       return true;
     } catch (error) {
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Checklist item could not be saved to the database.";
-      setUploadStatus(els.checklistAddStatus, detail, "error");
       return false;
     }
   }
@@ -664,15 +644,26 @@
     state.checklistItems = getAllChecklistItems().concat(created);
     let reviewSaveError = null;
     try {
-      await saveReviewState();
-      setReviewPersistenceStatus("Review tracking saved.", "success");
+      await runAsyncOperation(
+        (message, tone) => {
+          setReviewPersistenceStatus(message, tone);
+        },
+        {
+          pending: "Saving review tracking...",
+          success: "Review tracking saved.",
+          error: "Review tracking could not be synced.",
+        },
+        async () => {
+          try {
+            await saveReviewState();
+          } catch (error) {
+            state.reviewState = previousReviewState;
+            throw error;
+          }
+        }
+      );
     } catch (error) {
-      state.reviewState = previousReviewState;
       reviewSaveError = error;
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Review tracking could not be synced.";
-      setReviewPersistenceStatus(detail, "error");
     }
     renderReviewsPage();
     refreshChecklistAddFormOptions();
@@ -756,88 +747,6 @@
   }
   function isChecklistItemDueInMonth(item, monthIndex) {
     return dueMonthsForFrequency(item.frequency, item.startDate).includes(monthIndex);
-  }
-  function dueMonthsForFrequency(frequency, startDate = "") {
-    const value = String(frequency || "").trim().toLowerCase();
-    const dateParts = parseChecklistDateParts(startDate);
-    const anchorMonth = dateParts ? dateParts.monthIndex : null;
-    if (value.includes("monthly")) {
-      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-    }
-    if (value.includes("quarterly")) {
-      return recurringMonths(anchorMonth === null ? 2 : anchorMonth, 3, 4);
-    }
-    if (value.includes("semi")) {
-      return recurringMonths(anchorMonth === null ? 5 : anchorMonth, 6, 2);
-    }
-    if (value.includes("annual")) {
-      return [anchorMonth === null ? 11 : anchorMonth];
-    }
-    return [];
-  }
-  function normalizeChecklistStartDate(value) {
-    const parts = parseChecklistDateParts(value);
-    return parts ? parts.isoDate : "";
-  }
-  function normalizeChecklistCreatedAt(value) {
-    const raw = typeof value === "string" ? value.trim() : "";
-    if (!raw) {
-      return "";
-    }
-    const parsed = parseDisplayDateValue(raw);
-    return parsed ? raw : "";
-  }
-  function parseChecklistDateParts(value) {
-    const normalized = String(value || "").trim();
-    if (!normalized) {
-      return null;
-    }
-    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) {
-      return null;
-    }
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const parsed = new Date(Date.UTC(year, month - 1, day));
-    if (
-      parsed.getUTCFullYear() !== year
-      || parsed.getUTCMonth() !== month - 1
-      || parsed.getUTCDate() !== day
-    ) {
-      return null;
-    }
-    return {
-      isoDate: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-      year,
-      monthIndex: month - 1,
-      day,
-    };
-  }
-  function recurringMonths(anchorMonth, interval, count) {
-    const seen = new Set();
-    const months = [];
-    for (let index = 0; index < count; index += 1) {
-      const month = (anchorMonth + (interval * index)) % 12;
-      if (seen.has(month)) {
-        continue;
-      }
-      seen.add(month);
-      months.push(month);
-    }
-    return months;
-  }
-  function checklistFrequencyWithAnchorLabel(frequency, startDate, monthIndex = null) {
-    const normalizedFrequency = String(frequency || "").trim() || "Not scheduled";
-    const dateParts = parseChecklistDateParts(startDate);
-    if (!dateParts) {
-      return normalizedFrequency;
-    }
-    if (normalizedFrequency.toLowerCase().includes("monthly")) {
-      return `${normalizedFrequency} (day ${dateParts.day})`;
-    }
-    const displayMonthIndex = Number.isInteger(monthIndex) ? monthIndex : dateParts.monthIndex;
-    return `${normalizedFrequency} (${monthNames[displayMonthIndex]} ${dateParts.day})`;
   }
   const recommendationPickerState = {
     selectedId: "",

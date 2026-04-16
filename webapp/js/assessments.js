@@ -422,19 +422,29 @@
   }
 
   async function handleZeroTrustProfileSave() {
-    setUploadStatus(els.assessmentStatus, "Saving tenant assessment settings...", "info");
     try {
-      const payload = await apiRequest("/assessments/", {
-        method: "POST",
-        body: JSON.stringify({ profile: collectZeroTrustProfileForm() }),
-      });
-      replaceZeroTrustProfile(payload.profile);
-      state.selectedAssessmentProfileId = payload.profile.id;
-      await loadZeroTrustProfileDetail(payload.profile.id);
-      syncUrl();
-      setUploadStatus(els.assessmentStatus, "Tenant assessment settings saved to the shared database.", "success");
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.assessmentStatus, message, tone);
+        },
+        {
+          pending: "Saving tenant assessment settings...",
+          success: "Tenant assessment settings saved to the shared database.",
+          error: "Unable to save the tenant profile.",
+        },
+        async () => {
+          const payload = await apiRequest("/assessments/", {
+            method: "POST",
+            body: JSON.stringify({ profile: collectZeroTrustProfileForm() }),
+          });
+          replaceZeroTrustProfile(payload.profile);
+          state.selectedAssessmentProfileId = payload.profile.id;
+          await loadZeroTrustProfileDetail(payload.profile.id);
+          syncUrl();
+        }
+      );
     } catch (error) {
-      setUploadStatus(els.assessmentStatus, error instanceof Error ? error.message : "Unable to save the tenant profile.", "error");
+      // The shared helper already set the error status.
     }
   }
 
@@ -443,16 +453,26 @@
       setUploadStatus(els.assessmentStatus, "Save the tenant settings before generating a certificate.", "error");
       return;
     }
-    setUploadStatus(els.assessmentStatus, "Generating a certificate on the Ubuntu server...", "info");
     try {
-      const payload = await apiRequest(`/assessments/${encodeURIComponent(profileId)}/certificate/`, {
-        method: "POST",
-      });
-      replaceZeroTrustProfile(payload.profile);
-      await loadZeroTrustProfileDetail(profileId, { preserveRun: true });
-      setUploadStatus(els.assessmentStatus, "Certificate created. Download the .cer file and upload it to the Entra app registration before running the assessment.", "success");
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.assessmentStatus, message, tone);
+        },
+        {
+          pending: "Generating a certificate on the Ubuntu server...",
+          success: "Certificate created. Download the .cer file and upload it to the Entra app registration before running the assessment.",
+          error: "Unable to generate the certificate.",
+        },
+        async () => {
+          const payload = await apiRequest(`/assessments/${encodeURIComponent(profileId)}/certificate/`, {
+            method: "POST",
+          });
+          replaceZeroTrustProfile(payload.profile);
+          await loadZeroTrustProfileDetail(profileId, { preserveRun: true });
+        }
+      );
     } catch (error) {
-      setUploadStatus(els.assessmentStatus, error instanceof Error ? error.message : "Unable to generate the certificate.", "error");
+      // The shared helper already set the error status.
     }
   }
 
@@ -461,16 +481,26 @@
       setUploadStatus(els.assessmentStatus, "Select or save a tenant profile before starting a run.", "error");
       return;
     }
-    setUploadStatus(els.assessmentStatus, "Queueing a background Zero Trust Assessment run...", "info");
     try {
-      const payload = await apiRequest(`/assessments/${encodeURIComponent(profileId)}/runs/`, {
-        method: "POST",
-      });
-      state.selectedAssessmentRunId = payload.run.id;
-      await loadZeroTrustProfileDetail(profileId, { preserveRun: true });
-      setUploadStatus(els.assessmentStatus, "Assessment run queued for the Ubuntu worker service.", "success");
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.assessmentStatus, message, tone);
+        },
+        {
+          pending: "Queueing a background Zero Trust Assessment run...",
+          success: "Assessment run queued for the Ubuntu worker service.",
+          error: "Unable to queue the assessment run.",
+        },
+        async () => {
+          const payload = await apiRequest(`/assessments/${encodeURIComponent(profileId)}/runs/`, {
+            method: "POST",
+          });
+          state.selectedAssessmentRunId = payload.run.id;
+          await loadZeroTrustProfileDetail(profileId, { preserveRun: true });
+        }
+      );
     } catch (error) {
-      setUploadStatus(els.assessmentStatus, error instanceof Error ? error.message : "Unable to queue the assessment run.", "error");
+      // The shared helper already set the error status.
     }
   }
 
@@ -485,28 +515,38 @@
       return;
     }
 
-    setUploadStatus(els.assessmentStatus, "Deleting the saved tenant profile...", "info");
     try {
-      await apiRequest(`/assessments/${encodeURIComponent(profileId)}/`, {
-        method: "DELETE",
-      });
-      stopZeroTrustPolling();
-      zeroTrustProfiles = zeroTrustProfiles.filter((item) => item.id !== profileId);
-      zeroTrustProfileDetail = null;
-      zeroTrustRuns = [];
-      zeroTrustLogs = [];
-      state.selectedAssessmentProfileId = "";
-      state.selectedAssessmentRunId = "";
-      syncZeroTrustSelection();
-      syncUrl();
-      if (state.selectedAssessmentProfileId) {
-        await loadZeroTrustProfileDetail(state.selectedAssessmentProfileId);
-      } else {
-        renderZeroTrustPage();
-      }
-      setUploadStatus(els.assessmentStatus, "Tenant profile and stored assessment history deleted.", "success");
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.assessmentStatus, message, tone);
+        },
+        {
+          pending: "Deleting the saved tenant profile...",
+          success: "Tenant profile and stored assessment history deleted.",
+          error: "Unable to delete the tenant profile.",
+        },
+        async () => {
+          await apiRequest(`/assessments/${encodeURIComponent(profileId)}/`, {
+            method: "DELETE",
+          });
+          stopZeroTrustPolling();
+          zeroTrustProfiles = zeroTrustProfiles.filter((item) => item.id !== profileId);
+          zeroTrustProfileDetail = null;
+          zeroTrustRuns = [];
+          zeroTrustLogs = [];
+          state.selectedAssessmentProfileId = "";
+          state.selectedAssessmentRunId = "";
+          syncZeroTrustSelection();
+          syncUrl();
+          if (state.selectedAssessmentProfileId) {
+            await loadZeroTrustProfileDetail(state.selectedAssessmentProfileId);
+          } else {
+            renderZeroTrustPage();
+          }
+        }
+      );
     } catch (error) {
-      setUploadStatus(els.assessmentStatus, error instanceof Error ? error.message : "Unable to delete the tenant profile.", "error");
+      // The shared helper already set the error status.
     }
   }
 

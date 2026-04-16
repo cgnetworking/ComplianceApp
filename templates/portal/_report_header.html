@@ -1,0 +1,65 @@
+<section class="report-header{% if header_class %} {{ header_class }}{% endif %}">
+  {% if split_layout %}
+    <div>
+      <p class="section-kicker">{{ kicker }}</p>
+      <h1>{{ title }}</h1>
+      <p class="report-copy">
+        {{ copy }}
+      </p>
+    </div>
+    <div class="report-actions">
+      {% if action_input_id %}
+        <input id="{{ action_input_id }}" type="file" accept="{{ action_input_accept }}" multiple hidden>
+      {% endif %}
+      {% if action_link_href %}
+        <a class="ghost-button" href="{{ action_link_href }}"{% if action_link_download %} download="{{ action_link_download }}"{% endif %}>
+          {{ action_link_label }}
+        </a>
+      {% endif %}
+      {% if action_button_id %}
+        <button class="ghost-button" id="{{ action_button_id }}" type="button">{{ action_button_label }}</button>
+      {% endif %}
+      {% if status_text %}
+        <p class="helper-note upload-status" id="{{ status_id }}">
+          {{ status_text }}
+        </p>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="section-kicker">{{ kicker }}</p>
+    <h1>{{ title }}</h1>
+    <p class="report-copy">
+      {{ copy }}
+    </p>
+    {% include "portal/_filter_bar.html" with
+      domain_label=domain_label
+      domain_filter_id=domain_filter_id
+      domain_filter_aria=domain_filter_aria
+      applicability_label=applicability_label
+      applicability_filter_id=applicability_filter_id
+      applicability_filter_aria=applicability_filter_aria
+      review_label=review_label
+      review_filter_id=review_filter_id
+      review_filter_aria=review_filter_aria
+      assignee_label=assignee_label
+      assignee_filter_id=assignee_filter_id
+      assignee_filter_aria=assignee_filter_aria
+      status_label=status_label
+      status_filter_id=status_filter_id
+      status_filter_aria=status_filter_aria
+      risk_level_label=risk_level_label
+      risk_level_filter_id=risk_level_filter_id
+      risk_level_filter_aria=risk_level_filter_aria
+      clear_filters_label=clear_filters_label
+      clear_filters_id=clear_filters_id
+      upload_input_id=upload_input_id
+      upload_accept=upload_accept
+      upload_trigger_label=upload_trigger_label
+      upload_trigger_id=upload_trigger_id only %}
+    {% if status_text %}
+      <p class="helper-note upload-status" id="{{ status_id }}">
+        {{ status_text }}
+      </p>
+    {% endif %}
+  {% endif %}
+</section>

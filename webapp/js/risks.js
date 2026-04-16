@@ -206,20 +206,31 @@
 
     let persistedRisk = null;
     try {
-      persistedRisk = await saveRiskRecord(nextRisk, isEditing ? "update" : "create");
+      persistedRisk = await runAsyncOperation(
+        (message, tone) => {
+          setRiskFormStatus(message, tone);
+          renderRiskFormStatus();
+        },
+        {
+          pending: "Saving risk register entry...",
+          success: () => (isEditing ? `Risk updated in the ${riskRegisterLabel()}.` : `Risk added to the ${riskRegisterLabel()}.`),
+          error: "Unable to save the risk register entry.",
+        },
+        async () => {
+          try {
+            return await saveRiskRecord(nextRisk, isEditing ? "update" : "create");
+          } catch (error) {
+            state.riskRegister = previousRiskRegister;
+            throw error;
+          }
+        }
+      );
     } catch (error) {
-      state.riskRegister = previousRiskRegister;
-      setRiskFormStatus(error.message || "Unable to save the risk register entry.", "error");
-      renderRiskFormStatus();
       return;
     }
 
     state.selectedRiskId = persistedRisk && persistedRisk.id ? persistedRisk.id : riskId;
     state.isAddingRisk = false;
-    setRiskFormStatus(
-      isEditing ? `Risk updated in the ${riskRegisterLabel()}.` : `Risk added to the ${riskRegisterLabel()}.`,
-      "success"
-    );
     syncUrl();
     renderRisksPage();
   }
