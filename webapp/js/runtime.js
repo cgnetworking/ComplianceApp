@@ -86,8 +86,6 @@
   };
 
   const els = {
-    runtimeMode: document.getElementById("runtime-mode"),
-    generatedAt: document.getElementById("generated-at"),
     searchInput: document.getElementById("search-input"),
     domainFilter: document.getElementById("domain-filter"),
     clearFilters: document.getElementById("clear-filters"),
@@ -175,11 +173,7 @@
     if (page === "assessments" && typeof loadZeroTrustState === "function") {
       await loadZeroTrustState();
     }
-    updateRuntimeMode();
     updatePersistenceCopy();
-    if (els.generatedAt) {
-      els.generatedAt.textContent = formatDateTime(data.generatedAt);
-    }
     if (els.searchInput) {
       els.searchInput.value = state.search;
     }

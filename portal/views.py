@@ -121,6 +121,21 @@ def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
     return normalized_username, normalized_display_name
 
 
+def named_item_preview(items: list[object], *, limit: int = 3) -> str:
+    names: list[str] = []
+    for item in items:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        names.append(name)
+    if not names:
+        return ""
+    preview = ", ".join(names[:limit])
+    if len(names) > limit:
+        preview = f"{preview}, +{len(names) - limit} more"
+    return preview
+
+
 def render_portal_page(
     request: HttpRequest,
     template_name: str,
@@ -265,11 +280,17 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": str(error)}, status=400)
 
     actor_username, actor_display_name = current_audit_actor(request)
+    imported_file_names = [str(getattr(file, "name", "") or "").strip() for file in files]
+    imported_file_preview = named_item_preview(imported_file_names)
     append_portal_audit_entry(
         action="import_policy_documents",
         entity_type="policy",
         entity_id=f"{len(documents)}",
-        summary=f"Imported {len(documents)} policy document{'s' if len(documents) != 1 else ''}.",
+        summary=(
+            f"Imported policy file{'s' if len(imported_file_names) != 1 else ''}: {imported_file_preview}."
+            if imported_file_preview
+            else f"Imported {len(documents)} policy document{'s' if len(documents) != 1 else ''}."
+        ),
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
@@ -277,7 +298,7 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
             "importType": "policy_upload",
             "documentCount": len(documents),
             "documentIds": [str(item.get("id") or "") for item in documents if isinstance(item, dict)],
-            "fileNames": [str(getattr(file, "name", "") or "") for file in files],
+            "fileNames": imported_file_names,
             "messages": messages,
         },
     )
@@ -392,17 +413,18 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
     actor_username, actor_display_name = current_audit_actor(request)
     controls = mapping_payload.get("controls") if isinstance(mapping_payload.get("controls"), list) else []
     documents = mapping_payload.get("documents") if isinstance(mapping_payload.get("documents"), list) else []
+    mapping_file_name = str(getattr(file_obj, "name", "") or "").strip()
     append_portal_audit_entry(
         action="import_mapping",
         entity_type="mapping",
-        entity_id=str(getattr(file_obj, "name", "") or "mapping-upload"),
-        summary=f"Imported mapping file {getattr(file_obj, 'name', 'mapping file')}.",
+        entity_id=mapping_file_name or "mapping-upload",
+        summary=f"Imported mapping file {mapping_file_name or 'mapping file'}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
             "source": "policies",
             "importType": "mapping_upload",
-            "fileName": str(getattr(file_obj, "name", "") or ""),
+            "fileName": mapping_file_name,
             "controlCount": len(controls),
             "documentCount": len(documents),
         },
@@ -424,11 +446,17 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
 
     responses = create_vendor_responses(files)
     actor_username, actor_display_name = current_audit_actor(request)
+    imported_file_names = [str(getattr(file, "name", "") or "").strip() for file in files]
+    imported_file_preview = named_item_preview(imported_file_names)
     append_portal_audit_entry(
         action="import_vendor_responses",
         entity_type="vendor_response",
         entity_id=f"{len(responses)}",
-        summary=f"Imported {len(responses)} vendor response file{'s' if len(responses) != 1 else ''}.",
+        summary=(
+            f"Imported vendor response file{'s' if len(imported_file_names) != 1 else ''}: {imported_file_preview}."
+            if imported_file_preview
+            else f"Imported {len(responses)} vendor response file{'s' if len(responses) != 1 else ''}."
+        ),
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
@@ -436,7 +464,7 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
             "importType": "vendor_response_upload",
             "responseCount": len(responses),
             "responseIds": [str(item.get("id") or "") for item in responses if isinstance(item, dict)],
-            "fileNames": [str(getattr(file, "name", "") or "") for file in files],
+            "fileNames": imported_file_names,
         },
     )
     return JsonResponse({"responses": responses})
@@ -455,18 +483,20 @@ def vendor_response(request: HttpRequest, response_id: str) -> JsonResponse:
 
     actor_username, actor_display_name = current_audit_actor(request)
     deleted_response_id = str(deleted_response.get("id") or "")
-    vendor_name = str(deleted_response.get("vendorName") or deleted_response_id)
+    vendor_name = str(deleted_response.get("vendorName") or "").strip()
+    response_file_name = str(deleted_response.get("fileName") or "").strip()
+    deleted_response_label = response_file_name or vendor_name or deleted_response_id
     append_portal_audit_entry(
         action="delete_vendor_response",
         entity_type="vendor_response",
         entity_id=deleted_response_id,
-        summary=f"Deleted vendor response for {vendor_name}.",
+        summary=f"Deleted vendor response {deleted_response_label}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
             "source": "vendors",
             "vendorName": vendor_name,
-            "fileName": str(deleted_response.get("fileName") or ""),
+            "fileName": response_file_name,
             "responseId": deleted_response_id,
         },
     )
@@ -500,11 +530,18 @@ def risk_register(request: HttpRequest) -> JsonResponse:
 
     if isinstance(items, str):
         actor_username, actor_display_name = current_audit_actor(request)
+        risk_name_preview = named_item_preview(
+            [str(item.get("risk") or "").strip() for item in risk_register_payload if isinstance(item, dict)]
+        )
         append_portal_audit_entry(
             action="import_risk_csv",
             entity_type="risk_register",
             entity_id=f"{len(risk_register_payload)}",
-            summary=f"Imported risk CSV with {len(risk_register_payload)} risk record{'s' if len(risk_register_payload) != 1 else ''}.",
+            summary=(
+                f"Imported risk entries: {risk_name_preview}."
+                if risk_name_preview
+                else f"Imported risk CSV with {len(risk_register_payload)} risk record{'s' if len(risk_register_payload) != 1 else ''}."
+            ),
             actor_username=actor_username,
             actor_display_name=actor_display_name,
             metadata={
@@ -530,11 +567,14 @@ def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
             return JsonResponse({"detail": detail}, status=status_code)
         actor_username, actor_display_name = current_audit_actor(request)
         deleted_risk_id = str(deleted_risk.get("id") or "")
+        deleted_risk_name = str(deleted_risk.get("risk") or "").strip()
+        if not deleted_risk_name:
+            deleted_risk_name = deleted_risk_id
         append_portal_audit_entry(
             action="delete_risk_record",
             entity_type="risk",
             entity_id=deleted_risk_id,
-            summary=f"Deleted risk record {deleted_risk_id}.",
+            summary=f"Deleted risk '{deleted_risk_name}'.",
             actor_username=actor_username,
             actor_display_name=actor_display_name,
             metadata={
@@ -588,11 +628,16 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
 
     actor_username, actor_display_name = current_audit_actor(request)
     deleted_item_id = str(deleted_checklist_item.get("id") or "")
+    deleted_item_name = str(deleted_checklist_item.get("item") or "").strip()
     append_portal_audit_entry(
         action="delete_checklist_item",
         entity_type="checklist_item",
         entity_id=deleted_item_id,
-        summary=f"Deleted checklist item {deleted_item_id}.",
+        summary=(
+            f"Deleted checklist item '{deleted_item_name}'."
+            if deleted_item_name
+            else f"Deleted checklist item {deleted_item_id}."
+        ),
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={

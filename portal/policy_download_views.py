@@ -41,7 +41,7 @@ def policy_document_download(request: HttpRequest, document_id: str) -> HttpResp
         action="export_policy_document",
         entity_type="policy",
         entity_id=document_id,
-        summary=f"Exported policy document {document_id}.",
+        summary=f"Exported policy file {artifact.filename}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
@@ -74,7 +74,7 @@ def policy_documents_download_all(request: HttpRequest) -> HttpResponse:
         action="export_policy_documents",
         entity_type="policy",
         entity_id="all",
-        summary="Exported all policy documents.",
+        summary=f"Exported policy archive {artifact.filename}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
@@ -84,4 +84,3 @@ def policy_documents_download_all(request: HttpRequest) -> HttpResponse:
         },
     )
     return response
-

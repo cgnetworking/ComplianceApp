@@ -447,7 +447,7 @@
         </div>
 
         <div class="button-row button-row-wrap">
-          <button class="primary-button" type="button" data-assessment-save-profile="${escapeHtml(profileId)}">Save Settings</button>
+          <button class="ghost-button primary-button" type="button" data-assessment-save-profile="${escapeHtml(profileId)}">Save Settings</button>
           <button class="ghost-button" type="button" data-assessment-create-certificate="${escapeHtml(profileId)}"${profile ? "" : " disabled"}>Create Certificate</button>
           <a class="ghost-button${hasCertificate ? "" : " is-disabled"}" ${hasCertificate ? `href="/api/assessments/${encodeURIComponent(profileId)}/certificate.cer"` : 'aria-disabled="true"'}>Download .cer</a>
           <button class="ghost-button" type="button" data-assessment-run-start="${escapeHtml(profileId)}"${hasCertificate ? "" : " disabled"}>Run Assessment</button>

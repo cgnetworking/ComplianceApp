@@ -115,11 +115,16 @@ def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResp
 
         actor_username, actor_display_name = assessment_audit_actor(request)
         deleted_profile_id = str(deleted_profile.get("id") or "")
+        deleted_profile_name = (
+            str(deleted_profile.get("displayName") or "").strip()
+            or str(deleted_profile.get("tenantId") or "").strip()
+            or deleted_profile_id
+        )
         append_portal_audit_entry(
             action="delete_assessment_profile",
             entity_type="assessment_profile",
             entity_id=deleted_profile_id,
-            summary=f"Deleted assessment profile {deleted_profile_id}.",
+            summary=f"Deleted assessment profile {deleted_profile_name}.",
             actor_username=actor_username,
             actor_display_name=actor_display_name,
             metadata={
@@ -165,7 +170,7 @@ def assessment_profile_certificate_download(request: HttpRequest, profile_id: st
         action="export_assessment_certificate",
         entity_type="assessment_profile",
         entity_id=profile_id,
-        summary=f"Exported certificate for assessment profile {profile_id}.",
+        summary=f"Exported assessment certificate file {file_name}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={

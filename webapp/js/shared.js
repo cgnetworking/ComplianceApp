@@ -918,18 +918,6 @@
       element.classList.add(`is-${tone}`);
     }
   }
-  function updateRuntimeMode() {
-    if (!els.runtimeMode) {
-      return;
-    }
-
-    const hasControls = Array.isArray(data.controls) && data.controls.length > 0;
-    const hasExpandedMapping = Array.isArray(data.documents) && data.documents.length > 0;
-    const baseLabel = hasControls
-      ? (hasExpandedMapping ? "Custom mapping" : "Default controls")
-      : "No controls loaded";
-    els.runtimeMode.textContent = `${baseLabel} + API`;
-  }
   function updatePersistenceCopy() {
     if (els.policyUploadStatus) {
       els.policyUploadStatus.textContent = "Add markdown, text, or HTML policy files to the shared portal library.";

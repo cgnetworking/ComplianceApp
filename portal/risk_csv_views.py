@@ -25,20 +25,22 @@ def risk_csv_actor(request: HttpRequest) -> tuple[str, str]:
 def risk_register_csv_export(request: HttpRequest) -> HttpResponse:
     risk_register = list_risk_register()
     csv_payload = serialize_risk_records_to_csv(risk_register)
+    export_file_name = f"risk-register-{date.today().isoformat()}.csv"
     response = HttpResponse(csv_payload, content_type="text/csv; charset=utf-8")
-    response["Content-Disposition"] = f'attachment; filename="risk-register-{date.today().isoformat()}.csv"'
+    response["Content-Disposition"] = f'attachment; filename="{export_file_name}"'
 
     actor_username, actor_display_name = risk_csv_actor(request)
     append_portal_audit_entry(
         action="export_risk_register",
         entity_type="risk_register",
-        entity_id=f"{len(risk_register)}",
-        summary=f"Exported risk register CSV with {len(risk_register)} risk record{'s' if len(risk_register) != 1 else ''}.",
+        entity_id=export_file_name,
+        summary=f"Exported risk register file {export_file_name}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
             "source": "risks",
             "exportType": "risk_csv",
+            "fileName": export_file_name,
             "recordCount": len(risk_register),
         },
     )
@@ -67,11 +69,24 @@ def risk_register_csv_import(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": str(error)}, status=400)
 
     actor_username, actor_display_name = risk_csv_actor(request)
+    risk_name_preview = ", ".join(
+        [
+            str(item.get("risk") or "").strip()
+            for item in risk_register_payload
+            if isinstance(item, dict) and str(item.get("risk") or "").strip()
+        ][:3]
+    )
+    if len(risk_register_payload) > 3 and risk_name_preview:
+        risk_name_preview = f"{risk_name_preview}, +{len(risk_register_payload) - 3} more"
     append_portal_audit_entry(
         action="import_risk_csv",
         entity_type="risk_register",
         entity_id=f"{len(risk_register_payload)}",
-        summary=f"Imported risk CSV with {len(risk_register_payload)} risk record{'s' if len(risk_register_payload) != 1 else ''}.",
+        summary=(
+            f"Imported risk entries: {risk_name_preview}."
+            if risk_name_preview
+            else f"Imported risk CSV with {len(risk_register_payload)} risk record{'s' if len(risk_register_payload) != 1 else ''}."
+        ),
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={

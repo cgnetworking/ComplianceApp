@@ -47,7 +47,7 @@ def vendor_response_downloads(request: HttpRequest) -> HttpResponse:
             file_name, content, content_type = build_all_vendor_responses_download()
             action = "export_vendor_responses"
             entity_id = "all"
-            summary = "Exported all vendor responses."
+            summary = f"Exported vendor response archive {file_name}."
             metadata = {
                 "source": "vendors",
                 "exportType": "all_vendor_responses",
@@ -59,7 +59,7 @@ def vendor_response_downloads(request: HttpRequest) -> HttpResponse:
             normalized_response_id = normalize_string(response_id)
             action = "export_vendor_response"
             entity_id = normalized_response_id
-            summary = f"Exported vendor response {normalized_response_id or file_name}."
+            summary = f"Exported vendor response file {file_name}."
             metadata = {
                 "source": "vendors",
                 "exportType": "single_vendor_response",
@@ -98,7 +98,7 @@ def vendor_response_download(request: HttpRequest, response_id: str) -> HttpResp
         action="export_vendor_response",
         entity_type="vendor_response",
         entity_id=normalized_response_id,
-        summary=f"Exported vendor response {normalized_response_id or file_name}.",
+        summary=f"Exported vendor response file {file_name}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={
@@ -123,7 +123,7 @@ def vendor_response_download_all(request: HttpRequest) -> HttpResponse:
         action="export_vendor_responses",
         entity_type="vendor_response",
         entity_id="all",
-        summary="Exported all vendor responses.",
+        summary=f"Exported vendor response archive {file_name}.",
         actor_username=actor_username,
         actor_display_name=actor_display_name,
         metadata={

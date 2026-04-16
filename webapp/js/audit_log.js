@@ -30,6 +30,17 @@
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
   }
+  function auditDetailLabel(entry) {
+    const action = typeof entry.action === "string" ? entry.action.trim() : "";
+    const metadata = entry && typeof entry.metadata === "object" ? entry.metadata : {};
+    if (action === "delete_risk_record") {
+      const riskText = typeof metadata.risk === "string" ? metadata.risk.trim() : "";
+      if (riskText) {
+        return `Deleted risk '${riskText}'.`;
+      }
+    }
+    return typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.";
+  }
 
   function auditChecklistLookup() {
     const checklistItems = typeof getAllChecklistItems === "function"
@@ -113,7 +124,7 @@
       entry.entityType,
       entry.entityId,
       auditRecordLabel(entry, checklistById),
-      entry.summary,
+      auditDetailLabel(entry),
       entry.occurredAt,
       auditActorLabel(entry),
       JSON.stringify(entry.metadata || {}),
@@ -177,7 +188,7 @@
         entry.entityType,
         entry.entityId,
         auditRecordLabel(entry, checklistById),
-        entry.summary,
+        auditDetailLabel(entry),
         auditActorLabel(entry),
         actorUsername,
         entry.occurredAt,
@@ -346,7 +357,7 @@
               <span class="status-pill is-active">${escapeHtml(formatDateTime(entry.occurredAt))}</span>
             </div>
             <p class="activity-evidence">User: ${escapeHtml(auditActorLabel(entry))}</p>
-            <p class="activity-evidence">Details: ${escapeHtml(entry.summary)}</p>
+            <p class="activity-evidence">Details: ${escapeHtml(auditDetailLabel(entry))}</p>
           </article>
         `).join("")}
       </div>

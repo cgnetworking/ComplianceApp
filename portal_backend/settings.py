@@ -66,7 +66,7 @@ def resolve_database() -> dict[str, object]:
     return options
 
 
-DEBUG = env_bool("DJANGO_DEBUG", default=False)
+DEBUG = False
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
 if not SECRET_KEY:
     if DEBUG:

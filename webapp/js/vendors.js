@@ -39,7 +39,6 @@
     syncVendorSelection();
     updateVendorDownloadControls();
     ensureVendorUploadHelperCopy();
-    renderVendorOverview();
     renderVendorResponseList();
     renderVendorDetail();
   }
@@ -133,49 +132,6 @@
 
     const apiBaseUrl = resolveApiBaseUrl();
     window.location.assign(`${apiBaseUrl}/vendors/downloads/?${query.toString()}`);
-  }
-  function renderVendorOverview() {
-    if (!els.vendorOverview) {
-      return;
-    }
-
-    const responses = filteredVendorResponses();
-    const vendorCount = new Set(responses.map((response) => response.vendorName)).size;
-    const selectedResponse = responses.find((response) => response.id === state.selectedVendorResponseId) || null;
-    const lastImported = responses[0] ? formatShortDateTime(responses[0].importedAt) : "None";
-
-    const cards = [
-      {
-        label: "Vendors in view",
-        value: vendorCount,
-        note: responses.length ? "Distinct vendors represented in the filtered intake queue." : "No vendor responses have been staged yet.",
-      },
-      {
-        label: "Responses staged",
-        value: responses.length,
-        note: `Files stored in the ${portalWorkspaceLabel()} for follow-up review.`,
-      },
-      {
-        label: "Selected response",
-        value: selectedResponse ? selectedResponse.vendorName : "None",
-        note: selectedResponse
-          ? "Use Download to export the selected vendor response."
-          : "Select an imported response to enable single-file download.",
-      },
-      {
-        label: "Last import",
-        value: lastImported,
-        note: responses.length ? "Most recent vendor response imported into the queue." : "Import survey responses to start building the intake queue.",
-      },
-    ];
-
-    els.vendorOverview.innerHTML = cards.map((card) => `
-      <article class="stat-card">
-        <span class="stat-label">${escapeHtml(card.label)}</span>
-        <p class="stat-value">${escapeHtml(String(card.value))}</p>
-        <p class="stat-note">${escapeHtml(card.note)}</p>
-      </article>
-    `).join("");
   }
   function renderVendorResponseList() {
     if (!els.vendorResponses) {
@@ -294,16 +250,6 @@
         <div class="doc-section">
           <div class="button-row button-row-wrap">
             <button class="ghost-button danger-button" type="button" data-vendor-delete="${escapeHtml(response.id)}">Delete Response</button>
-          </div>
-        </div>
-        <div class="doc-section">
-          <strong>Suggested next steps</strong>
-          <div class="preview-block">
-            <ul class="detail-list">
-              <li>Confirm the vendor owner and risk tier before the response is used in a review package.</li>
-              <li>Check whether the response covers security clauses, incident notification, access control, and subprocessor handling.</li>
-              <li>Link the imported response to supplier review evidence once the intake workflow is finalized.</li>
-            </ul>
           </div>
         </div>
       </article>

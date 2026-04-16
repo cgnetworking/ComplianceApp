@@ -51,7 +51,7 @@ def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpRespo
         action="export_assessment_report",
         entity_type="assessment_run",
         entity_id=run_id,
-        summary=f"Exported stored assessment report for run {run_id}.",
+        summary=f"Exported assessment report archive {file_name}.",
         actor_username=username or "system",
         actor_display_name=display_name or username or "System",
         metadata={
@@ -81,7 +81,7 @@ def assessment_reports_export(request: HttpRequest) -> HttpResponse:
         action="export_assessment_reports",
         entity_type="assessment_run",
         entity_id=entity_id,
-        summary="Exported stored assessment reports.",
+        summary=f"Exported assessment reports archive {file_name}.",
         actor_username=username or "system",
         actor_display_name=display_name or username or "System",
         metadata={

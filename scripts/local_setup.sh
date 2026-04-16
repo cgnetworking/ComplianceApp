@@ -1179,7 +1179,7 @@ if [ ! -f "$ENV_FILE" ]; then
   SECRET_KEY="$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')"
   printf '%s\n' \
     "DJANGO_SECRET_KEY=$SECRET_KEY" \
-    "DJANGO_DEBUG=True" \
+    "DJANGO_DEBUG=False" \
     "ALLOWED_HOSTS=$DEFAULT_ALLOWED_HOSTS" \
     "CSRF_TRUSTED_ORIGINS=http://localhost:8000" \
     "TIME_ZONE=America/New_York" \
