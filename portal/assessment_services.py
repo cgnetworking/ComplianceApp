@@ -68,9 +68,14 @@ def assessment_staging_root() -> Path:
 
 
 def ensure_directory(path: Path, mode: int = 0o700) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    os.chmod(path, mode)
-    return path
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        os.chmod(path, mode)
+        return path
+    except OSError as error:
+        raise AssessmentValidationError(
+            f"Unable to access assessment storage at {path}. Check ASSESSMENT_STORAGE_ROOT permissions."
+        ) from error
 
 
 def ensure_assessment_roots() -> None:

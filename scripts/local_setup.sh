@@ -698,6 +698,18 @@ PY
   run_as_root install -m 0640 -o root -g "$GUNICORN_RUNTIME_GROUP" "$tmp_env" "$GUNICORN_ENV_FILE"
   rm -f "$tmp_env"
 
+  if [ -n "$GUNICORN_SERVICE_UNITS" ]; then
+    for service_unit in $GUNICORN_SERVICE_UNITS; do
+      log "Restarting $service_unit to pick up assessment storage environment changes"
+      run_as_root systemctl restart "$service_unit"
+      if ! run_as_root systemctl is-active --quiet "$service_unit"; then
+        echo "Gunicorn service failed to restart after updating assessment storage env: $service_unit" >&2
+        echo "Inspect with: sudo journalctl -u $service_unit --no-pager -n 100" >&2
+        exit 1
+      fi
+    done
+  fi
+
   install_powershell
   if ! command -v runuser >/dev/null 2>&1; then
     echo "runuser is required to bootstrap the Zero Trust assessment PowerShell module." >&2

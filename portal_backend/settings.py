@@ -6,6 +6,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_ASSESSMENT_STORAGE_ROOT = (
+    Path("/var/lib/complianceapp/assessments")
+    if Path("/etc/os-release").exists()
+    else BASE_DIR / ".assessment_storage"
+)
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -189,7 +194,7 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-ASSESSMENT_STORAGE_ROOT = env_path("ASSESSMENT_STORAGE_ROOT", BASE_DIR / ".assessment_storage")
+ASSESSMENT_STORAGE_ROOT = env_path("ASSESSMENT_STORAGE_ROOT", DEFAULT_ASSESSMENT_STORAGE_ROOT)
 ASSESSMENT_CERTIFICATE_ROOT = env_path(
     "ASSESSMENT_CERTIFICATE_ROOT",
     ASSESSMENT_STORAGE_ROOT / "certificates",
