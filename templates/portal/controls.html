@@ -8,24 +8,34 @@
 {% endblock %}
 
 {% block content %}
-  {% include "portal/_report_header.html" with
-    kicker="Controls"
-    title="Annex A register"
-    copy="Filter the control register, assign control owners, and inspect linked policies. Clicking the control number opens the policies page directly."
-    domain_label="Domain"
-    domain_filter_id="domain-filter"
-    clear_filters_label="Reset filters"
-    clear_filters_id="clear-filters"
-    upload_input_id="mapping-upload-input"
-    upload_accept=".json,.csv"
-    upload_trigger_label="Upload Mapping"
-    upload_trigger_id="mapping-upload-trigger"
-    status_text="Upload an optional mapping file (.json or .csv), or map policies directly from Controls and Policies."
-    status_id="mapping-upload-status" %}
+  <section class="report-header">
+    <p class="section-kicker">Controls</p>
+    <h1>Annex A register</h1>
+    <p class="report-copy">
+      Filter the control register, assign control owners, and inspect linked policies. Clicking the control number opens the policies page directly.
+    </p>
+    <div class="filter-bar">
+      <label class="pill-select">
+        <span>Domain</span>
+        <select id="domain-filter"></select>
+      </label>
+      <button class="ghost-button" id="clear-filters" type="button">Reset filters</button>
+      <input id="mapping-upload-input" type="file" accept=".json,.csv" hidden>
+      <button class="ghost-button" id="mapping-upload-trigger" type="button">Upload Mapping</button>
+    </div>
+    <p class="helper-note upload-status" id="mapping-upload-status">
+      Upload an optional mapping file (.json or .csv), or map policies directly from Controls and Policies.
+    </p>
+  </section>
 
   <section class="page-grid page-grid-controls">
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Control register" title="Visible controls" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Control register</p>
+          <h2>Visible controls</h2>
+        </div>
+      </div>
       <div class="table-shell">
         <table>
           <thead>

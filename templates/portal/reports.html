@@ -8,39 +8,69 @@
 {% endblock %}
 
 {% block content %}
-  {% include "portal/_report_header.html" with
-    kicker="Reports"
-    title="Compliance report"
-    copy="Filter the control population and review cadence trends, domain coverage, and annual review windows from a dedicated reporting page."
-    domain_label="Domain"
-    domain_filter_id="domain-filter"
-    applicability_label="Applicability"
-    applicability_filter_id="applicability-filter"
-    review_label="Review"
-    review_filter_id="frequency-filter"
-    clear_filters_label="Reset filters"
-    clear_filters_id="clear-filters" %}
+  <section class="report-header">
+    <p class="section-kicker">Reports</p>
+    <h1>Compliance report</h1>
+    <p class="report-copy">
+      Filter the control population and review cadence trends, domain coverage, and annual review windows from a dedicated reporting page.
+    </p>
+    <div class="filter-bar">
+      <label class="pill-select">
+        <span>Domain</span>
+        <select id="domain-filter"></select>
+      </label>
+      <label class="pill-select">
+        <span>Applicability</span>
+        <select id="applicability-filter"></select>
+      </label>
+      <label class="pill-select">
+        <span>Review</span>
+        <select id="frequency-filter"></select>
+      </label>
+      <button class="ghost-button" id="clear-filters" type="button">Reset filters</button>
+    </div>
+  </section>
 
   <section class="overview" id="overview"></section>
 
   <section class="page-grid page-grid-reports">
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Framework progress" title="Coverage by review cadence" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Framework progress</p>
+          <h2>Coverage by review cadence</h2>
+        </div>
+      </div>
       <div id="framework-chart"></div>
     </article>
 
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Upcoming audits" title="Review windows across the year" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Upcoming audits</p>
+          <h2>Review windows across the year</h2>
+        </div>
+      </div>
       <div id="timeline-chart"></div>
     </article>
 
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Domain mix" title="Visible control counts" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Domain mix</p>
+          <h2>Visible control counts</h2>
+        </div>
+      </div>
       <div id="report-domains"></div>
     </article>
 
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Policy coverage" title="Visible mapped policies" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Policy coverage</p>
+          <h2>Visible mapped policies</h2>
+        </div>
+      </div>
       <div id="policy-coverage"></div>
     </article>
   </section>
