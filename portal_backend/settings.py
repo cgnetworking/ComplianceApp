@@ -236,3 +236,8 @@ ASSESSMENT_WORKER_LEASE_SECONDS = max(
 ASSESSMENT_STORAGE_ROOT = os.environ.get("ASSESSMENT_STORAGE_ROOT", "").strip()
 ASSESSMENT_CERTIFICATE_ROOT = os.environ.get("ASSESSMENT_CERTIFICATE_ROOT", "").strip()
 ASSESSMENT_STAGING_ROOT = os.environ.get("ASSESSMENT_STAGING_ROOT", "").strip()
+ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME = (
+    os.environ.get("ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME", "assessment-pfx-password").strip()
+    or "assessment-pfx-password"
+)
+ASSESSMENT_PFX_PASSWORD_FILE = os.environ.get("ASSESSMENT_PFX_PASSWORD_FILE", "").strip()

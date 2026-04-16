@@ -118,6 +118,8 @@ The assessment feature is Ubuntu 24.04-only and assumes:
 
 The worker stores private assessment certificate material on disk and stores generated report bundles in PostgreSQL after ingestion. The staging export directory is transient and is removed after the report is copied into the database.
 
+PFX files are now written encrypted. In the supported Ubuntu 24.04 deployment path, `scripts/local_setup.sh` creates a root-owned random PFX password file under `/etc/complianceapp`, then mounts it into both the Gunicorn web service and the assessment worker using systemd `LoadCredential`. The application reads the password from the service credential directory under `/run/credentials/...` at runtime, and the generated PowerShell worker script stores only the credential file path rather than the plaintext password.
+
 The setup script writes these environment variables into the managed runtime env file so the worker uses writable storage outside the root-owned app bundle:
 
 - `ASSESSMENT_STORAGE_ROOT`
@@ -191,6 +193,7 @@ Example manual reload on Ubuntu:
 - `scripts/local_setup.sh` already runs `python manage.py collectstatic --noinput`.
 - The current implementation keeps uploaded content in PostgreSQL-backed records, but does not expose raw file downloads. That avoids adding object storage as a hard dependency for the first hosted version.
 - Zero Trust assessment report bundles are stored in PostgreSQL so they remain viewable in the portal after the worker deletes the staged export directory.
+- For manual deployments, mount the `assessment-pfx-password` systemd credential into both the web service and the assessment worker, or explicitly configure `ASSESSMENT_PFX_PASSWORD_FILE` to a root-managed secret file.
 - If you later want to retain original uploaded files, add S3-compatible media storage rather than relying on an ephemeral app filesystem.
 - Put the Django app and the HTML frontend on the same domain so CSRF protection works without extra CORS setup.
 - Create at least one local superuser with `python manage.py createsuperuser` so you retain break-glass admin access if the SSO provider is unavailable.

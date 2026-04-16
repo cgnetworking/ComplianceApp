@@ -124,6 +124,37 @@ def resolve_assessment_certificate_root() -> Path:
     return root_path.resolve()
 
 
+def resolve_assessment_pfx_password_path() -> Path:
+    configured_path = normalize_string(
+        getattr(settings, "ASSESSMENT_PFX_PASSWORD_FILE", "") or os.environ.get("ASSESSMENT_PFX_PASSWORD_FILE", "")
+    )
+    if configured_path:
+        return Path(configured_path).expanduser().resolve()
+
+    credential_name = normalize_string(
+        getattr(settings, "ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME", ""),
+        "assessment-pfx-password",
+    )
+    credentials_directory = normalize_string(os.environ.get("CREDENTIALS_DIRECTORY"))
+    if not credentials_directory:
+        raise AssessmentValidationError(
+            f"Assessment PFX password credential '{credential_name}' is not available to this service."
+        )
+    return (Path(credentials_directory).expanduser() / credential_name).resolve()
+
+
+def load_assessment_pfx_password() -> bytes:
+    password_path = resolve_assessment_pfx_password_path()
+    try:
+        password = password_path.read_bytes().strip()
+    except OSError as error:
+        raise AssessmentValidationError("Unable to read the assessment PFX password credential.") from error
+
+    if not password:
+        raise AssessmentValidationError("The assessment PFX password credential is empty.")
+    return password
+
+
 def certificate_storage_directory(profile: ZeroTrustTenantProfile) -> Path:
     root_path = resolve_assessment_certificate_root()
     tenant_component = safe_certificate_component(profile.tenant_id, "tenant")
@@ -362,6 +393,7 @@ def aware_certificate_datetime(value: datetime) -> datetime:
 
 def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
     profile = get_zero_trust_profile(profile_id)
+    pfx_password = load_assessment_pfx_password()
 
     rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject_string = make_certificate_subject(profile)
@@ -408,7 +440,7 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
         key=rsa_key,
         cert=certificate,
         cas=None,
-        encryption_algorithm=serialization.NoEncryption(),
+        encryption_algorithm=serialization.BestAvailableEncryption(pfx_password),
     )
     pfx_path = write_certificate_pfx_file(profile, certificate_id, thumbprint, pfx_bytes)
 
@@ -621,6 +653,7 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
         raise AssessmentValidationError("Assessment run certificate file is empty.")
 
     encoded_pfx = base64.b64encode(pfx_bytes).decode("ascii")
+    pfx_password_path = str(resolve_assessment_pfx_password_path())
 
     script_lines = [
         "$ErrorActionPreference = 'Stop'",
@@ -647,7 +680,12 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
         "  }",
         "  Write-Host ('ZTA_META::' + ($metadata | ConvertTo-Json -Compress))",
         f"  $pfxBytes = [Convert]::FromBase64String({powershell_literal(encoded_pfx)})",
-        "  $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxBytes, '', [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)",
+        f"  $pfxPasswordPath = {powershell_literal(pfx_password_path)}",
+        "  if (-not (Test-Path -LiteralPath $pfxPasswordPath -PathType Leaf)) { throw 'Assessment PFX password credential file is missing.' }",
+        "  $pfxPassword = [System.IO.File]::ReadAllText($pfxPasswordPath).Trim()",
+        "  if ([string]::IsNullOrWhiteSpace($pfxPassword)) { throw 'Assessment PFX password credential is empty.' }",
+        "  $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxBytes, $pfxPassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)",
+        "  Remove-Variable pfxPassword -ErrorAction SilentlyContinue",
         f"  Connect-ZtAssessment -ClientId {powershell_literal(run.profile.client_id)} -TenantId {powershell_literal(run.profile.tenant_id)} -Certificate $certificate -Force",
         f"  Invoke-ZtAssessment -Path {powershell_literal(str(output_root))} -ExportLog",
         "} catch {",

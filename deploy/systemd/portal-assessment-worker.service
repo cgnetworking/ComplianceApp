@@ -8,6 +8,7 @@ User=<runtime-user>
 Group=<runtime-group>
 WorkingDirectory=<runtime-app-dir>
 EnvironmentFile=<managed-env-file>
+LoadCredential=assessment-pfx-password:<credential-source-file>
 ExecStart=<runtime-venv-dir>/bin/python manage.py run_assessment_worker
 Restart=always
 RestartSec=5

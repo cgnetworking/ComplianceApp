@@ -26,6 +26,8 @@ ASSESSMENT_WORKER_SERVICE_UNIT=""
 APP_HEALTHCHECK_URL=""
 CREATE_SELF_SIGNED_CERT="false"
 PSQL_ADMIN_CMD=""
+ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME="assessment-pfx-password"
+ASSESSMENT_PFX_PASSWORD_SOURCE_FILE=""
 
 log() {
   echo "[local_setup] $*"
@@ -55,6 +57,32 @@ is_truthy() {
       return 1
       ;;
   esac
+}
+
+generate_random_secret() {
+  "$PYTHON_BIN" - <<'PY'
+import secrets
+
+print(secrets.token_urlsafe(48))
+PY
+}
+
+ensure_assessment_pfx_password_source_file() {
+  local credential_dir="$1"
+  local managed_name="$2"
+  local credential_file="$credential_dir/${managed_name}-${ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME}"
+  local tmp_secret=""
+
+  if [ -f "$credential_file" ]; then
+    ASSESSMENT_PFX_PASSWORD_SOURCE_FILE="$credential_file"
+    return
+  fi
+
+  tmp_secret="$(mktemp)"
+  generate_random_secret > "$tmp_secret"
+  run_as_root install -m 0600 -o root -g root "$tmp_secret" "$credential_file"
+  rm -f "$tmp_secret"
+  ASSESSMENT_PFX_PASSWORD_SOURCE_FILE="$credential_file"
 }
 
 ensure_supported_platform() {
@@ -552,6 +580,7 @@ setup_gunicorn_systemd_service() {
   managed_env_file="$managed_env_dir/${managed_env_name}.env"
   run_as_root install -d -m 0750 -o root -g "$service_group" "$managed_env_dir"
   run_as_root install -m 0640 -o root -g "$service_group" "$ENV_FILE" "$managed_env_file"
+  ensure_assessment_pfx_password_source_file "$managed_env_dir" "$managed_env_name"
 
   default_service_name="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')-gunicorn"
   service_names_raw="${LOCAL_SETUP_GUNICORN_SERVICE_NAMES:-${LOCAL_SETUP_GUNICORN_SERVICE_NAME:-$default_service_name}}"
@@ -584,6 +613,7 @@ User=$service_user
 Group=$service_group
 WorkingDirectory=$service_working_dir
 EnvironmentFile=$managed_env_file
+LoadCredential=$ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME:$ASSESSMENT_PFX_PASSWORD_SOURCE_FILE
 ExecStart=$service_venv_dir/bin/gunicorn --chdir $service_working_dir portal_backend.wsgi:application --bind $service_bind --workers $service_workers --access-logfile - --error-logfile -
 Restart=always
 RestartSec=5
@@ -643,6 +673,10 @@ setup_assessment_worker_systemd_service() {
   if [ -z "$GUNICORN_RUNTIME_USER" ] || [ -z "$GUNICORN_RUNTIME_GROUP" ] || [ -z "$GUNICORN_ENV_FILE" ] || [ -z "$GUNICORN_RUNTIME_APP_DIR" ] || [ -z "$GUNICORN_RUNTIME_VENV_DIR" ]; then
     log "Skipping assessment worker setup because the Gunicorn runtime context is incomplete."
     return
+  fi
+
+  if [ -z "$ASSESSMENT_PFX_PASSWORD_SOURCE_FILE" ]; then
+    ensure_assessment_pfx_password_source_file "$(dirname "$GUNICORN_ENV_FILE")" "$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')"
   fi
 
   if [[ ! "$service_name" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
@@ -755,6 +789,7 @@ User=$GUNICORN_RUNTIME_USER
 Group=$GUNICORN_RUNTIME_GROUP
 WorkingDirectory=$GUNICORN_RUNTIME_APP_DIR
 EnvironmentFile=$GUNICORN_ENV_FILE
+LoadCredential=$ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME:$ASSESSMENT_PFX_PASSWORD_SOURCE_FILE
 ExecStart=$GUNICORN_RUNTIME_VENV_DIR/bin/python manage.py run_assessment_worker
 Restart=always
 RestartSec=5
@@ -1342,6 +1377,9 @@ if [ -n "$GUNICORN_RUNTIME_VENV_DIR" ]; then
 fi
 if [ -n "$ASSESSMENT_WORKER_SERVICE_UNIT" ]; then
   echo "Assessment worker service unit: $ASSESSMENT_WORKER_SERVICE_UNIT"
+fi
+if [ -n "$ASSESSMENT_PFX_PASSWORD_SOURCE_FILE" ]; then
+  echo "Assessment PFX password source file: $ASSESSMENT_PFX_PASSWORD_SOURCE_FILE"
 fi
 if [ -n "$APP_HEALTHCHECK_URL" ]; then
   echo "Application readiness URL: $APP_HEALTHCHECK_URL"
