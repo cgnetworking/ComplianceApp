@@ -527,11 +527,6 @@
     return Boolean(risk.closedDate);
   }
   async function saveRiskRegister() {
-    if (!isApiPersistence()) {
-      window.localStorage.setItem(riskRegisterKey, JSON.stringify(state.riskRegister));
-      return;
-    }
-
     const payload = await apiRequest("/risks/", {
       method: "PUT",
       body: JSON.stringify({ riskRegister: state.riskRegister }),
@@ -539,19 +534,6 @@
 
     if (payload && Array.isArray(payload.riskRegister)) {
       state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
-    }
-  }
-  function loadRiskRegister() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(riskRegisterKey) || "[]");
-      if (!Array.isArray(saved)) {
-        return [];
-      }
-      return saved
-        .map((item) => normalizeRiskRecord(item))
-        .filter(Boolean);
-    } catch (error) {
-      return [];
     }
   }
   function normalizeRiskRecord(item) {
@@ -585,7 +567,7 @@
     return `risk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
   function riskRegisterLabel() {
-    return isApiPersistence() ? "shared portal register" : "browser register";
+    return "shared portal register";
   }
   function readFirstFormValue(formData, keys) {
     for (const key of keys) {

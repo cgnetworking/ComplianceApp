@@ -33,9 +33,6 @@
     }
     return typeof currentUser.username === "string" ? currentUser.username.trim() : "";
   }
-  function currentPolicyActorLabel() {
-    return currentPolicyUsername() || "Unknown user";
-  }
   function currentPolicyUserIsStaff() {
     if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
       return false;
@@ -120,36 +117,6 @@
     const approverIdentity = normalizePolicyApproverIdentity(documentItem.approver);
     return approverIdentity === currentIdentity;
   }
-  function ensurePolicyAuditLogState() {
-    if (!state.reviewState || typeof state.reviewState !== "object") {
-      state.reviewState = { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
-    }
-    if (!Array.isArray(state.reviewState.auditLog)) {
-      state.reviewState.auditLog = [];
-    }
-  }
-  function buildLocalPolicyApprovalAuditEntry(documentItem, occurredAt) {
-    const approvalDate = policyApprovalDateLabel(occurredAt) || occurredAt;
-    return {
-      id: `audit-${Math.random().toString(16).slice(2, 14)}`,
-      action: "policy_approved",
-      entityType: "policy",
-      entityId: documentItem.id,
-      summary: `Approved ${documentItem.id} / ${documentItem.title} on ${approvalDate}.`,
-      occurredAt,
-      actor: {
-        username: currentPolicyUsername() || "local-user",
-        displayName: currentPolicyActorLabel(),
-      },
-      metadata: {
-        source: "policies",
-        policyId: documentItem.id,
-        policyTitle: documentItem.title,
-        approvedBy: currentPolicyUsername() || "local-user",
-        approvedAt: occurredAt,
-      },
-    };
-  }
   async function handlePolicyApprovalSelection(checkbox) {
     if (!checkbox) {
       return;
@@ -172,32 +139,15 @@
     checkbox.disabled = true;
     setPolicyUploadStatus(`Recording approval for ${documentItem.id}...`, "info");
     try {
-      if (isApiPersistence()) {
-        const payload = await approvePolicyViaApi(documentId);
-        const updatedDocument = payload && payload.document && typeof payload.document === "object"
-          ? payload.document
-          : null;
-        if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
-          throw new Error("Approved policy response was invalid.");
-        }
-        if (payload && payload.reviewState && typeof payload.reviewState === "object") {
-          state.reviewState = normalizeReviewStateValue(payload.reviewState);
-        }
-      } else {
-        const occurredAt = new Date().toISOString();
-        if (!updateUploadedDocumentEntry({
-          id: documentId,
-          approvedAt: occurredAt,
-          approvedBy: currentPolicyUsername() || "local-user",
-        })) {
-          throw new Error("Uploaded policy was not found in local storage.");
-        }
-        ensurePolicyAuditLogState();
-        state.reviewState.auditLog = normalizeReviewAuditLogEntries(
-          state.reviewState.auditLog.concat(buildLocalPolicyApprovalAuditEntry(documentItem, occurredAt)),
-        );
-        await saveUploadedPolicies(uploadedDocuments);
-        saveReviewState();
+      const payload = await approvePolicyViaApi(documentId);
+      const updatedDocument = payload && payload.document && typeof payload.document === "object"
+        ? payload.document
+        : null;
+      if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+        throw new Error("Approved policy response was invalid.");
+      }
+      if (payload && payload.reviewState && typeof payload.reviewState === "object") {
+        state.reviewState = normalizeReviewStateValue(payload.reviewState);
       }
 
       refreshDocumentsIndex();
@@ -294,24 +244,12 @@
 
     setPolicyUploadStatus(`Updating approver for ${documentItem.id}...`, "info");
     try {
-      if (isApiPersistence()) {
-        const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
-        const updatedDocument = payload && payload.document && typeof payload.document === "object"
-          ? payload.document
-          : null;
-        if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
-          throw new Error("Updated policy response was invalid.");
-        }
-      } else {
-        if (!updateUploadedDocumentEntry({
-          id: documentId,
-          approver: selectedApprover,
-          approvedAt: "",
-          approvedBy: "",
-        })) {
-          throw new Error("Uploaded policy was not found in local storage.");
-        }
-        await saveUploadedPolicies(uploadedDocuments);
+      const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
+      const updatedDocument = payload && payload.document && typeof payload.document === "object"
+        ? payload.document
+        : null;
+      if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+        throw new Error("Updated policy response was invalid.");
       }
 
       refreshDocumentsIndex();
@@ -381,14 +319,13 @@
     );
 
     try {
-      const result = isApiPersistence() ? await uploadPoliciesToApi(files) : await createUploadedDocuments(files);
+      const result = await uploadPoliciesToApi(files);
       if (!result.documents.length) {
         setPolicyUploadStatus(result.messages[0] || "No supported policy files were selected.", "error");
         return;
       }
 
       const nextUploadedDocuments = uploadedDocuments.concat(result.documents);
-      await saveUploadedPolicies(nextUploadedDocuments);
       uploadedDocuments = nextUploadedDocuments;
       refreshDocumentsIndex();
 
@@ -417,11 +354,6 @@
     const selectedFile = files[0];
     setMappingUploadStatus(`Uploading mapping from ${selectedFile.name}...`, "info");
 
-    if (!isApiPersistence()) {
-      setMappingUploadStatus("Mapping uploads require API persistence so the mapping can be stored in PostgreSQL.", "error");
-      return;
-    }
-
     try {
       const payload = await uploadMappingToApi(selectedFile);
       applyMappingPayload(payload.mapping);
@@ -445,25 +377,6 @@
       method: "POST",
       body: formData,
     });
-  }
-  async function createUploadedDocuments(files) {
-    const documents = [];
-    const messages = [];
-    let nextNumber = nextUploadedPolicyNumber(uploadedDocuments);
-
-    for (const file of files) {
-      const extension = fileExtension(file.name);
-      if (!isSupportedUploadedPolicyType(extension)) {
-        messages.push(`${file.name} was skipped because only markdown, text, and HTML files are supported.`);
-        continue;
-      }
-
-      const rawContent = await readFileAsText(file);
-      documents.push(buildUploadedPolicyDocument(file, rawContent, nextNumber));
-      nextNumber += 1;
-    }
-
-    return { documents, messages };
   }
   async function uploadPoliciesToApi(files) {
     const formData = new FormData();
@@ -507,14 +420,8 @@
     setPolicyUploadStatus(`Deleting ${documentItem.id}...`, "info");
 
     try {
-      if (isApiPersistence()) {
-        await deletePolicyFromApi(selectedDocumentId);
-      }
-
+      await deletePolicyFromApi(selectedDocumentId);
       const nextUploadedDocuments = uploadedDocuments.filter((item) => item.id !== selectedDocumentId);
-      if (!isApiPersistence()) {
-        await saveUploadedPolicies(nextUploadedDocuments);
-      }
       uploadedDocuments = nextUploadedDocuments;
       refreshDocumentsIndex();
 
@@ -528,28 +435,6 @@
     } catch (error) {
       setPolicyUploadStatus(error.message || "Unable to delete the selected policy.", "error");
     }
-  }
-  function buildUploadedPolicyDocument(file, rawContent, number) {
-    const extension = fileExtension(file.name);
-    const isHtmlUpload = extension === "html" || extension === "htm";
-    const contentHtml = isHtmlUpload ? sanitizeUploadedHtml(rawContent) : markdownToHtml(rawContent);
-
-    return {
-      id: formatUploadedPolicyId(number),
-      title: fileNameBase(file.name),
-      type: "Uploaded policy",
-      approver: "Pending review",
-      approvedAt: "",
-      approvedBy: "",
-      reviewFrequency: "Not scheduled",
-      path: `Local upload / ${file.name}`,
-      folder: "Uploaded",
-      purpose: extractPurposeFromMarkdown(rawContent) || `Uploaded from ${file.name}.`,
-      contentHtml: contentHtml || "<p>No content was found in the uploaded file.</p>",
-      isUploaded: true,
-      originalFilename: file.name,
-      uploadedAt: new Date().toISOString(),
-    };
   }
   function setPolicyUploadStatus(message, tone) {
     if (!els.policyUploadStatus) {
@@ -573,35 +458,6 @@
       return;
     }
     setUploadStatus(els.mappingUploadStatus, message, tone);
-  }
-  function isSupportedUploadedPolicyType(extension) {
-    return ["md", "markdown", "txt", "html", "htm"].includes(extension);
-  }
-  function fileExtension(fileName) {
-    const parts = String(fileName).toLowerCase().split(".");
-    return parts.length > 1 ? parts.pop() : "";
-  }
-  function fileNameBase(fileName) {
-    const withoutExtension = String(fileName).replace(/\.[^.]+$/, "");
-    const normalized = withoutExtension.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    return normalized || fileName;
-  }
-  function nextUploadedPolicyNumber(items) {
-    return items.reduce((max, item) => {
-      const match = /^UPL-(\d+)$/i.exec(item.id || "");
-      return match ? Math.max(max, Number(match[1])) : max;
-    }, 0) + 1;
-  }
-  function formatUploadedPolicyId(number) {
-    return `UPL-${String(number).padStart(2, "0")}`;
-  }
-  function readFileAsText(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(new Error(`Unable to read ${file.name}.`));
-      reader.readAsText(file);
-    });
   }
   function inlineMarkup(text) {
     let rendered = escapeHtml(text);
@@ -690,40 +546,6 @@
     }
 
     return blocks.join("\n");
-  }
-  function extractPurposeFromMarkdown(markdown) {
-    const match = /^## 1\. Purpose\s+([\s\S]*?)\s+## /m.exec(String(markdown));
-    if (!match) {
-      return "";
-    }
-    return match[1]
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join(" ");
-  }
-  function sanitizeUploadedHtml(html) {
-    const parser = new DOMParser();
-    const parsed = parser.parseFromString(String(html), "text/html");
-
-    parsed.querySelectorAll("script,style,iframe,object,embed,form,link,meta").forEach((node) => {
-      node.remove();
-    });
-
-    parsed.querySelectorAll("*").forEach((element) => {
-      Array.from(element.attributes).forEach((attribute) => {
-        const name = attribute.name.toLowerCase();
-        const value = attribute.value.trim().toLowerCase();
-        if (name.startsWith("on")) {
-          element.removeAttribute(attribute.name);
-        }
-        if ((name === "href" || name === "src") && value.startsWith("javascript:")) {
-          element.removeAttribute(attribute.name);
-        }
-      });
-    });
-
-    return parsed.body.innerHTML.trim() || `<p>${escapeHtml(html)}</p>`;
   }
   function renderSelectedControlBanner() {
     if (!els.selectedControlBanner) {
@@ -884,11 +706,11 @@
     const relatedControlIds = new Set(relatedControlViews.map((control) => control.id));
     const relatedControls = relatedControlViews
       .slice(0, 8)
-      .map((control) => `<a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)}</a>`)
+      .map((control) => `<a class="chip" href="/controls/?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)}</a>`)
       .join("");
     const mappedControlRows = relatedControlViews.map((control) => `
       <div class="mapping-row">
-        <a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</a>
+        <a class="chip" href="/controls/?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</a>
         ${isPolicyReader ? "" : `
           <button
             class="ghost-button danger-button mapping-remove-button"
@@ -1396,5 +1218,5 @@
       query.set("doc", documentId);
     }
     const suffix = query.toString();
-    return `./policies.html${suffix ? `?${suffix}` : ""}`;
+    return `/policies/${suffix ? `?${suffix}` : ""}`;
   }

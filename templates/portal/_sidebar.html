@@ -18,17 +18,17 @@
   </label>
 
   <nav class="sidebar-nav">
-    <a class="nav-link{% if active_page == 'home' %} is-active{% endif %}" href="./index.html">Home</a>
+    <a class="nav-link{% if active_page == 'home' %} is-active{% endif %}" href="{% url 'portal-home' %}">Home</a>
     {% if current_user.isStaff %}
-    <a class="nav-link{% if active_page == 'assessments' %} is-active{% endif %}" href="./assessments.html">Assessments</a>
+    <a class="nav-link{% if active_page == 'assessments' %} is-active{% endif %}" href="{% url 'portal-assessments' %}">Assessments</a>
     {% endif %}
-    <a class="nav-link{% if active_page == 'controls' %} is-active{% endif %}" href="./controls.html">Controls</a>
-    <a class="nav-link{% if active_page == 'reports' %} is-active{% endif %}" href="./reports.html">Reports</a>
-    <a class="nav-link{% if active_page == 'reviews' %} is-active{% endif %}" href="./reviews.html">Reviews</a>
-    <a class="nav-link{% if active_page == 'audit-log' %} is-active{% endif %}" href="./audit-log.html">Audit Log</a>
-    <a class="nav-link{% if active_page == 'policies' %} is-active{% endif %}" href="./policies.html">Policies</a>
-    <a class="nav-link{% if active_page == 'risks' %} is-active{% endif %}" href="./risks.html">Risk Register</a>
-    <a class="nav-link{% if active_page == 'vendors' %} is-active{% endif %}" href="./vendors.html">Vendors</a>
+    <a class="nav-link{% if active_page == 'controls' %} is-active{% endif %}" href="{% url 'portal-controls' %}">Controls</a>
+    <a class="nav-link{% if active_page == 'reports' %} is-active{% endif %}" href="{% url 'portal-reports' %}">Reports</a>
+    <a class="nav-link{% if active_page == 'reviews' %} is-active{% endif %}" href="{% url 'portal-reviews' %}">Reviews</a>
+    <a class="nav-link{% if active_page == 'audit-log' %} is-active{% endif %}" href="{% url 'portal-audit-log' %}">Audit Log</a>
+    <a class="nav-link{% if active_page == 'policies' %} is-active{% endif %}" href="{% url 'portal-policies' %}">Policies</a>
+    <a class="nav-link{% if active_page == 'risks' %} is-active{% endif %}" href="{% url 'portal-risks' %}">Risk Register</a>
+    <a class="nav-link{% if active_page == 'vendors' %} is-active{% endif %}" href="{% url 'portal-vendors' %}">Vendors</a>
   </nav>
 
   <div class="sidebar-group">
@@ -40,7 +40,7 @@
     <p class="sidebar-heading">Control Data</p>
     <div class="sidebar-meta">
       <span class="sidebar-meta-label">Mode</span>
-      <strong id="runtime-mode">Default controls</strong>
+      <strong id="runtime-mode">Shared database</strong>
     </div>
     <div class="sidebar-meta">
       <span class="sidebar-meta-label">Built</span>

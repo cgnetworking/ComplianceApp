@@ -607,10 +607,6 @@
     }
   }
   async function createChecklistItem(payload) {
-    if (!isApiPersistence()) {
-      throw new Error("Checklist items can only be added in API/database mode.");
-    }
-
     const response = await apiRequest("/checklist/", {
       method: "POST",
       body: JSON.stringify({ checklistItem: payload }),

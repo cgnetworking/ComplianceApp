@@ -7,7 +7,6 @@ import json
 import re
 import uuid
 from datetime import date, datetime, timezone as dt_timezone
-from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import UploadedFile
@@ -642,70 +641,9 @@ def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
     return normalized_payload
 
 
-def ensure_mapping_state_seeded() -> None:
-    if PortalState.objects.filter(key="mapping_state").exists():
-        return
-
-    default_payload = get_default_controls_mapping_payload()
-    if default_payload.get("controls"):
-        set_state_payload("mapping_state", default_payload)
-
-
 def get_mapping_payload() -> dict[str, object]:
-    ensure_mapping_state_seeded()
     payload = get_state_payload("mapping_state", {})
-    normalized = normalize_mapping_payload(payload)
-    if normalized.get("controls"):
-        return normalized
-
-    return get_default_controls_mapping_payload()
-
-
-def get_default_controls_mapping_payload() -> dict[str, object]:
-    data_path = Path(__file__).resolve().parent.parent / "webapp" / "default_controls.json"
-    try:
-        raw_text = data_path.read_text(encoding="utf-8")
-    except OSError:
-        return default_mapping_payload()
-
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return default_mapping_payload()
-
-    controls_source = parsed if isinstance(parsed, list) else (parsed.get("controls") if isinstance(parsed, dict) else [])
-    controls = normalize_mapping_controls(controls_source)
-    if not controls:
-        return default_mapping_payload()
-
-    checklist_items = load_default_review_checklist_payload()
-    return normalize_mapping_payload(
-        {
-            "sourceSnapshot": {
-                "controlRegister": "default_controls.json",
-                "reviewSchedule": "default_review_checklist.json",
-                "runtimeDependency": False,
-            },
-            "controls": controls,
-            "checklist": checklist_items,
-        }
-    )
-
-
-def load_default_review_checklist_payload() -> list[dict[str, object]]:
-    data_path = Path(__file__).resolve().parent.parent / "webapp" / "default_review_checklist.json"
-    try:
-        raw_text = data_path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return []
-
-    checklist_source = parsed if isinstance(parsed, list) else (parsed.get("checklist") if isinstance(parsed, dict) else [])
-    return normalize_mapping_checklist(checklist_source)
+    return normalize_mapping_payload(payload)
 
 
 def list_review_checklist_items() -> list[dict[str, str]]:
@@ -828,30 +766,6 @@ def build_policy_approval_audit_entry(
     }
 
 
-def ensure_review_checklist_recommendations_seeded() -> None:
-    checklist_items = load_default_review_checklist_payload()
-    if not checklist_items:
-        return
-
-    seen_ids: set[str] = set()
-    for item in checklist_items:
-        item_id = normalize_string(item.get("id"))
-        item_text = normalize_string(item.get("item"))
-        if not item_id or not item_text or item_id in seen_ids:
-            continue
-        seen_ids.add(item_id)
-        ReviewChecklistRecommendation.objects.update_or_create(
-            external_id=item_id,
-            defaults={
-                "category": normalize_string(item.get("category"), "Custom"),
-                "item": item_text,
-                "frequency": normalize_string(item.get("frequency"), "Annual"),
-                "start_date": parse_optional_iso_date(normalize_iso_date_string(item.get("startDate"))),
-                "owner": normalize_string(item.get("owner"), "Shared portal"),
-            },
-        )
-
-
 def create_review_checklist_item(payload: object) -> dict[str, str]:
     if not isinstance(payload, dict):
         raise ValidationError("Checklist item payload must be an object.")
@@ -930,7 +844,6 @@ def delete_review_checklist_item(external_id: str) -> dict[str, str]:
 
 
 def get_bootstrap_payload(*, policy_reader: bool = False) -> dict[str, object]:
-    ensure_review_checklist_recommendations_seeded()
     payload: dict[str, object] = {
         "persistenceMode": "api",
         "mapping": get_mapping_payload(),

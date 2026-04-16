@@ -6,11 +6,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_ASSESSMENT_STORAGE_ROOT = (
-    Path("/var/lib/complianceapp/assessments")
-    if Path("/etc/os-release").exists()
-    else BASE_DIR / ".assessment_storage"
-)
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -23,13 +18,6 @@ def env_bool(name: str, default: bool = False) -> bool:
 def env_list(name: str, default: str = "") -> list[str]:
     value = os.environ.get(name, default)
     return [item.strip() for item in value.split(",") if item.strip()]
-
-
-def env_path(name: str, default: Path) -> Path:
-    value = os.environ.get(name, "").strip()
-    if not value:
-        return default
-    return Path(value).expanduser()
 
 
 def parse_database_url(database_url: str) -> dict[str, object]:
@@ -184,9 +172,6 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "webapp"]
 STORAGES = {
-    "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
-    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
@@ -194,15 +179,6 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-ASSESSMENT_STORAGE_ROOT = env_path("ASSESSMENT_STORAGE_ROOT", DEFAULT_ASSESSMENT_STORAGE_ROOT)
-ASSESSMENT_CERTIFICATE_ROOT = env_path(
-    "ASSESSMENT_CERTIFICATE_ROOT",
-    ASSESSMENT_STORAGE_ROOT / "certificates",
-)
-ASSESSMENT_STAGING_ROOT = env_path(
-    "ASSESSMENT_STAGING_ROOT",
-    ASSESSMENT_STORAGE_ROOT / "staging",
-)
 ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS = max(
     1,
     int(os.environ.get("ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS", "10")),

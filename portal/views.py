@@ -23,9 +23,6 @@ from .services import (
     delete_review_checklist_item,
     delete_uploaded_policy,
     get_bootstrap_payload,
-    get_mapping_payload,
-    list_review_checklist_items,
-    list_review_checklist_recommendations,
     normalize_control_state,
     normalize_mapping_payload,
     replace_mapping_payload,
@@ -340,12 +337,8 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def risk_register(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        payload = get_bootstrap_payload()
-        return JsonResponse({"riskRegister": payload["riskRegister"]})
-
     body = parse_json_body(request)
     items = body.get("riskRegister") if isinstance(body, dict) and "riskRegister" in body else body
 
@@ -359,11 +352,8 @@ def risk_register(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "POST"])
+@require_http_methods(["POST"])
 def checklist_items(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        return JsonResponse({"checklistItems": list_review_checklist_items()})
-
     body = parse_json_body(request)
     payload = body.get("checklistItem") if isinstance(body, dict) and "checklistItem" in body else body
 
@@ -389,19 +379,8 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_GET
-def checklist_recommendations(request: HttpRequest) -> JsonResponse:
-    return JsonResponse({"recommendedChecklistItems": list_review_checklist_recommendations()})
-
-
-@api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def review_state(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        payload = get_bootstrap_payload()
-        return JsonResponse({"reviewState": payload["reviewState"]})
-
     body = parse_json_body(request)
     payload = body.get("reviewState") if isinstance(body, dict) and "reviewState" in body else body
     username = request.user.get_username() if request.user.is_authenticated else "system"
@@ -416,12 +395,8 @@ def review_state(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def control_state(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        payload = get_bootstrap_payload()
-        return JsonResponse({"controlState": payload["controlState"]})
-
     body = parse_json_body(request)
     payload = body.get("controlState") if isinstance(body, dict) and "controlState" in body else body
     normalized = normalize_control_state(payload)
@@ -431,11 +406,8 @@ def control_state(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def mapping_state(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        return JsonResponse({"mapping": get_mapping_payload()})
-
     body = parse_json_body(request)
     payload = body.get("mapping") if isinstance(body, dict) and "mapping" in body else body
     normalized = normalize_mapping_payload(payload)

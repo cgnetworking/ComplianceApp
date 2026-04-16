@@ -51,15 +51,9 @@
   };
   const apiBaseUrl = resolveApiBaseUrl();
   const loginUrl = resolveLoginUrl();
-  const storageKey = "isms-policy-portal-review-state-v1";
-  const controlStateKey = "isms-policy-portal-control-state-v1";
-  const uploadedPolicyKey = "isms-policy-portal-uploaded-policies-v1";
-  const vendorSurveyKey = "isms-policy-portal-vendor-surveys-v1";
-  const riskRegisterKey = "isms-policy-portal-risk-register-v1";
-  let persistenceMode = "local";
   const controlsById = new Map();
-  let uploadedDocuments = loadUploadedPolicies();
-  let vendorSurveyResponses = loadVendorResponses();
+  let uploadedDocuments = [];
+  let vendorSurveyResponses = [];
   const documentsById = new Map();
   const today = new Date();
   const page = document.body.dataset.page || "home";
@@ -86,14 +80,14 @@
     selectedVendorResponseId: params.get("vendor"),
     selectedAssessmentProfileId: params.get("profile") || "",
     selectedAssessmentRunId: params.get("run") || "",
-    riskRegister: loadRiskRegister(),
+    riskRegister: [],
     assignableUsers: [],
     isAddingRisk: false,
     riskFormStatus: { message: "", tone: "" },
-    reviewState: loadReviewState(),
+    reviewState: { activities: {}, checklist: {}, completedAt: {}, auditLog: [] },
     checklistItems: [],
     recommendedChecklistItems: [],
-    controlState: loadControlState(),
+    controlState: {},
   };
 
   const els = {
@@ -204,11 +198,8 @@
 
   async function loadAssignableUsers() {
     const existingAssignableUsers = Array.isArray(state.assignableUsers) ? state.assignableUsers : [];
-    state.assignableUsers = existingAssignableUsers.length ? existingAssignableUsers : fallbackAssignableUsers();
+    state.assignableUsers = existingAssignableUsers.length ? existingAssignableUsers : deriveAssignableUsers();
     if (existingAssignableUsers.length) {
-      return;
-    }
-    if (window.location.protocol === "file:") {
       return;
     }
 
@@ -219,7 +210,7 @@
         state.assignableUsers = assignableUsers;
       }
     } catch (error) {
-      // Keep fallback owners from the local risk register when the API is unavailable.
+      // Keep owners derived from the current risk register if the API cannot provide them.
     }
   }
 
@@ -248,7 +239,7 @@
       .sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true, sensitivity: "base" }));
   }
 
-  function fallbackAssignableUsers() {
+  function deriveAssignableUsers() {
     const seen = new Set();
     return state.riskRegister
       .map((risk) => (risk && typeof risk.owner === "string" ? risk.owner.trim() : ""))

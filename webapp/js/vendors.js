@@ -224,16 +224,13 @@
     );
 
     try {
-      const additions = isApiPersistence()
-        ? await uploadVendorsToApi(files)
-        : await createVendorSurveyResponses(files);
+      const additions = await uploadVendorsToApi(files);
 
       vendorSurveyResponses = additions
         .concat(vendorSurveyResponses)
         .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
         .slice(0, 60);
 
-      await saveVendorResponses();
       syncVendorSelection();
       syncUrl();
       renderVendorsPage();
@@ -249,14 +246,6 @@
         "error"
       );
     }
-  }
-  async function createVendorSurveyResponses(files) {
-    const importedAt = new Date();
-    const additions = [];
-    for (let index = 0; index < files.length; index += 1) {
-      additions.push(await buildVendorSurveyResponse(files[index], importedAt, index + 1));
-    }
-    return additions;
   }
   async function uploadVendorsToApi(files) {
     const formData = new FormData();
@@ -288,20 +277,6 @@
       summary: summarizeVendorSurvey(file, rawText, extension, previewText),
       status: previewText ? "Preview ready" : "Metadata only",
     };
-  }
-  async function saveVendorResponses() {
-    if (isApiPersistence()) {
-      return;
-    }
-    window.localStorage.setItem(vendorSurveyKey, JSON.stringify(vendorSurveyResponses.slice(0, 60)));
-  }
-  function loadVendorResponses() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(vendorSurveyKey) || "[]");
-      return Array.isArray(saved) ? saved.filter((item) => item && typeof item.id === "string") : [];
-    } catch (error) {
-      return [];
-    }
   }
   function summarizeVendorSurvey(file, rawText, extension, previewText) {
     const nonEmptyLines = rawText ? rawText.split(/\r?\n/).filter((line) => line.trim()).length : 0;

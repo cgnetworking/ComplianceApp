@@ -102,10 +102,6 @@
     if (!normalizedId) {
       return;
     }
-    if (!isApiPersistence()) {
-      setUploadStatus(els.reviewTasksStatus, "Task removal requires API/database mode.", "error");
-      return;
-    }
 
     const task = reviewTaskItems().find((item) => item.id === normalizedId);
     const label = task ? task.item : normalizedId;

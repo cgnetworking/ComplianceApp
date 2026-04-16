@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import mimetypes
 import os
 import re
-import shutil
 import socket
 import subprocess
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path, PurePosixPath
+import tempfile
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -55,40 +56,11 @@ def make_external_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
-def assessment_storage_root() -> Path:
-    return Path(settings.ASSESSMENT_STORAGE_ROOT)
-
-
-def assessment_certificate_root() -> Path:
-    return Path(settings.ASSESSMENT_CERTIFICATE_ROOT)
-
-
-def assessment_staging_root() -> Path:
-    return Path(settings.ASSESSMENT_STAGING_ROOT)
-
-
-def ensure_directory(path: Path, mode: int = 0o700) -> Path:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        os.chmod(path, mode)
-        return path
-    except OSError as error:
-        raise AssessmentValidationError(
-            f"Unable to access assessment storage at {path}. Check ASSESSMENT_STORAGE_ROOT permissions."
-        ) from error
-
-
-def ensure_assessment_roots() -> None:
-    ensure_directory(assessment_storage_root())
-    ensure_directory(assessment_certificate_root())
-    ensure_directory(assessment_staging_root())
-
-
 def safe_relative_path(file_path: Path, root_path: Path) -> str:
     try:
         relative_path = file_path.relative_to(root_path)
     except ValueError as error:
-        raise AssessmentValidationError("Assessment artifact path escaped the staging root.") from error
+        raise AssessmentValidationError("Assessment artifact path escaped the temporary output root.") from error
 
     normalized = PurePosixPath(relative_path.as_posix())
     if normalized.is_absolute() or ".." in normalized.parts:
@@ -120,14 +92,6 @@ def infer_artifact_type(relative_path: str) -> str:
 
 def powershell_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
-
-
-def certificate_directory(profile: ZeroTrustTenantProfile, certificate_id: str) -> Path:
-    return assessment_certificate_root() / profile.external_id / certificate_id
-
-
-def run_staging_directory(run: ZeroTrustAssessmentRun) -> Path:
-    return assessment_staging_root() / run.external_id
 
 
 def current_profile_certificate(profile: ZeroTrustTenantProfile) -> ZeroTrustCertificate | None:
@@ -201,12 +165,6 @@ def get_zero_trust_profile_detail(profile_id: str) -> dict[str, object]:
     }
 
 
-def remove_tree_if_exists(path: Path) -> None:
-    if not path.exists():
-        return
-    shutil.rmtree(path)
-
-
 def delete_zero_trust_profile(profile_id: str) -> dict[str, object]:
     profile = get_zero_trust_profile(profile_id)
     active_statuses = [
@@ -219,28 +177,9 @@ def delete_zero_trust_profile(profile_id: str) -> dict[str, object]:
         raise AssessmentValidationError("Stop or finish the active assessment run before deleting this tenant.")
 
     deleted_profile = build_profile_payload(profile)
-    certificate_root = assessment_certificate_root() / profile.external_id
-    staged_paths = [
-        normalize_string(path_value)
-        for path_value in profile.assessment_runs.exclude(staged_path="").values_list("staged_path", flat=True)
-    ]
 
     with transaction.atomic():
         profile.delete()
-
-        def cleanup_deleted_profile() -> None:
-            for staged_path in staged_paths:
-                if staged_path:
-                    try:
-                        remove_tree_if_exists(Path(staged_path))
-                    except OSError:
-                        pass
-            try:
-                remove_tree_if_exists(certificate_root)
-            except OSError:
-                pass
-
-        transaction.on_commit(cleanup_deleted_profile)
 
     return deleted_profile
 
@@ -316,7 +255,6 @@ def aware_certificate_datetime(value: datetime) -> datetime:
 
 
 def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
-    ensure_assessment_roots()
     profile = get_zero_trust_profile(profile_id)
 
     rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -358,14 +296,7 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
 
     thumbprint = certificate.fingerprint(hashes.SHA1()).hex().upper()
     certificate_id = make_external_id("zt-cert")
-    certificate_dir = ensure_directory(certificate_directory(profile, certificate_id))
     public_der = certificate.public_bytes(serialization.Encoding.DER)
-    public_pem = certificate.public_bytes(serialization.Encoding.PEM)
-    private_key_pem = rsa_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
     pfx_bytes = pkcs12.serialize_key_and_certificates(
         name=common_name.encode("utf-8"),
         key=rsa_key,
@@ -373,21 +304,6 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
         cas=None,
         encryption_algorithm=serialization.NoEncryption(),
     )
-
-    public_certificate_path = certificate_dir / "certificate.cer"
-    public_pem_path = certificate_dir / "certificate.pem"
-    private_key_path = certificate_dir / "private.key"
-    pfx_path = certificate_dir / "certificate.pfx"
-
-    public_certificate_path.write_bytes(public_der)
-    public_pem_path.write_bytes(public_pem)
-    private_key_path.write_bytes(private_key_pem)
-    pfx_path.write_bytes(pfx_bytes)
-
-    os.chmod(public_certificate_path, 0o600)
-    os.chmod(public_pem_path, 0o600)
-    os.chmod(private_key_path, 0o600)
-    os.chmod(pfx_path, 0o600)
 
     with transaction.atomic():
         ZeroTrustCertificate.objects.filter(profile=profile, is_current=True).update(is_current=False)
@@ -406,9 +322,7 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
             key_algorithm="RSA",
             key_size=2048,
             public_certificate_der=public_der,
-            certificate_path=str(public_certificate_path),
-            private_key_path=str(private_key_path),
-            pfx_path=str(pfx_path),
+            pfx_bytes=pfx_bytes,
             is_current=True,
         )
         profile.certificate_thumbprint = thumbprint
@@ -580,6 +494,10 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
     certificate = run.certificate
     if certificate is None:
         raise AssessmentValidationError("Assessment run is missing a certificate.")
+    if not certificate.pfx_bytes:
+        raise AssessmentValidationError("Assessment run certificate is missing PFX material.")
+
+    encoded_pfx = base64.b64encode(bytes(certificate.pfx_bytes)).decode("ascii")
 
     script_lines = [
         "$ErrorActionPreference = 'Stop'",
@@ -605,7 +523,8 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
         "    powershellVersion = $PSVersionTable.PSVersion.ToString()",
         "  }",
         "  Write-Host ('ZTA_META::' + ($metadata | ConvertTo-Json -Compress))",
-        f"  $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new({powershell_literal(certificate.pfx_path)}, '', [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)",
+        f"  $pfxBytes = [Convert]::FromBase64String({powershell_literal(encoded_pfx)})",
+        "  $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxBytes, '', [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)",
         f"  Connect-ZtAssessment -ClientId {powershell_literal(run.profile.client_id)} -TenantId {powershell_literal(run.profile.tenant_id)} -Certificate $certificate -Force",
         f"  Invoke-ZtAssessment -Path {powershell_literal(str(output_root))} -ExportLog",
         "} catch {",
@@ -685,16 +604,6 @@ def ingest_assessment_artifacts(run: ZeroTrustAssessmentRun, export_root: Path) 
     return summary
 
 
-def cleanup_assessment_staging(path_value: str) -> bool:
-    target = Path(path_value)
-    if not path_value:
-        return True
-    if not target.exists():
-        return True
-    shutil.rmtree(target)
-    return not target.exists()
-
-
 def finalize_zero_trust_run(
     run: ZeroTrustAssessmentRun,
     *,
@@ -733,162 +642,146 @@ def finalize_zero_trust_run(
 
 def process_zero_trust_run(run_id: str, *, worker_id: str) -> ZeroTrustAssessmentRun:
     run = get_zero_trust_run(run_id)
-    ensure_assessment_roots()
+    with tempfile.TemporaryDirectory(prefix=f"{run.external_id}-") as staging_dir_value:
+        staging_dir = Path(staging_dir_value)
+        output_dir = staging_dir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        script_path = staging_dir / "run_assessment.ps1"
+        script_path.write_text(assessment_script_contents(run, output_dir), encoding="utf-8")
 
-    staging_dir = ensure_directory(run_staging_directory(run))
-    output_dir = ensure_directory(staging_dir / "output")
-    script_path = staging_dir / "run_assessment.ps1"
-    script_path.write_text(assessment_script_contents(run, output_dir), encoding="utf-8")
-    os.chmod(script_path, 0o600)
-
-    run.status = ZeroTrustRunStatus.RUNNING
-    run.status_message = "PowerShell assessment is running."
-    run.started_at = timezone.now()
-    run.staged_path = str(staging_dir)
-    run.last_heartbeat_at = run.started_at
-    run.lease_expires_at = run.started_at + timedelta(seconds=settings.ASSESSMENT_WORKER_LEASE_SECONDS)
-    run.worker_id = worker_id
-    run.save(
-        update_fields=[
-            "status",
-            "status_message",
-            "started_at",
-            "staged_path",
-            "last_heartbeat_at",
-            "lease_expires_at",
-            "worker_id",
-            "updated_at",
-        ]
-    )
-
-    sequence = initial_worker_sequence(run)
-    warning_lines: list[str] = []
-    last_heartbeat = timezone.now()
-    create_run_log(run, "Launching PowerShell assessment process.", level="info", stream="system", sequence=sequence + 1)
-    sequence += 1
-
-    try:
-        process = subprocess.Popen(
-            ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
+        run.status = ZeroTrustRunStatus.RUNNING
+        run.status_message = "PowerShell assessment is running."
+        run.started_at = timezone.now()
+        run.last_heartbeat_at = run.started_at
+        run.lease_expires_at = run.started_at + timedelta(seconds=settings.ASSESSMENT_WORKER_LEASE_SECONDS)
+        run.worker_id = worker_id
+        run.save(
+            update_fields=[
+                "status",
+                "status_message",
+                "started_at",
+                "last_heartbeat_at",
+                "lease_expires_at",
+                "worker_id",
+                "updated_at",
+            ]
         )
-    except FileNotFoundError as error:
-        finalize_zero_trust_run(
+
+        sequence = initial_worker_sequence(run)
+        warning_lines: list[str] = []
+        last_heartbeat = timezone.now()
+        create_run_log(
             run,
-            status=ZeroTrustRunStatus.FAILED,
-            status_message="PowerShell 7 is not installed on the server.",
-            error_summary=str(error),
+            "Launching PowerShell assessment process.",
+            level="info",
+            stream="system",
+            sequence=sequence + 1,
         )
-        create_run_log(run, run.status_message, level="error", stream="system", sequence=sequence + 1)
-        cleanup_assessment_staging(run.staged_path)
-        raise
+        sequence += 1
 
-    try:
-        assert process.stdout is not None
-        for raw_line in process.stdout:
-            line = raw_line.rstrip()
-            if not line:
-                continue
-            if line.startswith("ZTA_META::"):
-                try:
-                    metadata = json.loads(line.split("::", 1)[1])
-                except json.JSONDecodeError:
-                    metadata = {}
-                update_zero_trust_run_metadata(run, metadata if isinstance(metadata, dict) else {})
-                continue
-
-            log_level = log_level_for_output(line)
-            if log_level == "warning" and line not in warning_lines:
-                warning_lines.append(line)
-            sequence += 1
-            create_run_log(run, line, level=log_level, stream="stdout", sequence=sequence)
-
-            now = timezone.now()
-            if (now - last_heartbeat).total_seconds() >= 5:
-                heartbeat_zero_trust_run(run)
-                last_heartbeat = now
-
-        process.wait()
-        heartbeat_zero_trust_run(run)
-
-        if process.returncode != 0:
+        try:
+            process = subprocess.Popen(
+                ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except FileNotFoundError as error:
             finalize_zero_trust_run(
                 run,
                 status=ZeroTrustRunStatus.FAILED,
-                status_message="PowerShell assessment failed.",
+                status_message="PowerShell 7 is not installed on the server.",
+                error_summary=str(error),
+            )
+            create_run_log(run, run.status_message, level="error", stream="system", sequence=sequence + 1)
+            raise
+
+        try:
+            assert process.stdout is not None
+            for raw_line in process.stdout:
+                line = raw_line.rstrip()
+                if not line:
+                    continue
+                if line.startswith("ZTA_META::"):
+                    try:
+                        metadata = json.loads(line.split("::", 1)[1])
+                    except json.JSONDecodeError:
+                        metadata = {}
+                    update_zero_trust_run_metadata(run, metadata if isinstance(metadata, dict) else {})
+                    continue
+
+                log_level = log_level_for_output(line)
+                if log_level == "warning" and line not in warning_lines:
+                    warning_lines.append(line)
+                sequence += 1
+                create_run_log(run, line, level=log_level, stream="stdout", sequence=sequence)
+
+                now = timezone.now()
+                if (now - last_heartbeat).total_seconds() >= 5:
+                    heartbeat_zero_trust_run(run)
+                    last_heartbeat = now
+
+            process.wait()
+            heartbeat_zero_trust_run(run)
+
+            if process.returncode != 0:
+                finalize_zero_trust_run(
+                    run,
+                    status=ZeroTrustRunStatus.FAILED,
+                    status_message="PowerShell assessment failed.",
+                    warning_summary="\n".join(warning_lines[:10]),
+                    error_summary=f"PowerShell exited with code {process.returncode}.",
+                    exit_code=process.returncode,
+                )
+                sequence += 1
+                create_run_log(run, run.error_summary, level="error", stream="system", sequence=sequence)
+                return run
+
+            run.status = ZeroTrustRunStatus.INGESTING
+            run.status_message = "Assessment completed. Ingesting report artifacts."
+            run.exit_code = process.returncode
+            run.save(update_fields=["status", "status_message", "exit_code", "updated_at"])
+            sequence += 1
+            create_run_log(run, run.status_message, level="info", stream="system", sequence=sequence)
+
+            summary = ingest_assessment_artifacts(run, output_dir)
+            status = (
+                ZeroTrustRunStatus.SUCCEEDED_WITH_WARNINGS
+                if warning_lines
+                else ZeroTrustRunStatus.SUCCEEDED
+            )
+            status_message = "Assessment artifacts ingested into PostgreSQL."
+            finalize_zero_trust_run(
+                run,
+                status=status,
+                status_message=status_message,
                 warning_summary="\n".join(warning_lines[:10]),
-                error_summary=f"PowerShell exited with code {process.returncode}.",
                 exit_code=process.returncode,
             )
             sequence += 1
-            create_run_log(run, run.error_summary, level="error", stream="system", sequence=sequence)
-            return run
-
-        run.status = ZeroTrustRunStatus.INGESTING
-        run.status_message = "Assessment completed. Ingesting report artifacts."
-        run.exit_code = process.returncode
-        run.save(update_fields=["status", "status_message", "exit_code", "updated_at"])
-        sequence += 1
-        create_run_log(run, run.status_message, level="info", stream="system", sequence=sequence)
-
-        summary = ingest_assessment_artifacts(run, output_dir)
-        status = (
-            ZeroTrustRunStatus.SUCCEEDED_WITH_WARNINGS
-            if warning_lines
-            else ZeroTrustRunStatus.SUCCEEDED
-        )
-        status_message = "Assessment artifacts ingested into PostgreSQL."
-        finalize_zero_trust_run(
-            run,
-            status=status,
-            status_message=status_message,
-            warning_summary="\n".join(warning_lines[:10]),
-            exit_code=process.returncode,
-        )
-        sequence += 1
-        create_run_log(
-            run,
-            f"Stored {summary['artifactCount']} assessment artifact(s) in PostgreSQL.",
-            level="info",
-            stream="system",
-            sequence=sequence,
-        )
-        return run
-    except AssessmentValidationError as error:
-        finalize_zero_trust_run(
-            run,
-            status=ZeroTrustRunStatus.FAILED,
-            status_message="Assessment completed but artifact ingestion failed.",
-            warning_summary="\n".join(warning_lines[:10]),
-            error_summary=str(error),
-            exit_code=process.returncode if process.poll() is not None else None,
-        )
-        sequence += 1
-        create_run_log(run, str(error), level="error", stream="system", sequence=sequence)
-        return run
-    finally:
-        try:
-            if cleanup_assessment_staging(run.staged_path):
-                run.cleaned_up_at = timezone.now()
-                run.save(update_fields=["cleaned_up_at", "updated_at"])
-        except OSError as error:
-            warning_message = f"Unable to remove staging directory: {error}"
-            if warning_message not in warning_lines:
-                warning_lines.append(warning_message)
-            run.warning_summary = "\n".join(warning_lines[:10])
-            run.status = (
-                ZeroTrustRunStatus.SUCCEEDED_WITH_WARNINGS
-                if run.status == ZeroTrustRunStatus.SUCCEEDED
-                else run.status
+            create_run_log(
+                run,
+                f"Stored {summary['artifactCount']} assessment artifact(s) in PostgreSQL.",
+                level="info",
+                stream="system",
+                sequence=sequence,
             )
-            run.save(update_fields=["warning_summary", "status", "updated_at"])
+            return run
+        except AssessmentValidationError as error:
+            finalize_zero_trust_run(
+                run,
+                status=ZeroTrustRunStatus.FAILED,
+                status_message="Assessment completed but artifact ingestion failed.",
+                warning_summary="\n".join(warning_lines[:10]),
+                error_summary=str(error),
+                exit_code=process.returncode if process.poll() is not None else None,
+            )
             sequence += 1
-            create_run_log(run, warning_message, level="warning", stream="system", sequence=sequence)
+            create_run_log(run, str(error), level="error", stream="system", sequence=sequence)
+            return run
 
 
 def get_zero_trust_artifact(run_id: str, *, relative_path: str | None = None) -> ZeroTrustAssessmentArtifact:

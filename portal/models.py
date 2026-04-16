@@ -258,9 +258,7 @@ class ZeroTrustCertificate(models.Model):
     key_algorithm = models.CharField(max_length=64, default="RSA")
     key_size = models.PositiveIntegerField(default=2048)
     public_certificate_der = models.BinaryField()
-    certificate_path = models.CharField(max_length=512, default="")
-    private_key_path = models.CharField(max_length=512, default="")
-    pfx_path = models.CharField(max_length=512, default="")
+    pfx_bytes = models.BinaryField(default=b"", blank=True)
     is_current = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -327,8 +325,6 @@ class ZeroTrustAssessmentRun(models.Model):
     last_heartbeat_at = models.DateTimeField(blank=True, null=True)
     started_at = models.DateTimeField(blank=True, null=True)
     completed_at = models.DateTimeField(blank=True, null=True)
-    staged_path = models.CharField(max_length=512, blank=True, default="")
-    cleaned_up_at = models.DateTimeField(blank=True, null=True)
     ingested_at = models.DateTimeField(blank=True, null=True)
     entrypoint_relative_path = models.CharField(max_length=512, blank=True, default="")
     module_version = models.CharField(max_length=64, blank=True, default="")
@@ -373,7 +369,6 @@ class ZeroTrustAssessmentRun(models.Model):
             "lastHeartbeatAt": self.last_heartbeat_at.isoformat() if self.last_heartbeat_at else "",
             "startedAt": self.started_at.isoformat() if self.started_at else "",
             "completedAt": self.completed_at.isoformat() if self.completed_at else "",
-            "cleanedUpAt": self.cleaned_up_at.isoformat() if self.cleaned_up_at else "",
             "ingestedAt": self.ingested_at.isoformat() if self.ingested_at else "",
             "entrypointRelativePath": self.entrypoint_relative_path,
             "moduleVersion": self.module_version,

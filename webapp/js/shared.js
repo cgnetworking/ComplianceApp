@@ -66,7 +66,7 @@
           return;
         }
         const query = els.searchInput.value.trim();
-        const target = query ? `./controls.html?q=${encodeURIComponent(query)}` : "./controls.html";
+        const target = query ? `/controls/?q=${encodeURIComponent(query)}` : "/controls/";
         window.location.href = target;
       });
       return;
@@ -861,7 +861,7 @@
       reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
         ? item.reviewFrequency.trim()
         : "Not scheduled",
-      path: typeof item.path === "string" && item.path.trim() ? item.path.trim() : "Local upload",
+      path: typeof item.path === "string" && item.path.trim() ? item.path.trim() : "Uploaded file",
       folder: typeof item.folder === "string" && item.folder.trim() ? item.folder.trim() : "Uploaded",
       purpose: typeof item.purpose === "string" ? item.purpose : "",
       contentHtml,
@@ -870,37 +870,7 @@
       uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : "",
     };
   }
-  function loadUploadedPolicies() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(uploadedPolicyKey) || "[]");
-      if (!Array.isArray(saved)) {
-        return [];
-      }
-      return saved.map((item) => normalizeUploadedPolicyItem(item)).filter(Boolean);
-    } catch (error) {
-      return [];
-    }
-  }
-  async function saveUploadedPolicies(items) {
-    if (isApiPersistence()) {
-      return;
-    }
-    window.localStorage.setItem(uploadedPolicyKey, JSON.stringify(items));
-  }
-  function loadReviewState() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
-      return normalizeReviewStateValue(saved);
-    } catch (error) {
-      return { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
-    }
-  }
   function saveReviewState() {
-    if (!isApiPersistence()) {
-      window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
-      return;
-    }
-
     void apiRequest("/state/review/", {
       method: "PUT",
       body: JSON.stringify({ reviewState: state.reviewState }),
@@ -916,28 +886,15 @@
         renderAuditLogPage();
       }
     }).catch(() => {
-      window.localStorage.setItem(storageKey, JSON.stringify(state.reviewState));
+      console.error("Failed to persist review state to the API.");
     });
   }
-  function loadControlState() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(controlStateKey) || "{}");
-      return typeof saved === "object" && saved ? saved : {};
-    } catch (error) {
-      return {};
-    }
-  }
   function saveControlState() {
-    if (!isApiPersistence()) {
-      window.localStorage.setItem(controlStateKey, JSON.stringify(state.controlState));
-      return;
-    }
-
     void apiRequest("/state/control/", {
       method: "PUT",
       body: JSON.stringify({ controlState: state.controlState }),
     }).catch(() => {
-      window.localStorage.setItem(controlStateKey, JSON.stringify(state.controlState));
+      console.error("Failed to persist control state to the API.");
     });
   }
   function setUploadStatus(element, message, tone) {
@@ -1045,9 +1002,6 @@
     }
     return "/login/";
   }
-  function isApiPersistence() {
-    return persistenceMode === "api";
-  }
   function updateRuntimeMode() {
     if (!els.runtimeMode) {
       return;
@@ -1058,23 +1012,17 @@
     const baseLabel = hasControls
       ? (hasExpandedMapping ? "Custom mapping" : "Default controls")
       : "No controls loaded";
-    els.runtimeMode.textContent = isApiPersistence() ? `${baseLabel} + API` : baseLabel;
+    els.runtimeMode.textContent = `${baseLabel} + API`;
   }
   function updatePersistenceCopy() {
     if (els.policyUploadStatus) {
-      els.policyUploadStatus.textContent = isApiPersistence()
-        ? "Add markdown, text, or HTML policy files to the shared portal library."
-        : "Add markdown, text, or HTML policy files to this browser's library.";
+      els.policyUploadStatus.textContent = "Add markdown, text, or HTML policy files to the shared portal library.";
     }
     if (els.vendorUploadStatus) {
-      els.vendorUploadStatus.textContent = isApiPersistence()
-        ? "Download the sample CSV, replace the sample answers, and upload completed questionnaires or exports into the shared portal workspace. Text-based files generate inline previews."
-        : "Download the sample CSV, replace the sample answers, and upload completed questionnaires or exports. Text-based files generate inline previews.";
+      els.vendorUploadStatus.textContent = "Download the sample CSV, replace the sample answers, and upload completed questionnaires or exports into the shared portal workspace. Text-based files generate inline previews.";
     }
     if (els.mappingUploadStatus) {
-      els.mappingUploadStatus.textContent = isApiPersistence()
-        ? "Upload an optional mapping file (.json or .csv), or map policies manually from Controls and Policies."
-        : "Map policies manually from Controls and Policies. Mapping upload requires API mode.";
+      els.mappingUploadStatus.textContent = "Upload an optional mapping file (.json or .csv), or map policies manually from Controls and Policies.";
     }
   }
   function refreshDocumentsIndex() {
@@ -1084,65 +1032,11 @@
     });
   }
   async function loadRemoteState() {
-    if (window.location.protocol === "file:") {
-      persistenceMode = "local";
-      await loadDefaultControls();
-      return;
-    }
-
     try {
       const payload = await apiRequest("/state/");
-      persistenceMode = payload && payload.persistenceMode === "api" ? "api" : "local";
       applyRemoteState(payload);
     } catch (error) {
-      persistenceMode = "local";
-      await loadDefaultControls();
-    }
-  }
-  async function loadDefaultControls() {
-    try {
-      const response = await fetch("/static/default_controls.json", {
-        credentials: "same-origin",
-      });
-      if (!response.ok) {
-        return;
-      }
-
-      const payload = await response.json();
-      if (!Array.isArray(payload)) {
-        return;
-      }
-
-      const controls = payload
-        .filter((item) => item && typeof item.id === "string" && typeof item.name === "string")
-        .map((item) => ({
-          id: item.id.trim(),
-          name: item.name.trim(),
-          domain: typeof item.domain === "string" ? item.domain.trim() : "",
-          applicability: typeof item.applicability === "string" ? item.applicability.trim() : "",
-          owner: "",
-          reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
-            ? item.reviewFrequency.trim()
-            : "Annual",
-          documentIds: [],
-          policyDocumentIds: [],
-          preferredDocumentId: "",
-        }))
-        .filter((item) => item.id && item.name);
-      if (!controls.length) {
-        return;
-      }
-
-      applyMappingPayload({
-        sourceSnapshot: {
-          controlRegister: "default_controls.json",
-          reviewSchedule: "",
-          runtimeDependency: false,
-        },
-        controls,
-      });
-    } catch (error) {
-      // Ignore local loading errors and continue with empty defaults.
+      console.error("Failed to load portal state from the API.", error);
     }
   }
   function applyRemoteState(payload) {
@@ -1241,10 +1135,10 @@
     return match ? decodeURIComponent(match[1]) : "";
   }
   function portalWorkspaceLabel() {
-    return isApiPersistence() ? "shared portal workspace" : "browser workspace";
+    return "shared portal workspace";
   }
   function storageSentence() {
-    return isApiPersistence() ? "stored in the shared portal." : "stored locally in this browser.";
+    return "stored in the shared portal database.";
   }
   function parseDisplayDateValue(value) {
     if (value instanceof Date) {
