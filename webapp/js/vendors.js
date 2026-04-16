@@ -1,3 +1,36 @@
+  let vendorResponsesLoadPromise = null;
+
+  async function loadVendorResponsesState(force = false) {
+    if (force) {
+      state.vendorResponsesLoaded = false;
+    }
+    if (state.vendorResponsesLoaded) {
+      return;
+    }
+    if (vendorResponsesLoadPromise) {
+      await vendorResponsesLoadPromise;
+      return;
+    }
+
+    vendorResponsesLoadPromise = (async () => {
+      if (!vendorSurveyResponses.length) {
+        setUploadStatus(els.vendorUploadStatus, "Loading vendor response queue...", "info");
+      }
+      try {
+        const payload = await apiRequest("/vendors/uploads/");
+        vendorSurveyResponses = Array.isArray(payload.responses) ? payload.responses : [];
+        state.vendorResponsesLoaded = true;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unable to load vendor response queue.";
+        setUploadStatus(els.vendorUploadStatus, detail, "error");
+      } finally {
+        vendorResponsesLoadPromise = null;
+      }
+    })();
+
+    await vendorResponsesLoadPromise;
+  }
+
   function renderVendorsPage() {
     syncVendorSelection();
     renderVendorOverview();
@@ -230,6 +263,7 @@
         .concat(vendorSurveyResponses)
         .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
         .slice(0, 60);
+      state.vendorResponsesLoaded = true;
 
       syncVendorSelection();
       syncUrl();

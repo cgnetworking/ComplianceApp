@@ -78,6 +78,7 @@
     activeDocumentId: params.get("doc"),
     selectedRiskId: params.get("risk") || "",
     selectedVendorResponseId: params.get("vendor"),
+    vendorResponsesLoaded: false,
     selectedAssessmentProfileId: params.get("profile") || "",
     selectedAssessmentRunId: params.get("run") || "",
     riskRegister: [],
@@ -178,6 +179,9 @@
   async function init() {
     await loadRemoteState();
     await loadAssignableUsers();
+    if (page === "vendors" && typeof loadVendorResponsesState === "function") {
+      await loadVendorResponsesState();
+    }
     if (page === "assessments" && typeof loadZeroTrustState === "function") {
       await loadZeroTrustState();
     }
@@ -194,6 +198,9 @@
     initializeSelection();
     bindEvents();
     renderPage();
+    if (typeof applyRowSelectionAccessibility === "function") {
+      applyRowSelectionAccessibility();
+    }
   }
 
   async function loadAssignableUsers() {
@@ -204,7 +211,7 @@
     }
 
     try {
-      const payload = await apiRequest("/state/");
+      const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
       const assignableUsers = normalizeAssignableUsers(payload && payload.assignableUsers);
       if (assignableUsers.length) {
         state.assignableUsers = assignableUsers;

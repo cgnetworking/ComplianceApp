@@ -45,6 +45,26 @@ Relevant environment variables:
 
 The default settings also enable per-backend domain and email allowlists, require POST for the SSO begin route, and sanitize post-login redirects.
 
+## Django security defaults
+
+The app now starts fail-closed for production safety:
+
+- `DJANGO_DEBUG` defaults to `false`
+- `DJANGO_SECRET_KEY` has no static fallback and is required when `DJANGO_DEBUG=false`
+
+Required baseline environment variables for hosted deployments:
+
+- `DJANGO_SECRET_KEY` (strong random value)
+- `DATABASE_URL` (PostgreSQL DSN without credentials, e.g. `postgresql://db-host:5432/complianceapp`)
+- `DATABASE_USER`
+- `DATABASE_PASSWORD` (can be blank but must be set)
+- `ALLOWED_HOSTS` (comma-separated hostnames)
+
+Recommended:
+
+- `CSRF_TRUSTED_ORIGINS` with your HTTPS origins
+- `DJANGO_DEBUG=false` in all non-local environments
+
 ## Local setup
 
 `scripts/local_setup.sh` is designed for Ubuntu 24.04+.
@@ -57,6 +77,11 @@ The setup script creates `.env` if it does not already exist, installs dependenc
 During setup, the script asks a yes/no question about generating a local self-signed TLS cert. If you answer yes, it creates the cert at the exact `ssl_certificate` and `ssl_certificate_key` paths rendered into `deploy/nginx/complianceapp.conf`.
 
 For non-interactive runs, set `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=true` or `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=false`.
+
+For local development outside the setup script, set:
+
+- `DJANGO_DEBUG=true`
+- `DJANGO_SECRET_KEY` to any local secret value
 
 Useful local setup overrides:
 

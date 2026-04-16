@@ -1,110 +1,87 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISMS Command Center</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="home">
-  <div class="app-shell">
-      {% include "portal/_sidebar.html" with active_page="home" search_placeholder="Find controls or policies" %}
+{% extends "portal/base.html" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
-          <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
-          </div>
+{% block title %}ISMS Command Center{% endblock %}
+{% block body_page %}home{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="home" search_placeholder="Find controls or policies" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header">
+    <p class="section-kicker">Home</p>
+    <h1>Compliance workspace</h1>
+    <p class="report-copy">
+      Jump into the control register, review calendar, and mapped policy set from separate pages. Search from here opens the control register directly.
+    </p>
+  </section>
+
+  <section class="overview" id="overview"></section>
+
+  <section class="page-grid page-grid-home">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Quick links</p>
+          <h2>Primary work areas</h2>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
+      </div>
+      <div class="link-grid">
+        <a class="link-card" href="{% url 'portal-controls' %}">
+          <strong>Controls</strong>
+          <span>Browse Annex A controls and open mapped policy pages from each control number.</span>
+        </a>
+        <a class="link-card" href="{% url 'portal-reports' %}">
+          <strong>Reports</strong>
+          <span>View framework-level charts, cadence coverage, and audit windows.</span>
+        </a>
+        <a class="link-card" href="{% url 'portal-reviews' %}">
+          <strong>Reviews</strong>
+          <span>Track the annual review queue and recurring checklist items.</span>
+        </a>
+        <a class="link-card" href="{% url 'portal-policies' %}">
+          <strong>Policies</strong>
+          <span>Read policy content uploaded to the shared portal library.</span>
+        </a>
+        <a class="link-card" href="{% url 'portal-risks' %}">
+          <strong>Risk Register</strong>
+          <span>Track business risks, assign owners, and record initial risk levels and closure dates.</span>
+        </a>
+        <a class="link-card" href="{% url 'portal-vendors' %}">
+          <strong>Vendors</strong>
+          <span>Import due diligence survey responses and stage supplier evidence for review.</span>
+        </a>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Upcoming work</p>
+          <h2>Next review activities</h2>
         </div>
-      </header>
+      </div>
+      <div id="home-upcoming"></div>
+    </article>
 
-      <main class="content">
-        <section class="report-header">
-          <p class="section-kicker">Home</p>
-          <h1>Compliance workspace</h1>
-          <p class="report-copy">
-            Jump into the control register, review calendar, and mapped policy set from separate pages. Search from here opens the control register directly.
-          </p>
-        </section>
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Control footprint</p>
+          <h2>Domain distribution</h2>
+        </div>
+      </div>
+      <div id="home-domains"></div>
+    </article>
 
-        <section class="overview" id="overview"></section>
-
-        <section class="page-grid page-grid-home">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Quick links</p>
-                <h2>Primary work areas</h2>
-              </div>
-            </div>
-            <div class="link-grid">
-              <a class="link-card" href="{% url 'portal-controls' %}">
-                <strong>Controls</strong>
-                <span>Browse Annex A controls and open mapped policy pages from each control number.</span>
-              </a>
-              <a class="link-card" href="{% url 'portal-reports' %}">
-                <strong>Reports</strong>
-                <span>View framework-level charts, cadence coverage, and audit windows.</span>
-              </a>
-              <a class="link-card" href="{% url 'portal-reviews' %}">
-                <strong>Reviews</strong>
-                <span>Track the annual review queue and recurring checklist items.</span>
-              </a>
-              <a class="link-card" href="{% url 'portal-policies' %}">
-                <strong>Policies</strong>
-                <span>Read policy content uploaded to the shared portal library.</span>
-              </a>
-              <a class="link-card" href="{% url 'portal-risks' %}">
-                <strong>Risk Register</strong>
-                <span>Track business risks, assign owners, and record initial risk levels and closure dates.</span>
-              </a>
-              <a class="link-card" href="{% url 'portal-vendors' %}">
-                <strong>Vendors</strong>
-                <span>Import due diligence survey responses and stage supplier evidence for review.</span>
-              </a>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Upcoming work</p>
-                <h2>Next review activities</h2>
-              </div>
-            </div>
-            <div id="home-upcoming"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Control footprint</p>
-                <h2>Domain distribution</h2>
-              </div>
-            </div>
-            <div id="home-domains"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Policy surface</p>
-                <h2>Most-mapped policies</h2>
-              </div>
-            </div>
-            <div id="home-policies"></div>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Policy surface</p>
+          <h2>Most-mapped policies</h2>
+        </div>
+      </div>
+      <div id="home-policies"></div>
+    </article>
+  </section>
+{% endblock %}

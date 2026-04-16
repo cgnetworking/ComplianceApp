@@ -144,6 +144,24 @@
         state.selectedControlId = row.dataset.controlRow;
         syncUrlAndRender(renderControlsPage);
       });
+      els.controlsBody.addEventListener("keydown", (event) => {
+        if (!isRowActivationKey(event) || isInteractiveTarget(event.target)) {
+          return;
+        }
+        const row = event.target.closest("[data-control-row]");
+        if (!row) {
+          return;
+        }
+        event.preventDefault();
+        state.selectedControlId = row.dataset.controlRow;
+        syncUrlAndRender(renderControlsPage);
+      });
+      observeSelectableRows(
+        els.controlsBody,
+        "[data-control-row]",
+        ".is-selected",
+        "controlRowAccessibilityObserved"
+      );
     }
 
     if (!els.controlDetail) {
@@ -476,11 +494,31 @@
     }
 
     if (els.riskList) {
+      observeSelectableRows(
+        els.riskList,
+        "[data-risk-row]",
+        ".is-selected",
+        "riskRowAccessibilityObserved"
+      );
       els.riskList.addEventListener("click", (event) => {
         const row = event.target.closest("[data-risk-row]");
         if (!row) {
           return;
         }
+        state.selectedRiskId = row.dataset.riskRow;
+        state.isAddingRisk = false;
+        clearRiskFormStatus();
+        syncUrlAndRender(renderRisksPage);
+      });
+      els.riskList.addEventListener("keydown", (event) => {
+        if (!isRowActivationKey(event) || isInteractiveTarget(event.target)) {
+          return;
+        }
+        const row = event.target.closest("[data-risk-row]");
+        if (!row) {
+          return;
+        }
+        event.preventDefault();
         state.selectedRiskId = row.dataset.riskRow;
         state.isAddingRisk = false;
         clearRiskFormStatus();
@@ -755,6 +793,37 @@
   function syncUrlAndRender(renderer = renderPage) {
     syncUrl();
     renderer();
+    applyRowSelectionAccessibility();
+  }
+  function isRowActivationKey(event) {
+    return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
+  }
+  function isInteractiveTarget(target) {
+    return Boolean(target && target.closest && target.closest("a, button, input, select, textarea, [data-policy-link]"));
+  }
+  function decorateSelectableRows(container, rowSelector, activeSelector) {
+    if (!container) {
+      return;
+    }
+    container.querySelectorAll(rowSelector).forEach((row) => {
+      row.setAttribute("tabindex", "0");
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-pressed", row.matches(activeSelector) ? "true" : "false");
+    });
+  }
+  function observeSelectableRows(container, rowSelector, activeSelector, observedFlagName) {
+    if (!container || container.dataset[observedFlagName] === "true") {
+      return;
+    }
+    container.dataset[observedFlagName] = "true";
+    const observer = new MutationObserver(() => {
+      decorateSelectableRows(container, rowSelector, activeSelector);
+    });
+    observer.observe(container, { childList: true, subtree: true });
+  }
+  function applyRowSelectionAccessibility() {
+    decorateSelectableRows(els.controlsBody, "[data-control-row]", ".is-selected");
+    decorateSelectableRows(els.riskList, "[data-risk-row]", ".is-selected");
   }
   function renderPage() {
     switch (page) {
@@ -961,9 +1030,15 @@
     const id = typeof item.id === "string" ? item.id.trim() : "";
     const title = typeof item.title === "string" ? item.title.trim() : "";
     const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
-    if (!id || !title || !contentHtml) {
+    if (!id || !title) {
       return null;
     }
+    const contentAvailable = typeof item.contentAvailable === "boolean"
+      ? item.contentAvailable
+      : Boolean(contentHtml.trim());
+    const contentLoaded = typeof item.contentLoaded === "boolean"
+      ? item.contentLoaded
+      : Boolean(contentHtml.trim());
     return {
       id,
       title,
@@ -978,9 +1053,46 @@
       folder: typeof item.folder === "string" && item.folder.trim() ? item.folder.trim() : "Uploaded",
       purpose: typeof item.purpose === "string" ? item.purpose : "",
       contentHtml,
+      contentAvailable,
+      contentLoaded,
       isUploaded: true,
       originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
       uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : "",
+    };
+  }
+  function normalizeMappingDocumentItem(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : id;
+    if (!id || !title) {
+      return null;
+    }
+    const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
+    const contentAvailable = typeof item.contentAvailable === "boolean"
+      ? item.contentAvailable
+      : Boolean(contentHtml.trim());
+    const contentLoaded = typeof item.contentLoaded === "boolean"
+      ? item.contentLoaded
+      : Boolean(contentHtml.trim());
+    return {
+      id,
+      title,
+      type: typeof item.type === "string" ? item.type : "",
+      owner: typeof item.owner === "string" ? item.owner : "",
+      approver: typeof item.approver === "string" ? item.approver : "",
+      reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
+        ? item.reviewFrequency.trim()
+        : "Not scheduled",
+      path: typeof item.path === "string" ? item.path : "",
+      folder: typeof item.folder === "string" ? item.folder : "",
+      purpose: typeof item.purpose === "string" ? item.purpose : "",
+      contentHtml,
+      contentAvailable,
+      contentLoaded,
+      isUploaded: Boolean(item.isUploaded),
+      originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
     };
   }
   async function saveReviewState() {
@@ -1072,7 +1184,9 @@
     data.sourceSnapshot = mappingPayload.sourceSnapshot;
     data.summary = mappingPayload.summary;
     data.controls = mappingPayload.controls;
-    data.documents = mappingPayload.documents;
+    data.documents = mappingPayload.documents
+      .map((item) => normalizeMappingDocumentItem(item))
+      .filter(Boolean);
     data.activities = mappingPayload.activities;
     data.checklist = mappingPayload.checklist;
     data.policyCoverage = mappingPayload.policyCoverage;
@@ -1146,7 +1260,7 @@
   }
   async function loadRemoteState() {
     try {
-      const payload = await apiRequest("/state/");
+      const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
       applyRemoteState(payload);
     } catch (error) {
       console.error("Failed to load portal state from the API.", error);
@@ -1168,6 +1282,7 @@
     }
     if (Array.isArray(payload.vendorSurveyResponses)) {
       vendorSurveyResponses = payload.vendorSurveyResponses;
+      state.vendorResponsesLoaded = true;
     }
     if (Array.isArray(payload.riskRegister)) {
       state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);

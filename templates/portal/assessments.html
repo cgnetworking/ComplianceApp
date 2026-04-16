@@ -1,71 +1,48 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISMS Assessments</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="assessments">
-  <div class="app-shell">
-    {% include "portal/_sidebar.html" with active_page="assessments" search_placeholder="Search tenants or runs" %}
+{% extends "portal/base.html" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
-          <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
-          </div>
+{% block title %}ISMS Assessments{% endblock %}
+{% block body_page %}assessments{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="assessments" search_placeholder="Search tenants or runs" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Assessments</p>
+      <h1>Zero Trust assessment workspace</h1>
+      <p class="report-copy">
+        Generate an app-only certificate on the Ubuntu server, save tenant Graph settings, run the Microsoft Zero Trust Assessment in the background, and review the stored report directly in the portal.
+      </p>
+    </div>
+    <div class="report-actions">
+      <button class="ghost-button" id="assessment-new-profile" type="button">New Tenant Profile</button>
+      <p class="helper-note upload-status" id="assessment-status">
+        The generated report bundle is copied into PostgreSQL and then removed from the server staging folder after ingestion succeeds.
+      </p>
+    </div>
+  </section>
+
+  <section class="overview" id="assessment-overview"></section>
+
+  <section class="page-grid page-grid-assessments">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Tenant profiles</p>
+          <h2>Saved assessment targets</h2>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
-        </div>
-      </header>
+      </div>
+      <div id="assessment-profiles"></div>
+    </article>
 
-      <main class="content">
-        <section class="report-header report-header-split">
-          <div>
-            <p class="section-kicker">Assessments</p>
-            <h1>Zero Trust assessment workspace</h1>
-            <p class="report-copy">
-              Generate an app-only certificate on the Ubuntu server, save tenant Graph settings, run the Microsoft Zero Trust Assessment in the background, and review the stored report directly in the portal.
-            </p>
-          </div>
-          <div class="report-actions">
-            <button class="ghost-button" id="assessment-new-profile" type="button">New Tenant Profile</button>
-            <p class="helper-note upload-status" id="assessment-status">
-              The generated report bundle is copied into PostgreSQL and then removed from the server staging folder after ingestion succeeds.
-            </p>
-          </div>
-        </section>
+    <article class="panel">
+      <div id="assessment-detail"></div>
+    </article>
 
-        <section class="overview" id="assessment-overview"></section>
-
-        <section class="page-grid page-grid-assessments">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Tenant profiles</p>
-                <h2>Saved assessment targets</h2>
-              </div>
-            </div>
-            <div id="assessment-profiles"></div>
-          </article>
-
-          <article class="panel">
-            <div id="assessment-detail"></div>
-          </article>
-
-          <article class="panel panel-span-full">
-            <div id="assessment-report"></div>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+    <article class="panel panel-span-full">
+      <div id="assessment-report"></div>
+    </article>
+  </section>
+{% endblock %}

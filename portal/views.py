@@ -25,7 +25,9 @@ from .services import (
     delete_review_checklist_item,
     delete_uploaded_policy,
     get_bootstrap_payload,
+    get_policy_document,
     list_risk_register,
+    list_vendor_responses,
     normalize_control_state,
     normalize_mapping_payload,
     replace_mapping_payload,
@@ -236,7 +238,13 @@ def parse_json_body_or_400(request: HttpRequest) -> tuple[object | None, JsonRes
 @ensure_csrf_cookie
 @require_GET
 def bootstrap_state(request: HttpRequest) -> JsonResponse:
-    return JsonResponse(get_bootstrap_payload(policy_reader=user_is_policy_reader(request.user)))
+    page = str(request.GET.get("page") or "").strip().lower()
+    return JsonResponse(
+        get_bootstrap_payload(
+            policy_reader=user_is_policy_reader(request.user),
+            page=page,
+        )
+    )
 
 
 @api_login_required
@@ -256,9 +264,21 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["DELETE"])
+@policy_reader_api_access(allow_policy_reader=True)
+@require_http_methods(["GET", "DELETE"])
 def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
+    if request.method == "GET":
+        try:
+            document = get_policy_document(document_id)
+        except ValidationError as error:
+            detail = str(error)
+            status_code = 404 if detail == "Policy document was not found." else 400
+            return JsonResponse({"detail": detail}, status=status_code)
+        return JsonResponse({"document": document})
+
+    if user_is_policy_reader(request.user):
+        return policy_reader_forbidden_response()
+
     try:
         deleted_document = delete_uploaded_policy(document_id)
     except ValidationError as error:
@@ -335,8 +355,11 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def upload_vendors(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"responses": list_vendor_responses()})
+
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"detail": "Select at least one vendor response file to import."}, status=400)

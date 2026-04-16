@@ -1,75 +1,53 @@
+{% extends "portal/base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISMS Vendors</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="vendors">
-  <div class="app-shell">
-      {% include "portal/_sidebar.html" with active_page="vendors" search_placeholder="Search imported vendor responses" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
-          <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
-          </div>
+{% block title %}ISMS Vendors{% endblock %}
+{% block body_page %}vendors{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="vendors" search_placeholder="Search imported vendor responses" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Vendors</p>
+      <h1>Vendor due diligence intake</h1>
+      <p class="report-copy">
+        Import vendor due diligence survey responses into the portal workspace, review extracted previews, and stage supplier evidence for follow-up.
+      </p>
+    </div>
+    <div class="report-actions">
+      <input id="vendor-upload-input" type="file" accept=".csv,.json,.txt,.md,.markdown,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
+      <a
+        class="ghost-button"
+        href="{% static 'downloads/vendor_due_diligence_intake_sample.csv' %}"
+        download="vendor_due_diligence_intake_form.csv"
+      >
+        Download Sample Form
+      </a>
+      <button class="ghost-button" id="vendor-upload-trigger" type="button">Import Responses</button>
+      <p class="helper-note upload-status" id="vendor-upload-status">
+        Download the sample CSV, replace the sample answers, and import completed questionnaires or exports into the shared database. Text-based files generate inline previews.
+      </p>
+    </div>
+  </section>
+
+  <section class="overview" id="vendor-overview"></section>
+
+  <section class="page-grid page-grid-vendors">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Import queue</p>
+          <h2>Vendor survey responses</h2>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
-        </div>
-      </header>
+      </div>
+      <div id="vendor-responses"></div>
+    </article>
 
-      <main class="content">
-        <section class="report-header report-header-split">
-          <div>
-            <p class="section-kicker">Vendors</p>
-            <h1>Vendor due diligence intake</h1>
-            <p class="report-copy">
-              Import vendor due diligence survey responses into the portal workspace, review extracted previews, and stage supplier evidence for follow-up.
-            </p>
-          </div>
-          <div class="report-actions">
-            <input id="vendor-upload-input" type="file" accept=".csv,.json,.txt,.md,.markdown,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
-            <a
-              class="ghost-button"
-              href="{% static 'downloads/vendor_due_diligence_intake_sample.csv' %}"
-              download="vendor_due_diligence_intake_form.csv"
-            >
-              Download Sample Form
-            </a>
-            <button class="ghost-button" id="vendor-upload-trigger" type="button">Import Responses</button>
-            <p class="helper-note upload-status" id="vendor-upload-status">
-              Download the sample CSV, replace the sample answers, and import completed questionnaires or exports into the shared database. Text-based files generate inline previews.
-            </p>
-          </div>
-        </section>
-
-        <section class="overview" id="vendor-overview"></section>
-
-        <section class="page-grid page-grid-vendors">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Import queue</p>
-                <h2>Vendor survey responses</h2>
-              </div>
-            </div>
-            <div id="vendor-responses"></div>
-          </article>
-
-          <article class="panel">
-            <div id="vendor-detail"></div>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+    <article class="panel">
+      <div id="vendor-detail"></div>
+    </article>
+  </section>
+{% endblock %}

@@ -1,57 +1,34 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Review Tasks</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="review-tasks">
-  <div class="app-shell">
-      {% include "portal/_sidebar.html" with active_page="reviews" search_placeholder="Search controls or policies" %}
+{% extends "portal/base.html" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
-          <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
-          </div>
+{% block title %}Review Tasks{% endblock %}
+{% block body_page %}review-tasks{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="reviews" search_placeholder="Search controls or policies" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header">
+    <p class="section-kicker">Reviews</p>
+    <h1>All Review Tasks</h1>
+    <p class="report-copy">
+      View every recurring review task stored in the shared checklist and remove tasks that are no longer needed.
+    </p>
+  </section>
+
+  <section class="page-grid">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Checklist database</p>
+          <h2>Manage recurring tasks</h2>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
+        <div class="panel-head-actions">
+          <a class="ghost-button" href="{% url 'portal-reviews' %}">Back to Reviews</a>
         </div>
-      </header>
-
-      <main class="content">
-        <section class="report-header">
-          <p class="section-kicker">Reviews</p>
-          <h1>All Review Tasks</h1>
-          <p class="report-copy">
-            View every recurring review task stored in the shared checklist and remove tasks that are no longer needed.
-          </p>
-        </section>
-
-        <section class="page-grid">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Checklist database</p>
-                <h2>Manage recurring tasks</h2>
-              </div>
-              <div class="panel-head-actions">
-                <a class="ghost-button" href="{% url 'portal-reviews' %}">Back to Reviews</a>
-              </div>
-            </div>
-            <div id="review-tasks-list"></div>
-            <p class="helper-note" id="review-tasks-status"></p>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+      </div>
+      <div id="review-tasks-list"></div>
+      <p class="helper-note" id="review-tasks-status"></p>
+    </article>
+  </section>
+{% endblock %}

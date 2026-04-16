@@ -8,6 +8,7 @@
     selectedControlId: "",
     showAll: false,
   };
+  const policyDocumentLoadPromises = new Map();
 
   function normalizePolicyLibraryTab(value) {
     const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -87,6 +88,92 @@
     }
     uploadedDocuments[index] = normalizedDocument;
     return true;
+  }
+  function updateAnyDocumentEntry(updatedDocument) {
+    if (!updatedDocument || typeof updatedDocument !== "object" || typeof updatedDocument.id !== "string") {
+      return false;
+    }
+
+    const uploadedIndex = uploadedDocuments.findIndex((item) => item.id === updatedDocument.id);
+    if (uploadedIndex >= 0) {
+      const mergedUploadedDocument = {
+        ...uploadedDocuments[uploadedIndex],
+        ...updatedDocument,
+      };
+      const normalizedUploadedDocument = typeof normalizeUploadedPolicyItem === "function"
+        ? normalizeUploadedPolicyItem(mergedUploadedDocument)
+        : mergedUploadedDocument;
+      if (!normalizedUploadedDocument) {
+        return false;
+      }
+      uploadedDocuments[uploadedIndex] = normalizedUploadedDocument;
+      refreshDocumentsIndex();
+      return true;
+    }
+
+    const mappingIndex = data.documents.findIndex((item) => item.id === updatedDocument.id);
+    if (mappingIndex < 0) {
+      return false;
+    }
+    const mergedMappingDocument = {
+      ...data.documents[mappingIndex],
+      ...updatedDocument,
+    };
+    const normalizedMappingDocument = typeof normalizeMappingDocumentItem === "function"
+      ? normalizeMappingDocumentItem(mergedMappingDocument)
+      : mergedMappingDocument;
+    if (!normalizedMappingDocument) {
+      return false;
+    }
+    data.documents[mappingIndex] = normalizedMappingDocument;
+    refreshDocumentsIndex();
+    return true;
+  }
+  async function fetchPolicyDocumentFromApi(documentId) {
+    return apiRequest(`/policies/${encodeURIComponent(documentId)}/`);
+  }
+  async function ensurePolicyDocumentContentLoaded(documentId) {
+    const normalizedDocumentId = typeof documentId === "string" ? documentId.trim() : "";
+    if (!normalizedDocumentId) {
+      return;
+    }
+    const currentDocument = documentsById.get(normalizedDocumentId);
+    if (!currentDocument || currentDocument.contentLoaded || currentDocument.contentAvailable === false) {
+      return;
+    }
+    if (policyDocumentLoadPromises.has(normalizedDocumentId)) {
+      await policyDocumentLoadPromises.get(normalizedDocumentId);
+      return;
+    }
+
+    const request = (async () => {
+      try {
+        const payload = await fetchPolicyDocumentFromApi(normalizedDocumentId);
+        const nextDocument = payload && payload.document && typeof payload.document === "object"
+          ? payload.document
+          : null;
+        if (!nextDocument || !updateAnyDocumentEntry(nextDocument)) {
+          throw new Error("Policy document response was invalid.");
+        }
+      } catch (error) {
+        const fallbackDocument = {
+          id: normalizedDocumentId,
+          contentHtml: '<div class="empty-state">Unable to load policy content at the moment.</div>',
+          contentLoaded: true,
+          contentAvailable: false,
+        };
+        updateAnyDocumentEntry(fallbackDocument);
+        setPolicyUploadStatus(error instanceof Error ? error.message : "Unable to load policy content.", "error");
+      } finally {
+        policyDocumentLoadPromises.delete(normalizedDocumentId);
+        if (state.activeDocumentId === normalizedDocumentId) {
+          renderPoliciesPage();
+        }
+      }
+    })();
+
+    policyDocumentLoadPromises.set(normalizedDocumentId, request);
+    await request;
   }
   async function updatePolicyApproverViaApi(documentId, approver) {
     return apiRequest(`/policies/${encodeURIComponent(documentId)}/approver/`, {
@@ -759,6 +846,21 @@
     const documentActions = documentItem.isUploaded && !isPolicyReader
       ? `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
       : "";
+    const shouldLoadDocumentContent = !documentItem.contentLoaded && documentItem.contentAvailable !== false;
+    if (shouldLoadDocumentContent) {
+      void ensurePolicyDocumentContentLoaded(documentItem.id);
+    }
+    const contentMarkup = documentItem.contentLoaded
+      ? (
+          documentItem.contentHtml
+            ? documentItem.contentHtml
+            : '<div class="empty-state">No embedded content is available for this policy document.</div>'
+        )
+      : (
+          documentItem.contentAvailable === false
+            ? '<div class="empty-state">No embedded content is available for this policy document.</div>'
+            : '<div class="empty-state">Loading policy content...</div>'
+        );
     const approverFieldMarkup = renderPolicyApproverField(documentItem);
     const controlMappingEditor = isPolicyReader
       ? '<p class="helper-note">Policy Reader access is view-only. Control mappings cannot be edited.</p>'
@@ -813,7 +915,7 @@
         </div>
         ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}
       </div>
-      <div class="content-frame">${documentItem.contentHtml}</div>
+      <div class="content-frame">${contentMarkup}</div>
     `;
     renderPolicyControlOptions();
   }

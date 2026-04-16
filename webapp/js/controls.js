@@ -204,7 +204,7 @@
           <div class="quick-add-row" data-control-policy-mapper="${escapeHtml(control.id)}">
             <label class="form-field" for="control-policy-picker-input">
               <span>Policy document</span>
-              <div class="recommendation-picker" data-control-policy-picker>
+              <div class="recommendation-picker">
                 <input
                   id="control-policy-picker-input"
                   type="search"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -65,8 +66,15 @@ def resolve_database() -> dict[str, object]:
     return options
 
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "unsafe-local-dev-secret-key")
-DEBUG = env_bool("DJANGO_DEBUG", default=True)
+DEBUG = env_bool("DJANGO_DEBUG", default=False)
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = secrets.token_urlsafe(50)
+    else:
+        raise RuntimeError(
+            "DJANGO_SECRET_KEY is required when DJANGO_DEBUG is disabled."
+        )
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:8000")
 SOCIAL_AUTH_SSO_BACKEND_PATH = os.environ.get(

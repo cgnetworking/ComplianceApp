@@ -1,244 +1,221 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISMS Risk Register</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="risks">
-  <div class="app-shell">
-      {% include "portal/_sidebar.html" with active_page="risks" search_placeholder="Search risks or owners" %}
+{% extends "portal/base.html" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
+{% block title %}ISMS Risk Register{% endblock %}
+{% block body_page %}risks{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="risks" search_placeholder="Search risks or owners" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header">
+    <p class="section-kicker">Risk Register</p>
+    <h1>Business risk register</h1>
+    <p class="report-copy">
+      Track business risks in one place, assign owners, and score each entry by probability and impact.
+    </p>
+    <div class="filter-bar">
+      <label class="pill-select">
+        <span>Assignee</span>
+        <select id="risk-assignee-filter" aria-label="Filter risks by assigned user"></select>
+      </label>
+      <label class="pill-select">
+        <span>Status</span>
+        <select id="risk-status-filter" aria-label="Filter risks by status"></select>
+      </label>
+      <label class="pill-select">
+        <span>Risk Level</span>
+        <select id="risk-level-filter" aria-label="Filter risks by matrix level"></select>
+      </label>
+    </div>
+  </section>
+
+  <section class="overview" id="overview"></section>
+
+  <section class="page-grid page-grid-risks">
+    <article class="panel">
+      <div class="panel-head panel-head-actions">
+        <div>
+          <p class="panel-kicker">Risk log</p>
+          <h2>Tracked business risks</h2>
+        </div>
+        <button class="ghost-button" id="add-risk-trigger" type="button">Add New Risk</button>
+      </div>
+      <div id="risk-list"></div>
+    </article>
+
+    <article class="panel">
+      <form class="risk-form" id="risk-form">
+        <div class="panel-head">
           <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
+            <p class="panel-kicker" id="risk-form-kicker">New risk</p>
+            <h2 id="risk-form-title">Capture a new risk</h2>
           </div>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
+
+        <p class="helper-note risk-form-copy" id="risk-form-copy">
+          Risk entries are stored in the shared database.
+        </p>
+
+        <label class="form-field" for="risk-name">
+          <span>Risk</span>
+          <textarea id="risk-name" name="risk" rows="5" placeholder="Describe the business risk." required></textarea>
+        </label>
+
+        <div class="risk-factor-grid">
+          <fieldset class="risk-level-field">
+            <legend>Probability (1-5)</legend>
+            <div class="risk-level-grid">
+              <label class="risk-level-option level-1">
+                <input type="radio" name="risk-probability" value="1">
+                <span>1</span>
+              </label>
+              <label class="risk-level-option level-2">
+                <input type="radio" name="risk-probability" value="2">
+                <span>2</span>
+              </label>
+              <label class="risk-level-option level-3">
+                <input type="radio" name="risk-probability" value="3" checked>
+                <span>3</span>
+              </label>
+              <label class="risk-level-option level-4">
+                <input type="radio" name="risk-probability" value="4">
+                <span>4</span>
+              </label>
+              <label class="risk-level-option level-5">
+                <input type="radio" name="risk-probability" value="5">
+                <span>5</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="risk-level-field">
+            <legend>Impact (1-5)</legend>
+            <div class="risk-level-grid">
+              <label class="risk-level-option level-1">
+                <input type="radio" name="risk-impact" value="1">
+                <span>1</span>
+              </label>
+              <label class="risk-level-option level-2">
+                <input type="radio" name="risk-impact" value="2">
+                <span>2</span>
+              </label>
+              <label class="risk-level-option level-3">
+                <input type="radio" name="risk-impact" value="3" checked>
+                <span>3</span>
+              </label>
+              <label class="risk-level-option level-4">
+                <input type="radio" name="risk-impact" value="4">
+                <span>4</span>
+              </label>
+              <label class="risk-level-option level-5">
+                <input type="radio" name="risk-impact" value="5">
+                <span>5</span>
+              </label>
+            </div>
+          </fieldset>
         </div>
-      </header>
 
-      <main class="content">
-        <section class="report-header">
-          <p class="section-kicker">Risk Register</p>
-          <h1>Business risk register</h1>
-          <p class="report-copy">
-            Track business risks in one place, assign owners, and score each entry by probability and impact.
-          </p>
-          <div class="filter-bar">
-            <label class="pill-select">
-              <span>Assignee</span>
-              <select id="risk-assignee-filter" aria-label="Filter risks by assigned user"></select>
-            </label>
-            <label class="pill-select">
-              <span>Status</span>
-              <select id="risk-status-filter" aria-label="Filter risks by status"></select>
-            </label>
-            <label class="pill-select">
-              <span>Risk Level</span>
-              <select id="risk-level-filter" aria-label="Filter risks by matrix level"></select>
-            </label>
+        <p class="helper-note">Score is calculated as <strong>probability x impact</strong> (1-25).</p>
+
+        <div class="form-grid">
+          <label class="form-field" for="risk-date">
+            <span>Date</span>
+            <input id="risk-date" name="risk-date" type="date" required>
+          </label>
+
+          <label class="form-field" for="risk-owner">
+            <span>Risk Owner</span>
+            <select id="risk-owner" name="risk-owner" required></select>
+          </label>
+        </div>
+
+        <label class="form-field" for="risk-closed-date">
+          <span>Risk Closed Date</span>
+          <input id="risk-closed-date" name="risk-closed-date" type="date">
+        </label>
+
+        <div class="form-actions">
+          <button class="ghost-button primary-button" id="risk-submit-button" type="submit">Save Risk</button>
+        </div>
+
+        <p class="helper-note risk-form-status" id="risk-form-status">Risk entries sync with the portal when the backend is available.</p>
+      </form>
+    </article>
+
+    <article class="panel risk-matrix-panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Risk matrix</p>
+          <h2>5x5 probability and impact matrix</h2>
+        </div>
+      </div>
+      <p class="helper-note risk-matrix-copy">
+        Use this matrix to align probability and impact scores (1-5) and keep risk ratings consistent.
+      </p>
+
+      <div class="risk-matrix-frame">
+        <p class="risk-matrix-axis risk-matrix-axis-impact">Impact (1-5)</p>
+        <div class="risk-matrix-layout">
+          <p class="risk-matrix-axis risk-matrix-axis-probability">Probability (1-5)</p>
+          <div class="risk-matrix-scroll">
+            <table class="risk-matrix-table">
+              <thead>
+                <tr>
+                  <th class="risk-matrix-corner" scope="col">Probability \ Impact</th>
+                  <th scope="col">1 Insignificant</th>
+                  <th scope="col">2 Minor</th>
+                  <th scope="col">3 Significant</th>
+                  <th scope="col">4 Major</th>
+                  <th scope="col">5 Severe</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">5 Almost Certain</th>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>5</strong></td>
+                  <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>10</strong></td>
+                  <td class="risk-matrix-cell risk-band-very-high"><span>Very high</span><strong>15</strong></td>
+                  <td class="risk-matrix-cell risk-band-extreme"><span>Extreme</span><strong>20</strong></td>
+                  <td class="risk-matrix-cell risk-band-extreme"><span>Extreme</span><strong>25</strong></td>
+                </tr>
+                <tr>
+                  <th scope="row">4 Likely</th>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>4</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>8</strong></td>
+                  <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>12</strong></td>
+                  <td class="risk-matrix-cell risk-band-very-high"><span>Very high</span><strong>16</strong></td>
+                  <td class="risk-matrix-cell risk-band-extreme"><span>Extreme</span><strong>20</strong></td>
+                </tr>
+                <tr>
+                  <th scope="row">3 Moderate</th>
+                  <td class="risk-matrix-cell risk-band-low"><span>Low</span><strong>3</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>6</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>9</strong></td>
+                  <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>12</strong></td>
+                  <td class="risk-matrix-cell risk-band-very-high"><span>Very high</span><strong>15</strong></td>
+                </tr>
+                <tr>
+                  <th scope="row">2 Unlikely</th>
+                  <td class="risk-matrix-cell risk-band-very-low"><span>Very low</span><strong>2</strong></td>
+                  <td class="risk-matrix-cell risk-band-low"><span>Low</span><strong>4</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>6</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>8</strong></td>
+                  <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>10</strong></td>
+                </tr>
+                <tr>
+                  <th scope="row">1 Rare</th>
+                  <td class="risk-matrix-cell risk-band-very-low"><span>Very low</span><strong>1</strong></td>
+                  <td class="risk-matrix-cell risk-band-very-low"><span>Very low</span><strong>2</strong></td>
+                  <td class="risk-matrix-cell risk-band-low"><span>Low</span><strong>3</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>4</strong></td>
+                  <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>5</strong></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        </section>
-
-        <section class="overview" id="overview"></section>
-
-        <section class="page-grid page-grid-risks">
-          <article class="panel">
-            <div class="panel-head panel-head-actions">
-              <div>
-                <p class="panel-kicker">Risk log</p>
-                <h2>Tracked business risks</h2>
-              </div>
-              <button class="ghost-button" id="add-risk-trigger" type="button">Add New Risk</button>
-            </div>
-            <div id="risk-list"></div>
-          </article>
-
-          <article class="panel">
-            <form class="risk-form" id="risk-form">
-              <div class="panel-head">
-                <div>
-                  <p class="panel-kicker" id="risk-form-kicker">New risk</p>
-                  <h2 id="risk-form-title">Capture a new risk</h2>
-                </div>
-              </div>
-
-              <p class="helper-note risk-form-copy" id="risk-form-copy">
-                Risk entries are stored in the shared database.
-              </p>
-
-              <label class="form-field" for="risk-name">
-                <span>Risk</span>
-                <textarea id="risk-name" name="risk" rows="5" placeholder="Describe the business risk." required></textarea>
-              </label>
-
-              <div class="risk-factor-grid">
-                <fieldset class="risk-level-field">
-                  <legend>Probability (1-5)</legend>
-                  <div class="risk-level-grid">
-                    <label class="risk-level-option level-1">
-                      <input type="radio" name="risk-probability" value="1">
-                      <span>1</span>
-                    </label>
-                    <label class="risk-level-option level-2">
-                      <input type="radio" name="risk-probability" value="2">
-                      <span>2</span>
-                    </label>
-                    <label class="risk-level-option level-3">
-                      <input type="radio" name="risk-probability" value="3" checked>
-                      <span>3</span>
-                    </label>
-                    <label class="risk-level-option level-4">
-                      <input type="radio" name="risk-probability" value="4">
-                      <span>4</span>
-                    </label>
-                    <label class="risk-level-option level-5">
-                      <input type="radio" name="risk-probability" value="5">
-                      <span>5</span>
-                    </label>
-                  </div>
-                </fieldset>
-
-                <fieldset class="risk-level-field">
-                  <legend>Impact (1-5)</legend>
-                  <div class="risk-level-grid">
-                    <label class="risk-level-option level-1">
-                      <input type="radio" name="risk-impact" value="1">
-                      <span>1</span>
-                    </label>
-                    <label class="risk-level-option level-2">
-                      <input type="radio" name="risk-impact" value="2">
-                      <span>2</span>
-                    </label>
-                    <label class="risk-level-option level-3">
-                      <input type="radio" name="risk-impact" value="3" checked>
-                      <span>3</span>
-                    </label>
-                    <label class="risk-level-option level-4">
-                      <input type="radio" name="risk-impact" value="4">
-                      <span>4</span>
-                    </label>
-                    <label class="risk-level-option level-5">
-                      <input type="radio" name="risk-impact" value="5">
-                      <span>5</span>
-                    </label>
-                  </div>
-                </fieldset>
-              </div>
-
-              <p class="helper-note">Score is calculated as <strong>probability x impact</strong> (1-25).</p>
-
-              <div class="form-grid">
-                <label class="form-field" for="risk-date">
-                  <span>Date</span>
-                  <input id="risk-date" name="risk-date" type="date" required>
-                </label>
-
-                <label class="form-field" for="risk-owner">
-                  <span>Risk Owner</span>
-                  <select id="risk-owner" name="risk-owner" required></select>
-                </label>
-              </div>
-
-              <label class="form-field" for="risk-closed-date">
-                <span>Risk Closed Date</span>
-                <input id="risk-closed-date" name="risk-closed-date" type="date">
-              </label>
-
-              <div class="form-actions">
-                <button class="ghost-button primary-button" id="risk-submit-button" type="submit">Save Risk</button>
-              </div>
-
-              <p class="helper-note risk-form-status" id="risk-form-status">Risk entries sync with the portal when the backend is available.</p>
-            </form>
-          </article>
-
-          <article class="panel risk-matrix-panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Risk matrix</p>
-                <h2>5x5 probability and impact matrix</h2>
-              </div>
-            </div>
-            <p class="helper-note risk-matrix-copy">
-              Use this matrix to align probability and impact scores (1-5) and keep risk ratings consistent.
-            </p>
-
-            <div class="risk-matrix-frame">
-              <p class="risk-matrix-axis risk-matrix-axis-impact">Impact (1-5)</p>
-              <div class="risk-matrix-layout">
-                <p class="risk-matrix-axis risk-matrix-axis-probability">Probability (1-5)</p>
-                <div class="risk-matrix-scroll">
-                  <table class="risk-matrix-table">
-                    <thead>
-                      <tr>
-                        <th class="risk-matrix-corner" scope="col">Probability \ Impact</th>
-                        <th scope="col">1 Insignificant</th>
-                        <th scope="col">2 Minor</th>
-                        <th scope="col">3 Significant</th>
-                        <th scope="col">4 Major</th>
-                        <th scope="col">5 Severe</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <th scope="row">5 Almost Certain</th>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>5</strong></td>
-                        <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>10</strong></td>
-                        <td class="risk-matrix-cell risk-band-very-high"><span>Very high</span><strong>15</strong></td>
-                        <td class="risk-matrix-cell risk-band-extreme"><span>Extreme</span><strong>20</strong></td>
-                        <td class="risk-matrix-cell risk-band-extreme"><span>Extreme</span><strong>25</strong></td>
-                      </tr>
-                      <tr>
-                        <th scope="row">4 Likely</th>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>4</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>8</strong></td>
-                        <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>12</strong></td>
-                        <td class="risk-matrix-cell risk-band-very-high"><span>Very high</span><strong>16</strong></td>
-                        <td class="risk-matrix-cell risk-band-extreme"><span>Extreme</span><strong>20</strong></td>
-                      </tr>
-                      <tr>
-                        <th scope="row">3 Moderate</th>
-                        <td class="risk-matrix-cell risk-band-low"><span>Low</span><strong>3</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>6</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>9</strong></td>
-                        <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>12</strong></td>
-                        <td class="risk-matrix-cell risk-band-very-high"><span>Very high</span><strong>15</strong></td>
-                      </tr>
-                      <tr>
-                        <th scope="row">2 Unlikely</th>
-                        <td class="risk-matrix-cell risk-band-very-low"><span>Very low</span><strong>2</strong></td>
-                        <td class="risk-matrix-cell risk-band-low"><span>Low</span><strong>4</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>6</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>8</strong></td>
-                        <td class="risk-matrix-cell risk-band-high"><span>High</span><strong>10</strong></td>
-                      </tr>
-                      <tr>
-                        <th scope="row">1 Rare</th>
-                        <td class="risk-matrix-cell risk-band-very-low"><span>Very low</span><strong>1</strong></td>
-                        <td class="risk-matrix-cell risk-band-very-low"><span>Very low</span><strong>2</strong></td>
-                        <td class="risk-matrix-cell risk-band-low"><span>Low</span><strong>3</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>4</strong></td>
-                        <td class="risk-matrix-cell risk-band-medium"><span>Medium</span><strong>5</strong></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+        </div>
+      </div>
+    </article>
+  </section>
+{% endblock %}

@@ -131,6 +131,22 @@ RISK_RECORD_MODEL_FIELDS = (
     "created_at",
     "updated_at",
 )
+BOOTSTRAP_PAGES = frozenset(
+    {
+        "home",
+        "controls",
+        "reports",
+        "reviews",
+        "review-tasks",
+        "audit-log",
+        "policies",
+        "risks",
+        "vendors",
+        "assessments",
+    }
+)
+BOOTSTRAP_PAGES_WITH_REVIEW_STATE = frozenset({"home", "reviews", "review-tasks", "audit-log"})
+BOOTSTRAP_PAGES_WITH_CONTROL_STATE = frozenset({"home", "controls", "reports", "policies"})
 
 
 class ValidationError(Exception):
@@ -726,6 +742,68 @@ def list_assignable_users() -> list[dict[str, str]]:
     return assignable_users
 
 
+def normalize_bootstrap_page(value: object) -> str:
+    normalized = normalize_string(value).lower()
+    return normalized if normalized in BOOTSTRAP_PAGES else ""
+
+
+def serialize_policy_document_payload(
+    document: dict[str, object],
+    *,
+    include_content: bool,
+) -> dict[str, object]:
+    payload = dict(document) if isinstance(document, dict) else {}
+    content_html = normalize_string(payload.get("contentHtml"))
+    payload["contentAvailable"] = bool(content_html)
+    payload["contentLoaded"] = include_content
+    payload["contentHtml"] = content_html if include_content else ""
+    return payload
+
+
+def get_mapping_bootstrap_payload(*, include_document_content: bool) -> dict[str, object]:
+    mapping_payload = get_mapping_payload()
+    mapping_documents = [
+        serialize_policy_document_payload(item, include_content=include_document_content)
+        for item in mapping_payload.get("documents", [])
+        if isinstance(item, dict)
+    ]
+    next_payload = dict(mapping_payload)
+    next_payload["documents"] = mapping_documents
+    return next_payload
+
+
+def list_uploaded_documents(*, include_content: bool) -> list[dict[str, object]]:
+    return [
+        serialize_policy_document_payload(item.to_portal_dict(), include_content=include_content)
+        for item in UploadedPolicy.objects.all()
+    ]
+
+
+def get_policy_document(document_id: str, *, include_content: bool = True) -> dict[str, object]:
+    normalized_id = normalize_string(document_id)
+    if not normalized_id:
+        raise ValidationError("Policy id is required.")
+
+    try:
+        uploaded = UploadedPolicy.objects.get(document_id=normalized_id)
+    except UploadedPolicy.DoesNotExist:
+        uploaded = None
+
+    if uploaded is not None:
+        return serialize_policy_document_payload(uploaded.to_portal_dict(), include_content=include_content)
+
+    mapping_payload = get_mapping_payload()
+    mapping_documents = mapping_payload.get("documents")
+    if isinstance(mapping_documents, list):
+        for item in mapping_documents:
+            if not isinstance(item, dict):
+                continue
+            if normalize_string(item.get("id")) == normalized_id:
+                return serialize_policy_document_payload(item, include_content=include_content)
+
+    raise ValidationError("Policy document was not found.")
+
+
 def resolve_assignable_username(identifier: str) -> str:
     normalized_identifier = normalize_string(identifier)
     if not normalized_identifier:
@@ -894,27 +972,31 @@ def delete_review_checklist_item(external_id: str) -> dict[str, str]:
     return deleted_item
 
 
-def get_bootstrap_payload(*, policy_reader: bool = False) -> dict[str, object]:
+def get_bootstrap_payload(*, policy_reader: bool = False, page: str = "") -> dict[str, object]:
+    normalized_page = normalize_bootstrap_page(page)
+    include_all_sections = normalized_page == ""
+    include_document_content = include_all_sections
+
     payload: dict[str, object] = {
         "persistenceMode": "api",
-        "mapping": get_mapping_payload(),
-        "uploadedDocuments": [item.to_portal_dict() for item in UploadedPolicy.objects.all()],
+        "mapping": get_mapping_bootstrap_payload(include_document_content=include_document_content),
+        "uploadedDocuments": list_uploaded_documents(include_content=include_document_content),
     }
 
     if policy_reader:
         return payload
 
-    payload.update(
-        {
-            "checklistItems": list_review_checklist_items(),
-            "recommendedChecklistItems": list_review_checklist_recommendations(),
-            "vendorSurveyResponses": [item.to_portal_dict() for item in VendorResponse.objects.all()],
-            "riskRegister": [item.to_portal_dict() for item in RiskRecord.objects.all()],
-            "assignableUsers": list_assignable_users(),
-            "reviewState": normalize_review_state(get_state_payload("review_state", {})),
-            "controlState": normalize_control_state(get_state_payload("control_state", {})),
-        }
-    )
+    payload["assignableUsers"] = list_assignable_users()
+    if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_REVIEW_STATE:
+        payload["checklistItems"] = list_review_checklist_items()
+        payload["recommendedChecklistItems"] = list_review_checklist_recommendations()
+        payload["reviewState"] = normalize_review_state(get_state_payload("review_state", {}))
+    if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
+        payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
+    if include_all_sections:
+        payload["vendorSurveyResponses"] = list_vendor_responses()
+    if include_all_sections or normalized_page == "risks":
+        payload["riskRegister"] = list_risk_register()
     return payload
 
 
@@ -1076,6 +1158,10 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
         created_items.append(response)
 
     return [item.to_portal_dict() for item in created_items]
+
+
+def list_vendor_responses() -> list[dict[str, object]]:
+    return [item.to_portal_dict() for item in VendorResponse.objects.all()]
 
 
 def list_risk_register() -> list[dict[str, object]]:

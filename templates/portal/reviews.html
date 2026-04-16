@@ -1,122 +1,99 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISMS Reviews</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="reviews">
-  <div class="app-shell">
-      {% include "portal/_sidebar.html" with active_page="reviews" search_placeholder="Search and jump to controls" %}
+{% extends "portal/base.html" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
-          <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
-          </div>
+{% block title %}ISMS Reviews{% endblock %}
+{% block body_page %}reviews{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="reviews" search_placeholder="Search and jump to controls" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header">
+    <p class="section-kicker">Reviews</p>
+    <h1>Review tracker</h1>
+    <p class="report-copy">
+      Work through the annual review schedule and recurring review checklist from a dedicated page. Review checklist tasks, monthly program items, and completion state are stored in the shared database.
+    </p>
+  </section>
+
+  <section class="overview" id="overview"></section>
+
+  <section class="page-grid page-grid-reviews">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Review queue</p>
+          <h2>Monthly review program</h2>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
+      </div>
+      <div class="month-tabs" id="month-tabs"></div>
+      <div id="activities"></div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Recurring checks</p>
+          <h2>Create Recurring Review</h2>
         </div>
-      </header>
-
-      <main class="content">
-        <section class="report-header">
-          <p class="section-kicker">Reviews</p>
-          <h1>Review tracker</h1>
-          <p class="report-copy">
-            Work through the annual review schedule and recurring review checklist from a dedicated page. Review checklist tasks, monthly program items, and completion state are stored in the shared database.
-          </p>
-        </section>
-
-        <section class="overview" id="overview"></section>
-
-        <section class="page-grid page-grid-reviews">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Review queue</p>
-                <h2>Monthly review program</h2>
-              </div>
+        <div class="panel-head-actions">
+          <a class="ghost-button" href="{% url 'portal-review-tasks' %}">Manage All Tasks</a>
+          <button class="ghost-button" type="button" id="checklist-add-trigger">Add Checklist Item</button>
+        </div>
+      </div>
+      <div class="mini-stats" id="checklist-summary"></div>
+      <form class="risk-form" id="checklist-add-form" hidden>
+        <div class="quick-add-row">
+          <label class="form-field" for="checklist-recommendation-select">
+            <span>Recommended task</span>
+            <div class="recommendation-picker" id="checklist-recommendation-picker">
+              <input
+                id="checklist-recommendation-select"
+                type="search"
+                placeholder="Search recommended tasks"
+                autocomplete="off"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="checklist-recommendation-list"
+              >
+              <div class="recommendation-picker-list" id="checklist-recommendation-list" role="listbox" hidden></div>
             </div>
-            <div class="month-tabs" id="month-tabs"></div>
-            <div id="activities"></div>
-          </article>
+          </label>
+          <button class="ghost-button" type="button" id="checklist-recommendation-add">Quick add selected task</button>
+        </div>
 
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Recurring checks</p>
-                <h2>Create Recurring Review</h2>
-              </div>
-              <div class="panel-head-actions">
-                <a class="ghost-button" href="{% url 'portal-review-tasks' %}">Manage All Tasks</a>
-                <button class="ghost-button" type="button" id="checklist-add-trigger">Add Checklist Item</button>
-              </div>
-            </div>
-            <div class="mini-stats" id="checklist-summary"></div>
-            <form class="risk-form" id="checklist-add-form" hidden>
-              <div class="quick-add-row">
-                <label class="form-field" for="checklist-recommendation-select">
-                  <span>Recommended task</span>
-                  <div class="recommendation-picker" id="checklist-recommendation-picker">
-                    <input
-                      id="checklist-recommendation-select"
-                      type="search"
-                      placeholder="Search recommended tasks"
-                      autocomplete="off"
-                      aria-haspopup="listbox"
-                      aria-expanded="false"
-                      aria-controls="checklist-recommendation-list"
-                    >
-                    <div class="recommendation-picker-list" id="checklist-recommendation-list" role="listbox" hidden></div>
-                  </div>
-                </label>
-                <button class="ghost-button" type="button" id="checklist-recommendation-add">Quick add selected task</button>
-              </div>
+        <div class="form-grid">
+          <label class="form-field" for="checklist-add-category">
+            <span>Category</span>
+            <select id="checklist-add-category" required></select>
+          </label>
+          <label class="form-field" for="checklist-add-frequency">
+            <span>Frequency</span>
+            <select id="checklist-add-frequency" required></select>
+          </label>
+          <label class="form-field" for="checklist-add-start-date">
+            <span>Anchor date (optional)</span>
+            <input id="checklist-add-start-date" type="date">
+          </label>
+        </div>
 
-              <div class="form-grid">
-                <label class="form-field" for="checklist-add-category">
-                  <span>Category</span>
-                  <select id="checklist-add-category" required></select>
-                </label>
-                <label class="form-field" for="checklist-add-frequency">
-                  <span>Frequency</span>
-                  <select id="checklist-add-frequency" required></select>
-                </label>
-                <label class="form-field" for="checklist-add-start-date">
-                  <span>Anchor date (optional)</span>
-                  <input id="checklist-add-start-date" type="date">
-                </label>
-              </div>
+        <label class="form-field" for="checklist-add-item">
+          <span>Checklist item</span>
+          <textarea id="checklist-add-item" placeholder="Describe the review check to perform." required></textarea>
+        </label>
 
-              <label class="form-field" for="checklist-add-item">
-                <span>Checklist item</span>
-                <textarea id="checklist-add-item" placeholder="Describe the review check to perform." required></textarea>
-              </label>
+        <label class="form-field" for="checklist-add-owner">
+          <span>Owner</span>
+          <select id="checklist-add-owner" required></select>
+        </label>
 
-              <label class="form-field" for="checklist-add-owner">
-                <span>Owner</span>
-                <select id="checklist-add-owner" required></select>
-              </label>
-
-              <div class="form-actions">
-                <button class="ghost-button primary-button" type="submit">Save checklist item</button>
-                <button class="ghost-button" type="button" id="checklist-add-cancel">Cancel</button>
-              </div>
-              <p class="helper-note" id="checklist-add-status"></p>
-            </form>
-            <div id="checklist"></div>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+        <div class="form-actions">
+          <button class="ghost-button primary-button" type="submit">Save checklist item</button>
+          <button class="ghost-button" type="button" id="checklist-add-cancel">Cancel</button>
+        </div>
+        <p class="helper-note" id="checklist-add-status"></p>
+      </form>
+      <div id="checklist"></div>
+    </article>
+  </section>
+{% endblock %}
