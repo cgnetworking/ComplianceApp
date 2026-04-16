@@ -1,10 +1,33 @@
 from django.urls import path
 
-from . import views
+from . import assessment_views, views
 
 
 urlpatterns = [
     path("state/", views.bootstrap_state, name="api-state"),
+    path("assessments/", assessment_views.assessments_collection, name="api-assessments"),
+    path("assessments/<str:profile_id>/", assessment_views.assessment_profile_detail, name="api-assessment-profile"),
+    path(
+        "assessments/<str:profile_id>/certificate/",
+        assessment_views.assessment_profile_certificate,
+        name="api-assessment-profile-certificate",
+    ),
+    path(
+        "assessments/<str:profile_id>/certificate.cer",
+        assessment_views.assessment_profile_certificate_download,
+        name="api-assessment-profile-certificate-download",
+    ),
+    path(
+        "assessments/<str:profile_id>/runs/",
+        assessment_views.assessment_profile_runs,
+        name="api-assessment-profile-runs",
+    ),
+    path("assessments/runs/<str:run_id>/", assessment_views.assessment_run_detail, name="api-assessment-run"),
+    path(
+        "assessments/runs/<str:run_id>/logs/",
+        assessment_views.assessment_run_logs,
+        name="api-assessment-run-logs",
+    ),
     path("mapping/uploads/", views.upload_mapping, name="api-mapping-uploads"),
     path("policies/uploads/", views.upload_policies, name="api-policy-uploads"),
     path("policies/<str:document_id>/", views.policy_document, name="api-policy-document"),

@@ -10,6 +10,7 @@ This repo includes a Django backend that persists portal uploads and workspace s
 - Risk register entries
 - Review checklist progress
 - Local control exclusion state
+- Zero Trust assessment tenant profiles, run history, logs, and report bundles
 
 ## Initial data load
 
@@ -51,7 +52,7 @@ The default settings also enable per-backend domain and email allowlists, requir
 1. Run `./scripts/local_setup.sh` from the repository root.
 2. Run `python manage.py createsuperuser` if you want Django admin access.
 
-The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, renders and installs NGINX site config, creates a dedicated non-login system runtime user for Gunicorn (default: `complianceapp`), stages a root-owned runtime bundle under `/opt/complianceapp` (app code and venv by default), creates/enables/starts Gunicorn systemd service units, validates app readiness, and starts/enables NGINX when config validation passes.
+The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, renders and installs NGINX site config, creates a dedicated non-login system runtime user for Gunicorn (default: `complianceapp`), stages a root-owned runtime bundle under `/opt/complianceapp` (app code and venv by default), creates/enables/starts Gunicorn systemd service units, creates the Zero Trust assessment worker service and writable assessment storage roots, validates app readiness, and starts/enables NGINX when config validation passes.
 
 During setup, the script asks a yes/no question about generating a local self-signed TLS cert. If you answer yes, it creates the cert at the exact `ssl_certificate` and `ssl_certificate_key` paths rendered into `deploy/nginx/complianceapp.conf`.
 
@@ -72,7 +73,44 @@ Useful local setup overrides:
 - `LOCAL_SETUP_GUNICORN_APP_ROOT` (default: `/opt/complianceapp`)
 - `LOCAL_SETUP_GUNICORN_SERVICE_NAME`
 - `LOCAL_SETUP_GUNICORN_SERVICE_NAMES` (comma-separated)
+- `LOCAL_SETUP_ASSESSMENT_STORAGE_ROOT` (default: `/var/lib/<gunicorn-user>/assessments`)
+- `LOCAL_SETUP_ASSESSMENT_CERTIFICATE_ROOT`
+- `LOCAL_SETUP_ASSESSMENT_STAGING_ROOT`
+- `LOCAL_SETUP_ASSESSMENT_WORKER_SERVICE_NAME`
 - `LOCAL_SETUP_HEALTHCHECK_URL`
+
+## Zero Trust assessment prerequisites
+
+The assessment feature is Ubuntu 24.04-only and assumes:
+
+- PowerShell 7 (`pwsh`) is installed on the server
+- The runtime venv includes the Python dependency `cryptography`
+- The worker service can install or import the `ZeroTrustAssessment` PowerShell module for the runtime user
+
+`scripts/local_setup.sh` now installs PowerShell 7 automatically on Ubuntu 24.04 using Microsoft's preferred package-repository method from the official install guide, then bootstraps the `ZeroTrustAssessment` PowerShell module for the runtime user during setup. If you are deploying manually instead of using the setup script, perform those steps yourself before starting the worker.
+
+The worker stores private assessment certificate material on disk and stores generated report bundles in PostgreSQL after ingestion. The staging export directory is transient and is removed after the report is copied into the database.
+
+The setup script writes these environment variables into the managed runtime env file so the worker uses writable storage outside the root-owned app bundle:
+
+- `ASSESSMENT_STORAGE_ROOT`
+- `ASSESSMENT_CERTIFICATE_ROOT`
+- `ASSESSMENT_STAGING_ROOT`
+
+Default production layout from `scripts/local_setup.sh`:
+
+- Assessment storage root: `/var/lib/complianceapp/assessments`
+- Certificate bundles: `/var/lib/complianceapp/assessments/certificates`
+- Transient staging exports: `/var/lib/complianceapp/assessments/staging`
+- Worker service: `complianceapp-assessment-worker.service` unless overridden
+
+Operational flow:
+
+1. Save `TenantId` and `ClientId` on the Assessments page.
+2. Generate a certificate from the portal.
+3. Download the generated `.cer` and upload it to the target Entra app registration as a certificate credential.
+4. Run the assessment from the portal.
+5. The worker copies the generated report bundle into PostgreSQL and removes the staged filesystem copy.
 
 The portal pages will be available at:
 
@@ -121,8 +159,11 @@ Example manual reload on Ubuntu:
 - `gunicorn portal_backend.wsgi:application` is the production entrypoint.
 - `scripts/local_setup.sh` runs Gunicorn as a dedicated locked system user with a non-login shell (default user: `complianceapp`).
 - `scripts/local_setup.sh` points Gunicorn at a root-owned runtime app tree (default `/opt/complianceapp/app`) and runtime venv (default `/opt/complianceapp/venv`).
+- `python manage.py run_assessment_worker` is the Zero Trust assessment worker entrypoint.
+- The example worker unit template lives at [deploy/systemd/portal-assessment-worker.service](/Users/coreygeorge/Documents/ISO27001/deploy/systemd/portal-assessment-worker.service). Replace the placeholder values with your runtime user, env file, app root, and venv path if you deploy it manually.
 - `scripts/local_setup.sh` already runs `python manage.py collectstatic --noinput`.
 - The current implementation keeps uploaded content in PostgreSQL-backed records, but does not expose raw file downloads. That avoids adding object storage as a hard dependency for the first hosted version.
+- Zero Trust assessment report bundles are stored in PostgreSQL so they remain viewable in the portal after the worker deletes the staged export directory.
 - If you later want to retain original uploaded files, add S3-compatible media storage rather than relying on an ephemeral app filesystem.
 - Put the Django app and the HTML frontend on the same domain so CSRF protection works without extra CORS setup.
 - Create at least one local superuser with `python manage.py createsuperuser` so you retain break-glass admin access if the SSO provider is unavailable.

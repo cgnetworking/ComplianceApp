@@ -1,4 +1,5 @@
 Django
+cryptography
 gunicorn
 psycopg[binary]
 social-auth-app-django

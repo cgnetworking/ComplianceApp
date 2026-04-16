@@ -22,6 +22,7 @@ GUNICORN_RUNTIME_GROUP=""
 GUNICORN_ENV_FILE=""
 GUNICORN_RUNTIME_APP_DIR=""
 GUNICORN_RUNTIME_VENV_DIR=""
+ASSESSMENT_WORKER_SERVICE_UNIT=""
 APP_HEALTHCHECK_URL=""
 CREATE_SELF_SIGNED_CERT="false"
 PSQL_ADMIN_CMD=""
@@ -130,6 +131,44 @@ install_nginx() {
 
   if ! command -v nginx >/dev/null 2>&1; then
     echo "NGINX installation did not provide the nginx command." >&2
+    exit 1
+  fi
+}
+
+install_powershell() {
+  local version_id=""
+  local package_dir=""
+  local package_path=""
+
+  if command -v pwsh >/dev/null 2>&1; then
+    return
+  fi
+
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  version_id="${VERSION_ID:-}"
+  if [ -z "$version_id" ]; then
+    echo "Unable to determine Ubuntu VERSION_ID for PowerShell installation." >&2
+    exit 1
+  fi
+
+  log "Installing PowerShell 7 from the Microsoft package repository"
+  run_as_root apt-get update
+  run_as_root apt-get install -y wget apt-transport-https software-properties-common
+
+  if ! dpkg -s packages-microsoft-prod >/dev/null 2>&1; then
+    package_dir="$(mktemp -d)"
+    package_path="$package_dir/packages-microsoft-prod.deb"
+    wget -q "https://packages.microsoft.com/config/ubuntu/$version_id/packages-microsoft-prod.deb" -O "$package_path"
+    run_as_root dpkg -i "$package_path"
+    rm -rf "$package_dir"
+  fi
+
+  run_as_root apt-get update
+  run_as_root apt-get install -y powershell
+
+  if ! command -v pwsh >/dev/null 2>&1; then
+    echo "PowerShell installation completed but the pwsh command was not found." >&2
     exit 1
   fi
 }
@@ -585,6 +624,148 @@ EOF
   GUNICORN_RUNTIME_VENV_DIR="$service_venv_dir"
 }
 
+setup_assessment_worker_systemd_service() {
+  local service_name="${LOCAL_SETUP_ASSESSMENT_WORKER_SERVICE_NAME:-$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]')-assessment-worker}"
+  local service_unit=""
+  local service_path=""
+  local assessment_storage_root=""
+  local assessment_certificate_root=""
+  local assessment_staging_root=""
+  local tmp_file=""
+  local tmp_env=""
+  local module_bootstrap_script=""
+
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    log "Skipping assessment worker systemd service setup because systemd is unavailable."
+    return
+  fi
+
+  if [ -z "$GUNICORN_RUNTIME_USER" ] || [ -z "$GUNICORN_RUNTIME_GROUP" ] || [ -z "$GUNICORN_ENV_FILE" ] || [ -z "$GUNICORN_RUNTIME_APP_DIR" ] || [ -z "$GUNICORN_RUNTIME_VENV_DIR" ]; then
+    log "Skipping assessment worker setup because the Gunicorn runtime context is incomplete."
+    return
+  fi
+
+  if [[ ! "$service_name" =~ ^[A-Za-z0-9_.@-]+$ ]]; then
+    echo "Invalid assessment worker service name '$service_name'." >&2
+    exit 1
+  fi
+
+  assessment_storage_root="${LOCAL_SETUP_ASSESSMENT_STORAGE_ROOT:-/var/lib/$GUNICORN_RUNTIME_USER/assessments}"
+  assessment_certificate_root="${LOCAL_SETUP_ASSESSMENT_CERTIFICATE_ROOT:-$assessment_storage_root/certificates}"
+  assessment_staging_root="${LOCAL_SETUP_ASSESSMENT_STAGING_ROOT:-$assessment_storage_root/staging}"
+
+  run_as_root install -d -m 0700 -o "$GUNICORN_RUNTIME_USER" -g "$GUNICORN_RUNTIME_GROUP" \
+    "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root"
+
+  tmp_env="$(mktemp)"
+  cp "$GUNICORN_ENV_FILE" "$tmp_env"
+  "$PYTHON_BIN" - "$tmp_env" "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root" <<'PY'
+from pathlib import Path
+import sys
+
+env_path = Path(sys.argv[1])
+storage_root = sys.argv[2]
+certificate_root = sys.argv[3]
+staging_root = sys.argv[4]
+
+desired = {
+    "ASSESSMENT_STORAGE_ROOT": storage_root,
+    "ASSESSMENT_CERTIFICATE_ROOT": certificate_root,
+    "ASSESSMENT_STAGING_ROOT": staging_root,
+}
+
+lines = env_path.read_text(encoding="utf-8").splitlines()
+updated = []
+seen = set()
+for line in lines:
+    stripped = line.strip()
+    if "=" not in stripped or stripped.startswith("#"):
+        updated.append(line)
+        continue
+    key = stripped.split("=", 1)[0].strip()
+    if key in desired:
+        updated.append(f"{key}={desired[key]}")
+        seen.add(key)
+    else:
+        updated.append(line)
+
+for key, value in desired.items():
+    if key not in seen:
+        updated.append(f"{key}={value}")
+
+env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+PY
+  run_as_root install -m 0640 -o root -g "$GUNICORN_RUNTIME_GROUP" "$tmp_env" "$GUNICORN_ENV_FILE"
+  rm -f "$tmp_env"
+
+  install_powershell
+  if ! command -v runuser >/dev/null 2>&1; then
+    echo "runuser is required to bootstrap the Zero Trust assessment PowerShell module." >&2
+    exit 1
+  fi
+
+  module_bootstrap_script="$(mktemp)"
+  cat > "$module_bootstrap_script" <<'EOF'
+$ErrorActionPreference = 'Stop'
+if (-not (Get-Module -ListAvailable -Name ZeroTrustAssessment)) {
+  if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
+    Install-PSResource -Name ZeroTrustAssessment -Scope CurrentUser -TrustRepository -Quiet
+  } else {
+    if (Get-Command Set-PSRepository -ErrorAction SilentlyContinue) {
+      Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue | Out-Null
+    }
+    Install-Module ZeroTrustAssessment -Scope CurrentUser -Force -AllowClobber
+  }
+}
+Import-Module ZeroTrustAssessment -Force
+EOF
+  log "Ensuring the ZeroTrustAssessment PowerShell module is available for $GUNICORN_RUNTIME_USER"
+  if ! run_as_root runuser -u "$GUNICORN_RUNTIME_USER" -- pwsh -NoLogo -NoProfile -NonInteractive -File "$module_bootstrap_script"; then
+    rm -f "$module_bootstrap_script"
+    echo "Unable to install or import the ZeroTrustAssessment PowerShell module for $GUNICORN_RUNTIME_USER." >&2
+    echo "Verify that pwsh is installed and that the server can reach PSGallery, then rerun scripts/local_setup.sh." >&2
+    exit 1
+  fi
+  rm -f "$module_bootstrap_script"
+
+  service_unit="${service_name}.service"
+  service_path="/etc/systemd/system/$service_unit"
+  tmp_file="$(mktemp)"
+  cat > "$tmp_file" <<EOF
+[Unit]
+Description=$service_name Zero Trust assessment worker
+After=network.target
+
+[Service]
+Type=simple
+User=$GUNICORN_RUNTIME_USER
+Group=$GUNICORN_RUNTIME_GROUP
+WorkingDirectory=$GUNICORN_RUNTIME_APP_DIR
+EnvironmentFile=$GUNICORN_ENV_FILE
+ExecStart=$GUNICORN_RUNTIME_VENV_DIR/bin/python manage.py run_assessment_worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  log "Installing assessment worker systemd service at $service_path"
+  run_as_root install -m 0644 "$tmp_file" "$service_path"
+  rm -f "$tmp_file"
+
+  run_as_root systemctl daemon-reload
+  run_as_root systemctl enable "$service_unit"
+  run_as_root systemctl restart "$service_unit" || run_as_root systemctl start "$service_unit"
+  if ! run_as_root systemctl is-active --quiet "$service_unit"; then
+    echo "Assessment worker service failed to start: $service_unit" >&2
+    echo "Inspect with: sudo journalctl -u $service_unit --no-pager -n 100" >&2
+    exit 1
+  fi
+
+  ASSESSMENT_WORKER_SERVICE_UNIT="$service_unit"
+}
+
 ensure_python_venv() {
   if "$PYTHON_BIN" -c "import venv, ensurepip" >/dev/null 2>&1; then
     return
@@ -945,6 +1126,7 @@ ensure_supported_platform
 ensure_python_runtime
 ensure_python_venv
 install_nginx
+install_powershell
 prompt_for_nginx_server_name
 DEFAULT_ALLOWED_HOSTS="$(merge_host_values "$DEFAULT_ALLOWED_HOSTS" "$NGINX_SERVER_NAME")"
 configure_nginx_site_link
@@ -1082,6 +1264,7 @@ python "$ROOT_DIR/manage.py" migrate
 collect_static_assets
 sync_static_assets_for_nginx
 setup_gunicorn_systemd_service
+setup_assessment_worker_systemd_service
 verify_app_readiness
 start_nginx_service
 
@@ -1099,6 +1282,9 @@ if [ -n "$GUNICORN_RUNTIME_APP_DIR" ]; then
 fi
 if [ -n "$GUNICORN_RUNTIME_VENV_DIR" ]; then
   echo "Gunicorn runtime venv dir: $GUNICORN_RUNTIME_VENV_DIR"
+fi
+if [ -n "$ASSESSMENT_WORKER_SERVICE_UNIT" ]; then
+  echo "Assessment worker service unit: $ASSESSMENT_WORKER_SERVICE_UNIT"
 fi
 if [ -n "$APP_HEALTHCHECK_URL" ]; then
   echo "Application readiness URL: $APP_HEALTHCHECK_URL"

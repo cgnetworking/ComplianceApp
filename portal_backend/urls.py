@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.urls import include, path
 
+from portal import assessment_views
 from portal import views as portal_views
 
 
@@ -17,6 +18,17 @@ urlpatterns = [
     path("reviews.html", portal_views.reviews_page, name="portal-reviews"),
     path("review-tasks.html", portal_views.review_tasks_page, name="portal-review-tasks"),
     path("audit-log.html", portal_views.audit_log_page, name="portal-audit-log"),
+    path("assessments.html", assessment_views.assessments_page, name="portal-assessments"),
+    path(
+        "assessments/runs/<str:run_id>/report/",
+        assessment_views.assessment_run_report,
+        name="portal-assessment-run-report",
+    ),
+    path(
+        "assessments/runs/<str:run_id>/files/<path:relative_path>",
+        assessment_views.assessment_run_artifact,
+        name="portal-assessment-run-artifact",
+    ),
     path("policies.html", portal_views.policies_page, name="portal-policies"),
     path("risks.html", portal_views.risks_page, name="portal-risks"),
     path("vendors.html", portal_views.vendors_page, name="portal-vendors"),

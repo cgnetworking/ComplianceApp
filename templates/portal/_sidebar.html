@@ -19,6 +19,9 @@
 
   <nav class="sidebar-nav">
     <a class="nav-link{% if active_page == 'home' %} is-active{% endif %}" href="./index.html">Home</a>
+    {% if current_user.isStaff %}
+    <a class="nav-link{% if active_page == 'assessments' %} is-active{% endif %}" href="./assessments.html">Assessments</a>
+    {% endif %}
     <a class="nav-link{% if active_page == 'controls' %} is-active{% endif %}" href="./controls.html">Controls</a>
     <a class="nav-link{% if active_page == 'reports' %} is-active{% endif %}" href="./reports.html">Reports</a>
     <a class="nav-link{% if active_page == 'reviews' %} is-active{% endif %}" href="./reviews.html">Reviews</a>

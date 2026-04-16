@@ -654,6 +654,11 @@ a {
   color: #16803d;
 }
 
+.status-pill.is-danger {
+  background: rgba(246, 92, 97, 0.14);
+  color: #b4232a;
+}
+
 .status-pill.is-closed {
   background: rgba(123, 114, 147, 0.14);
   color: var(--muted-strong);
@@ -1778,6 +1783,61 @@ tbody tr.is-selected {
   line-height: 1.6;
 }
 
+.page-grid-assessments {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr);
+}
+
+.panel-span-full {
+  grid-column: 1 / -1;
+}
+
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.button-row-wrap {
+  flex-wrap: wrap;
+}
+
+.table-link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.assessment-table tbody tr.is-selected-row {
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.empty-cell {
+  color: var(--muted);
+}
+
+.assessment-log-block {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.assessment-report-frame {
+  inline-size: 100%;
+  min-block-size: 920px;
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+}
+
+a.is-disabled {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 .detail-list {
   margin: 0;
   padding-left: 18px;
@@ -1826,7 +1886,8 @@ code {
   .page-grid-policies,
   .page-grid-reviews,
   .page-grid-risks,
-  .page-grid-vendors {
+  .page-grid-vendors,
+  .page-grid-assessments {
     grid-template-columns: 1fr;
   }
 }

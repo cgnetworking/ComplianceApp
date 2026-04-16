@@ -84,6 +84,8 @@
     activeDocumentId: params.get("doc"),
     selectedRiskId: params.get("risk") || "",
     selectedVendorResponseId: params.get("vendor"),
+    selectedAssessmentProfileId: params.get("profile") || "",
+    selectedAssessmentRunId: params.get("run") || "",
     riskRegister: loadRiskRegister(),
     assignableUsers: [],
     isAddingRisk: false,
@@ -123,6 +125,12 @@
     vendorOverview: document.getElementById("vendor-overview"),
     vendorResponses: document.getElementById("vendor-responses"),
     vendorDetail: document.getElementById("vendor-detail"),
+    assessmentStatus: document.getElementById("assessment-status"),
+    assessmentOverview: document.getElementById("assessment-overview"),
+    assessmentProfiles: document.getElementById("assessment-profiles"),
+    assessmentDetail: document.getElementById("assessment-detail"),
+    assessmentReport: document.getElementById("assessment-report"),
+    assessmentNewProfile: document.getElementById("assessment-new-profile"),
     monthTabs: document.getElementById("month-tabs"),
     activities: document.getElementById("activities"),
     checklistSummary: document.getElementById("checklist-summary"),
@@ -176,6 +184,9 @@
   async function init() {
     await loadRemoteState();
     await loadAssignableUsers();
+    if (page === "assessments" && typeof loadZeroTrustState === "function") {
+      await loadZeroTrustState();
+    }
     updateRuntimeMode();
     updatePersistenceCopy();
     if (els.generatedAt) {

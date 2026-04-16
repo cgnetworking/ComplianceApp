@@ -36,6 +36,9 @@
     if (page === "vendors") {
       syncVendorSelection();
     }
+    if (page === "assessments" && typeof syncZeroTrustSelection === "function") {
+      syncZeroTrustSelection();
+    }
   }
   function bindEvents() {
     bindSearchEvents();
@@ -56,7 +59,7 @@
       return;
     }
 
-    const searchablePages = new Set(["controls", "reports", "policies", "risks", "vendors", "audit-log"]);
+    const searchablePages = new Set(["controls", "reports", "policies", "risks", "vendors", "audit-log", "assessments"]);
     if (!searchablePages.has(page)) {
       els.searchInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") {
@@ -624,6 +627,13 @@
       syncVendorSelection();
       return;
     }
+    if (page === "assessments" && typeof syncZeroTrustSelection === "function") {
+      syncZeroTrustSelection();
+      if (typeof handleZeroTrustSelectionChanged === "function") {
+        handleZeroTrustSelectionChanged();
+      }
+      return;
+    }
     if (page === "audit-log") {
       return;
     }
@@ -664,6 +674,11 @@
         break;
       case "vendors":
         renderVendorsPage();
+        break;
+      case "assessments":
+        if (typeof renderZeroTrustPage === "function") {
+          renderZeroTrustPage();
+        }
         break;
       default:
         renderHomePage();
@@ -741,7 +756,7 @@
   function syncUrl() {
     const query = new URLSearchParams();
 
-    if (page === "controls" || page === "reports" || page === "policies" || page === "risks" || page === "vendors" || page === "audit-log") {
+    if (page === "controls" || page === "reports" || page === "policies" || page === "risks" || page === "vendors" || page === "audit-log" || page === "assessments") {
       if (state.search) {
         query.set("q", state.search);
       }
@@ -781,6 +796,12 @@
     }
     if (page === "vendors" && state.selectedVendorResponseId) {
       query.set("vendor", state.selectedVendorResponseId);
+    }
+    if (page === "assessments" && state.selectedAssessmentProfileId) {
+      query.set("profile", state.selectedAssessmentProfileId);
+    }
+    if (page === "assessments" && state.selectedAssessmentRunId) {
+      query.set("run", state.selectedAssessmentRunId);
     }
 
     const next = query.toString();

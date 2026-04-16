@@ -20,6 +20,13 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def env_path(name: str, default: Path) -> Path:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    return Path(value).expanduser()
+
+
 def parse_database_url(database_url: str) -> dict[str, object]:
     parsed = urlparse(database_url)
     scheme = parsed.scheme.lower()
@@ -182,3 +189,20 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+ASSESSMENT_STORAGE_ROOT = env_path("ASSESSMENT_STORAGE_ROOT", BASE_DIR / ".assessment_storage")
+ASSESSMENT_CERTIFICATE_ROOT = env_path(
+    "ASSESSMENT_CERTIFICATE_ROOT",
+    ASSESSMENT_STORAGE_ROOT / "certificates",
+)
+ASSESSMENT_STAGING_ROOT = env_path(
+    "ASSESSMENT_STAGING_ROOT",
+    ASSESSMENT_STORAGE_ROOT / "staging",
+)
+ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS = max(
+    1,
+    int(os.environ.get("ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS", "10")),
+)
+ASSESSMENT_WORKER_LEASE_SECONDS = max(
+    60,
+    int(os.environ.get("ASSESSMENT_WORKER_LEASE_SECONDS", "900")),
+)
