@@ -1111,9 +1111,17 @@ url = sys.argv[1]
 deadline = time.time() + 45
 last_error = ""
 
+
+class NoRedirect(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+opener = request.build_opener(NoRedirect)
+
 while time.time() < deadline:
     try:
-        with request.urlopen(url, timeout=5) as response:
+        with opener.open(url, timeout=5) as response:
             status = getattr(response, "status", 0) or response.getcode()
             if 200 <= status < 500:
                 raise SystemExit(0)
@@ -1182,6 +1190,12 @@ if [ ! -f "$ENV_FILE" ]; then
     "DJANGO_DEBUG=False" \
     "ALLOWED_HOSTS=$DEFAULT_ALLOWED_HOSTS" \
     "CSRF_TRUSTED_ORIGINS=http://localhost:8000" \
+    "SECURE_SSL_REDIRECT=False" \
+    "SESSION_COOKIE_SECURE=False" \
+    "CSRF_COOKIE_SECURE=False" \
+    "SECURE_HSTS_SECONDS=0" \
+    "SECURE_CONTENT_TYPE_NOSNIFF=True" \
+    "SECURE_REFERRER_POLICY=strict-origin-when-cross-origin" \
     "TIME_ZONE=America/New_York" \
     "DATABASE_URL=$DEFAULT_DATABASE_URL" \
     "DATABASE_USER=$DEFAULT_DATABASE_USER" \
@@ -1202,6 +1216,36 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "Created $ENV_FILE"
 else
   echo "Using existing $ENV_FILE"
+fi
+
+if [ -z "$(read_env_var SECURE_SSL_REDIRECT)" ]; then
+  upsert_env_var SECURE_SSL_REDIRECT "False"
+  echo "Added SECURE_SSL_REDIRECT=False to $ENV_FILE for local HTTP checks"
+fi
+
+if [ -z "$(read_env_var SESSION_COOKIE_SECURE)" ]; then
+  upsert_env_var SESSION_COOKIE_SECURE "False"
+  echo "Added SESSION_COOKIE_SECURE=False to $ENV_FILE for local development"
+fi
+
+if [ -z "$(read_env_var CSRF_COOKIE_SECURE)" ]; then
+  upsert_env_var CSRF_COOKIE_SECURE "False"
+  echo "Added CSRF_COOKIE_SECURE=False to $ENV_FILE for local development"
+fi
+
+if [ -z "$(read_env_var SECURE_HSTS_SECONDS)" ]; then
+  upsert_env_var SECURE_HSTS_SECONDS "0"
+  echo "Added SECURE_HSTS_SECONDS=0 to $ENV_FILE for local development"
+fi
+
+if [ -z "$(read_env_var SECURE_CONTENT_TYPE_NOSNIFF)" ]; then
+  upsert_env_var SECURE_CONTENT_TYPE_NOSNIFF "True"
+  echo "Added SECURE_CONTENT_TYPE_NOSNIFF=True to $ENV_FILE"
+fi
+
+if [ -z "$(read_env_var SECURE_REFERRER_POLICY)" ]; then
+  upsert_env_var SECURE_REFERRER_POLICY "strict-origin-when-cross-origin"
+  echo "Added SECURE_REFERRER_POLICY to $ENV_FILE"
 fi
 
 CURRENT_ALLOWED_HOSTS="$(read_env_var ALLOWED_HOSTS)"
