@@ -1229,6 +1229,8 @@ if [ ! -f "$ENV_FILE" ]; then
     "SESSION_COOKIE_SECURE=False" \
     "CSRF_COOKIE_SECURE=False" \
     "SECURE_HSTS_SECONDS=0" \
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS=False" \
+    "SECURE_HSTS_PRELOAD=False" \
     "SECURE_CONTENT_TYPE_NOSNIFF=True" \
     "SECURE_REFERRER_POLICY=strict-origin-when-cross-origin" \
     "TIME_ZONE=America/New_York" \
@@ -1271,6 +1273,16 @@ fi
 if [ -z "$(read_env_var SECURE_HSTS_SECONDS)" ]; then
   upsert_env_var SECURE_HSTS_SECONDS "0"
   echo "Added SECURE_HSTS_SECONDS=0 to $ENV_FILE for local development"
+fi
+
+if [ -z "$(read_env_var SECURE_HSTS_INCLUDE_SUBDOMAINS)" ]; then
+  upsert_env_var SECURE_HSTS_INCLUDE_SUBDOMAINS "False"
+  echo "Added SECURE_HSTS_INCLUDE_SUBDOMAINS=False to $ENV_FILE for local development"
+fi
+
+if [ -z "$(read_env_var SECURE_HSTS_PRELOAD)" ]; then
+  upsert_env_var SECURE_HSTS_PRELOAD "False"
+  echo "Added SECURE_HSTS_PRELOAD=False to $ENV_FILE for local development"
 fi
 
 if [ -z "$(read_env_var SECURE_CONTENT_TYPE_NOSNIFF)" ]; then
