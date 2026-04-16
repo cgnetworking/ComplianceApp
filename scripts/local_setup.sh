@@ -719,6 +719,7 @@ if (-not (Get-Module -ListAvailable -Name ZeroTrustAssessment)) {
 }
 Import-Module ZeroTrustAssessment -Force
 EOF
+  chmod 0644 "$module_bootstrap_script"
   log "Ensuring the ZeroTrustAssessment PowerShell module is available for $GUNICORN_RUNTIME_USER"
   if ! run_as_root runuser -u "$GUNICORN_RUNTIME_USER" -- pwsh -NoLogo -NoProfile -NonInteractive -File "$module_bootstrap_script"; then
     rm -f "$module_bootstrap_script"
