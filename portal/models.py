@@ -218,12 +218,12 @@ class ZeroTrustTenantProfile(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant_id", "client_id"],
-                name="portal_zt_profile_tenant_client_unique",
+                name="portal_zt_prof_tenant_cli_uq",
             )
         ]
         indexes = [
-            models.Index(fields=["tenant_id"], name="portal_zt_profile_tenant_idx"),
-            models.Index(fields=["last_run_at"], name="portal_zt_profile_last_run_idx"),
+            models.Index(fields=["tenant_id"], name="portal_zt_prof_tenant_idx"),
+            models.Index(fields=["last_run_at"], name="portal_zt_prof_lastrun_idx"),
         ]
 
     def __str__(self) -> str:
@@ -270,12 +270,12 @@ class ZeroTrustCertificate(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["profile", "thumbprint"],
-                name="portal_zt_cert_profile_thumbprint_unique",
+                name="portal_zt_cert_prof_thumb_uq",
             )
         ]
         indexes = [
             models.Index(fields=["profile", "is_current"], name="portal_zt_cert_current_idx"),
-            models.Index(fields=["not_after"], name="portal_zt_cert_not_after_idx"),
+            models.Index(fields=["not_after"], name="portal_zt_cert_expiry_idx"),
         ]
 
     def __str__(self) -> str:
@@ -342,10 +342,10 @@ class ZeroTrustAssessmentRun(models.Model):
     class Meta:
         ordering = ["-created_at", "external_id"]
         indexes = [
-            models.Index(fields=["profile", "created_at"], name="portal_zt_run_profile_created_idx"),
-            models.Index(fields=["profile", "status"], name="portal_zt_run_profile_status_idx"),
-            models.Index(fields=["status", "created_at"], name="portal_zt_run_status_created_idx"),
-            models.Index(fields=["completed_at"], name="portal_zt_run_completed_idx"),
+            models.Index(fields=["profile", "created_at"], name="portal_zt_run_prof_cr_idx"),
+            models.Index(fields=["profile", "status"], name="portal_zt_run_prof_stat_idx"),
+            models.Index(fields=["status", "created_at"], name="portal_zt_run_stat_cr_idx"),
+            models.Index(fields=["completed_at"], name="portal_zt_run_done_idx"),
         ]
 
     def __str__(self) -> str:
@@ -404,11 +404,11 @@ class ZeroTrustAssessmentRunLog(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["run", "sequence"],
-                name="portal_zt_run_log_sequence_unique",
+                name="portal_zt_run_log_seq_uq",
             )
         ]
         indexes = [
-            models.Index(fields=["run", "created_at"], name="portal_zt_run_log_created_idx"),
+            models.Index(fields=["run", "created_at"], name="portal_zt_run_log_cr_idx"),
         ]
 
     def __str__(self) -> str:
@@ -444,7 +444,7 @@ class ZeroTrustAssessmentArtifact(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["run", "relative_path"],
-                name="portal_zt_artifact_run_path_unique",
+                name="portal_zt_artifact_path_uq",
             )
         ]
         indexes = [
