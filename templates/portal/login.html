@@ -22,7 +22,7 @@
         kicker="Authentication"
         title="Sign in to the portal"
         copy="Use your organization SSO for normal access, or a local Django account for break-glass admin access."
-        hide_filter_bar=True %}
+        hide_filter_bar=1 %}
 
       {% if auth_error_message %}
         <p class="helper-note is-warning">{{ auth_error_message }}</p>
