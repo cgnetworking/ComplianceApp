@@ -1,26 +1,16 @@
 {% load static %}
-<script>
-  window.ISMS_PORTAL_CONFIG = {
-    apiBaseUrl: "{{ api_base_url }}",
-    loginUrl: "{% url 'portal-login' %}",
-    currentUser: {
-      username: "{{ current_user.username|default:''|escapejs }}",
-      isStaff: {{ current_user.isStaff|yesno:"true,false" }},
-      isPolicyReader: {{ current_user.isPolicyReader|yesno:"true,false" }}
-    }
-  };
-</script>
-<script src="{% static 'js/api.js' %}"></script>
-<script src="{% static 'js/state.js' %}"></script>
-<script src="{% static 'js/accessibility.js' %}"></script>
-<script src="{% static 'js/shared.js' %}"></script>
-<script src="{% static 'js/home.js' %}"></script>
-<script src="{% static 'js/controls.js' %}"></script>
-<script src="{% static 'js/policies.js' %}"></script>
-<script src="{% static 'js/reviews.js' %}"></script>
-<script src="{% static 'js/review_tasks.js' %}"></script>
-<script src="{% static 'js/audit_log.js' %}"></script>
-<script src="{% static 'js/risks.js' %}"></script>
-<script src="{% static 'js/vendors.js' %}"></script>
-<script src="{% static 'js/assessments.js' %}"></script>
-<script src="{% static 'js/runtime.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/portal_config.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/api.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/state.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/accessibility.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/shared.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/home.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/controls.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/policies.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/reviews.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/review_tasks.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/audit_log.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/risks.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/vendors.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/assessments.js' %}"></script>
+<script nonce="{{ csp_nonce }}" src="{% static 'js/runtime.js' %}"></script>

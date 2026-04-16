@@ -30,13 +30,13 @@ ASSESSMENT_REPORT_CSP = (
     "frame-ancestors 'self'; "
     "form-action 'none'; "
     "connect-src 'none'; "
-    "img-src data: blob: http: https:; "
-    "font-src data: http: https:; "
-    "media-src data: blob: http: https:; "
-    "style-src 'unsafe-inline' http: https:; "
-    "script-src 'unsafe-inline' http: https:; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "media-src 'self'; "
+    "style-src 'self'; "
+    "script-src 'none'; "
     "object-src 'none'; "
-    "sandbox allow-scripts allow-forms allow-downloads allow-modals allow-popups;"
+    "sandbox;"
 )
 
 

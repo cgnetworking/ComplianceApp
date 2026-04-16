@@ -27,7 +27,9 @@ class AssessmentSecurityTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("default-src 'none'", response["Content-Security-Policy"])
-        self.assertIn("sandbox allow-scripts", response["Content-Security-Policy"])
+        self.assertIn("script-src 'none'", response["Content-Security-Policy"])
+        self.assertNotIn("unsafe-inline", response["Content-Security-Policy"])
+        self.assertIn("sandbox;", response["Content-Security-Policy"])
         self.assertEqual(response["Cross-Origin-Opener-Policy"], "same-origin")
         self.assertEqual(response["Referrer-Policy"], "no-referrer")
         self.assertEqual(response["X-Content-Type-Options"], "nosniff")
@@ -65,4 +67,3 @@ class AssessmentSecurityTests(TestCase):
         self.client.force_login(self.non_staff_user)
         response = self.client.get("/assessments/runs/run-001/report/")
         self.assertEqual(response.status_code, 403)
-
