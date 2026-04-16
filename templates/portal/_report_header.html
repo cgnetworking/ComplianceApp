@@ -31,33 +31,31 @@
     <p class="report-copy">
       {{ copy }}
     </p>
-    {% if not hide_filter_bar %}
-      {% include "portal/_filter_bar.html" with
-        domain_label=domain_label
-        domain_filter_id=domain_filter_id
-        domain_filter_aria=domain_filter_aria
-        applicability_label=applicability_label
-        applicability_filter_id=applicability_filter_id
-        applicability_filter_aria=applicability_filter_aria
-        review_label=review_label
-        review_filter_id=review_filter_id
-        review_filter_aria=review_filter_aria
-        assignee_label=assignee_label
-        assignee_filter_id=assignee_filter_id
-        assignee_filter_aria=assignee_filter_aria
-        status_label=status_label
-        status_filter_id=status_filter_id
-        status_filter_aria=status_filter_aria
-        risk_level_label=risk_level_label
-        risk_level_filter_id=risk_level_filter_id
-        risk_level_filter_aria=risk_level_filter_aria
-        clear_filters_label=clear_filters_label
-        clear_filters_id=clear_filters_id
-        upload_input_id=upload_input_id
-        upload_accept=upload_accept
-        upload_trigger_label=upload_trigger_label
-        upload_trigger_id=upload_trigger_id only %}
-    {% endif %}
+    {% include "portal/_filter_bar.html" with
+      domain_label=domain_label
+      domain_filter_id=domain_filter_id
+      domain_filter_aria=domain_filter_aria
+      applicability_label=applicability_label
+      applicability_filter_id=applicability_filter_id
+      applicability_filter_aria=applicability_filter_aria
+      review_label=review_label
+      review_filter_id=review_filter_id
+      review_filter_aria=review_filter_aria
+      assignee_label=assignee_label
+      assignee_filter_id=assignee_filter_id
+      assignee_filter_aria=assignee_filter_aria
+      status_label=status_label
+      status_filter_id=status_filter_id
+      status_filter_aria=status_filter_aria
+      risk_level_label=risk_level_label
+      risk_level_filter_id=risk_level_filter_id
+      risk_level_filter_aria=risk_level_filter_aria
+      clear_filters_label=clear_filters_label
+      clear_filters_id=clear_filters_id
+      upload_input_id=upload_input_id
+      upload_accept=upload_accept
+      upload_trigger_label=upload_trigger_label
+      upload_trigger_id=upload_trigger_id only %}
     {% if status_text %}
       <p class="helper-note upload-status" id="{{ status_id }}">
         {{ status_text }}

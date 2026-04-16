@@ -8,15 +8,22 @@
 {% endblock %}
 
 {% block content %}
-  {% include "portal/_report_header.html" with
-    kicker="Audit"
-    title="Audit log"
-    copy="Review recorded system actions for this workspace. Each entry includes action, record, user, and timestamp details."
-    hide_filter_bar=1 %}
+  <section class="report-header">
+    <p class="section-kicker">Audit</p>
+    <h1>Audit log</h1>
+    <p class="report-copy">
+      Review recorded system actions for this workspace. Each entry includes action, record, user, and timestamp details.
+    </p>
+  </section>
 
   <section class="page-grid">
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Activity history" title="Recorded actions" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Activity history</p>
+          <h2>Recorded actions</h2>
+        </div>
+      </div>
       <div class="mini-stats" id="audit-log-summary"></div>
       <div id="audit-log-list"></div>
     </article>

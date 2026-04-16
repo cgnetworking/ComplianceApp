@@ -9,28 +9,40 @@
 {% endblock %}
 
 {% block content %}
-  {% static 'downloads/vendor_due_diligence_intake_sample.csv' as vendor_sample_download_url %}
-  {% include "portal/_report_header.html" with
-    split_layout=1
-    header_class="report-header-split"
-    kicker="Vendors"
-    title="Vendor due diligence intake"
-    copy="Import vendor due diligence survey responses into the portal workspace, review extracted previews, and stage supplier evidence for follow-up."
-    action_input_id="vendor-upload-input"
-    action_input_accept=".csv,.json,.txt,.md,.markdown,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx"
-    action_link_href=vendor_sample_download_url
-    action_link_label="Download Sample Form"
-    action_link_download="vendor_due_diligence_intake_form.csv"
-    action_button_id="vendor-upload-trigger"
-    action_button_label="Import Responses"
-    status_text="Download the sample CSV, replace the sample answers, and import completed questionnaires or exports into the shared database. Text-based files generate inline previews."
-    status_id="vendor-upload-status" %}
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Vendors</p>
+      <h1>Vendor due diligence intake</h1>
+      <p class="report-copy">
+        Import vendor due diligence survey responses into the portal workspace, review extracted previews, and stage supplier evidence for follow-up.
+      </p>
+    </div>
+    <div class="report-actions">
+      <input id="vendor-upload-input" type="file" accept=".csv,.json,.txt,.md,.markdown,.html,.htm,.pdf,.doc,.docx,.xls,.xlsx" multiple hidden>
+      <a
+        class="ghost-button"
+        href="{% static 'downloads/vendor_due_diligence_intake_sample.csv' %}"
+        download="vendor_due_diligence_intake_form.csv"
+      >
+        Download Sample Form
+      </a>
+      <button class="ghost-button" id="vendor-upload-trigger" type="button">Import Responses</button>
+      <p class="helper-note upload-status" id="vendor-upload-status">
+        Download the sample CSV, replace the sample answers, and import completed questionnaires or exports into the shared database. Text-based files generate inline previews.
+      </p>
+    </div>
+  </section>
 
   <section class="overview" id="vendor-overview"></section>
 
   <section class="page-grid page-grid-vendors">
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Import queue" title="Vendor survey responses" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Import queue</p>
+          <h2>Vendor survey responses</h2>
+        </div>
+      </div>
       <div id="vendor-responses"></div>
     </article>
 

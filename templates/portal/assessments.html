@@ -8,22 +8,32 @@
 {% endblock %}
 
 {% block content %}
-  {% include "portal/_report_header.html" with
-    split_layout=1
-    header_class="report-header-split"
-    kicker="Assessments"
-    title="Zero Trust assessment workspace"
-    copy="Generate an app-only certificate on the Ubuntu server, save tenant Graph settings, run the Microsoft Zero Trust Assessment in the background, and review the stored report directly in the portal."
-    action_button_id="assessment-new-profile"
-    action_button_label="New Tenant Profile"
-    status_text="The generated report bundle is copied into PostgreSQL and then removed from the server staging folder after ingestion succeeds."
-    status_id="assessment-status" %}
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Assessments</p>
+      <h1>Zero Trust assessment workspace</h1>
+      <p class="report-copy">
+        Generate an app-only certificate on the Ubuntu server, save tenant Graph settings, run the Microsoft Zero Trust Assessment in the background, and review the stored report directly in the portal.
+      </p>
+    </div>
+    <div class="report-actions">
+      <button class="ghost-button" id="assessment-new-profile" type="button">New Tenant Profile</button>
+      <p class="helper-note upload-status" id="assessment-status">
+        The generated report bundle is copied into PostgreSQL and then removed from the server staging folder after ingestion succeeds.
+      </p>
+    </div>
+  </section>
 
   <section class="overview" id="assessment-overview"></section>
 
   <section class="page-grid page-grid-assessments">
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Tenant profiles" title="Saved assessment targets" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Tenant profiles</p>
+          <h2>Saved assessment targets</h2>
+        </div>
+      </div>
       <div id="assessment-profiles"></div>
     </article>
 

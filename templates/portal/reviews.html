@@ -8,27 +8,39 @@
 {% endblock %}
 
 {% block content %}
-  {% include "portal/_report_header.html" with
-    kicker="Reviews"
-    title="Review tracker"
-    copy="Work through the annual review schedule and recurring review checklist from a dedicated page. Review checklist tasks, monthly program items, and completion state are stored in the shared database."
-    hide_filter_bar=1 %}
+  <section class="report-header">
+    <p class="section-kicker">Reviews</p>
+    <h1>Review tracker</h1>
+    <p class="report-copy">
+      Work through the annual review schedule and recurring review checklist from a dedicated page. Review checklist tasks, monthly program items, and completion state are stored in the shared database.
+    </p>
+  </section>
 
   <section class="overview" id="overview"></section>
 
   <section class="page-grid page-grid-reviews">
     <article class="panel">
-      {% include "portal/_panel_head.html" with kicker="Review queue" title="Monthly review program" only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Review queue</p>
+          <h2>Monthly review program</h2>
+        </div>
+      </div>
       <div class="month-tabs" id="month-tabs"></div>
       <div id="activities"></div>
     </article>
 
     <article class="panel">
-      {% include "portal/_panel_head.html" with
-        kicker="Recurring checks"
-        title="Create Recurring Review"
-        actions_template="portal/_reviews_panel_actions.html"
-        only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Recurring checks</p>
+          <h2>Create Recurring Review</h2>
+        </div>
+        <div class="panel-head-actions">
+          <a class="ghost-button" href="{% url 'portal-review-tasks' %}">Manage All Tasks</a>
+          <button class="ghost-button" type="button" id="checklist-add-trigger">Add Checklist Item</button>
+        </div>
+      </div>
       <div class="mini-stats" id="checklist-summary"></div>
       <form class="risk-form" id="checklist-add-form" hidden>
         <div class="quick-add-row">

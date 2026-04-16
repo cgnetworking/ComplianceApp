@@ -8,19 +8,25 @@
 {% endblock %}
 
 {% block content %}
-  {% include "portal/_report_header.html" with
-    kicker="Reviews"
-    title="All Review Tasks"
-    copy="View every recurring review task stored in the shared checklist and remove tasks that are no longer needed."
-    hide_filter_bar=1 %}
+  <section class="report-header">
+    <p class="section-kicker">Reviews</p>
+    <h1>All Review Tasks</h1>
+    <p class="report-copy">
+      View every recurring review task stored in the shared checklist and remove tasks that are no longer needed.
+    </p>
+  </section>
 
   <section class="page-grid">
     <article class="panel">
-      {% include "portal/_panel_head.html" with
-        kicker="Checklist database"
-        title="Manage recurring tasks"
-        actions_template="portal/_review_tasks_panel_actions.html"
-        only %}
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Checklist database</p>
+          <h2>Manage recurring tasks</h2>
+        </div>
+        <div class="panel-head-actions">
+          <a class="ghost-button" href="{% url 'portal-reviews' %}">Back to Reviews</a>
+        </div>
+      </div>
       <div id="review-tasks-list"></div>
       <p class="helper-note" id="review-tasks-status"></p>
     </article>
