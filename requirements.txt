@@ -1,4 +1,5 @@
 Django
+bleach
 cryptography
 gunicorn
 psycopg[binary]

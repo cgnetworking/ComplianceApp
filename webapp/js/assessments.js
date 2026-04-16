@@ -401,7 +401,13 @@
           <a class="ghost-button" href="${escapeHtml(run.reportUrl)}" target="_blank" rel="noopener">Open Full Report</a>
         </div>
       </div>
-      <iframe class="assessment-report-frame" src="${escapeHtml(run.reportUrl)}" title="Zero Trust Assessment report"></iframe>
+      <iframe
+        class="assessment-report-frame"
+        src="${escapeHtml(run.reportUrl)}"
+        title="Zero Trust Assessment report"
+        sandbox="allow-scripts allow-forms allow-downloads allow-modals allow-popups"
+        referrerpolicy="no-referrer"
+      ></iframe>
     `;
   }
 

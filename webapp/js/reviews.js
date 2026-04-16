@@ -4,6 +4,40 @@
     renderActivities();
     renderChecklist();
   }
+  function reviewPersistenceStatusValue() {
+    if (!state.reviewPersistenceStatus || typeof state.reviewPersistenceStatus !== "object") {
+      return { message: "", tone: "" };
+    }
+    return {
+      message: typeof state.reviewPersistenceStatus.message === "string" ? state.reviewPersistenceStatus.message : "",
+      tone: typeof state.reviewPersistenceStatus.tone === "string" ? state.reviewPersistenceStatus.tone : "",
+    };
+  }
+  function reviewPersistenceStatusMarkup() {
+    return '<p class="helper-note" data-review-save-status></p>';
+  }
+  function renderReviewPersistenceStatus() {
+    if (!els.activities) {
+      return;
+    }
+    const statusElement = els.activities.querySelector("[data-review-save-status]");
+    if (!statusElement) {
+      return;
+    }
+    const status = reviewPersistenceStatusValue();
+    setUploadStatus(
+      statusElement,
+      status.message || "Review checklist updates sync with the shared portal database.",
+      status.tone || ""
+    );
+  }
+  function setReviewPersistenceStatus(message, tone) {
+    state.reviewPersistenceStatus = {
+      message: message || "",
+      tone: tone || "",
+    };
+    renderReviewPersistenceStatus();
+  }
   function renderReviewOverview() {
     if (!els.overview) {
       return;
@@ -61,7 +95,11 @@
     }
     const activities = monthlyActivities(state.monthIndex);
     if (!activities.length) {
-      els.activities.innerHTML = `<div class="empty-state">No checklist tasks are due for ${escapeHtml(monthNames[state.monthIndex])}.</div>`;
+      els.activities.innerHTML = `
+        <div class="empty-state">No checklist tasks are due for ${escapeHtml(monthNames[state.monthIndex])}.</div>
+        ${reviewPersistenceStatusMarkup()}
+      `;
+      renderReviewPersistenceStatus();
       return;
     }
 
@@ -87,7 +125,9 @@
           `;
         }).join("")}
       </div>
+      ${reviewPersistenceStatusMarkup()}
     `;
+    renderReviewPersistenceStatus();
   }
   function renderChecklist() {
     if (!els.checklist || !els.checklistSummary) {
@@ -616,15 +656,34 @@
       throw new Error("Created checklist item response was invalid.");
     }
 
-    applyCreatedChecklistItem(created);
+    await applyCreatedChecklistItem(created);
     return created;
   }
-  function applyCreatedChecklistItem(created) {
+  async function applyCreatedChecklistItem(created) {
+    const previousReviewState = normalizeReviewStateValue(state.reviewState);
     state.checklistItems = getAllChecklistItems().concat(created);
-    saveReviewState();
+    let reviewSaveError = null;
+    try {
+      await saveReviewState();
+      setReviewPersistenceStatus("Review tracking saved.", "success");
+    } catch (error) {
+      state.reviewState = previousReviewState;
+      reviewSaveError = error;
+      const detail = error instanceof Error && error.message
+        ? error.message
+        : "Review tracking could not be synced.";
+      setReviewPersistenceStatus(detail, "error");
+    }
     renderReviewsPage();
     refreshChecklistAddFormOptions();
     renderChecklistRecommendationOptions();
+
+    if (reviewSaveError) {
+      const detail = reviewSaveError instanceof Error && reviewSaveError.message
+        ? reviewSaveError.message
+        : "Review tracking could not be synced.";
+      throw new Error(`Checklist item was added, but review tracking did not sync: ${detail}`);
+    }
   }
   function monthlyActivities(monthIndex) {
     return getAllChecklistItems()

@@ -37,11 +37,22 @@ class Command(BaseCommand):
         self.stdout.write(self.style.NOTICE(f"Starting assessment worker {worker_id}"))
 
         while True:
-            stale_count = mark_stale_zero_trust_runs()
-            if stale_count:
-                self.stdout.write(self.style.WARNING(f"Marked {stale_count} stale assessment run(s)."))
+            try:
+                stale_count = mark_stale_zero_trust_runs()
+                if stale_count:
+                    self.stdout.write(self.style.WARNING(f"Marked {stale_count} stale assessment run(s)."))
+                run = claim_next_zero_trust_run(worker_id=worker_id)
+            except Exception as error:
+                self.stderr.write(
+                    self.style.ERROR(
+                        f"Assessment worker poll cycle failed: {error.__class__.__name__}: {error}"
+                    )
+                )
+                if run_once:
+                    return
+                time.sleep(poll_interval)
+                continue
 
-            run = claim_next_zero_trust_run(worker_id=worker_id)
             if run is None:
                 if run_once:
                     self.stdout.write("No queued assessment runs found.")
@@ -50,7 +61,14 @@ class Command(BaseCommand):
                 continue
 
             self.stdout.write(f"Processing assessment run {run.external_id}")
-            process_zero_trust_run(run.external_id, worker_id=worker_id)
+            try:
+                process_zero_trust_run(run.external_id, worker_id=worker_id)
+            except Exception as error:
+                self.stderr.write(
+                    self.style.ERROR(
+                        f"Assessment run {run.external_id} crashed in worker loop: {error.__class__.__name__}: {error}"
+                    )
+                )
 
             if run_once:
                 return

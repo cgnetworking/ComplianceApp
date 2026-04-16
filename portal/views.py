@@ -17,17 +17,21 @@ from django.views.decorators.http import require_GET, require_http_methods
 from .services import (
     ValidationError,
     approve_uploaded_policy,
+    create_risk_record,
     create_review_checklist_item,
     create_uploaded_policies,
     create_vendor_responses,
+    delete_risk_record,
     delete_review_checklist_item,
     delete_uploaded_policy,
     get_bootstrap_payload,
+    list_risk_register,
     normalize_control_state,
     normalize_mapping_payload,
     replace_mapping_payload,
     replace_risk_register,
     set_state_payload,
+    update_risk_record,
     update_uploaded_policy_approver,
     update_review_state,
     user_is_policy_reader,
@@ -220,6 +224,13 @@ def parse_json_body(request: HttpRequest) -> object:
         raise ValidationError("Invalid JSON body.") from error
 
 
+def parse_json_body_or_400(request: HttpRequest) -> tuple[object | None, JsonResponse | None]:
+    try:
+        return parse_json_body(request), None
+    except ValidationError as error:
+        return None, JsonResponse({"detail": str(error)}, status=400)
+
+
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=True)
 @ensure_csrf_cookie
@@ -263,10 +274,9 @@ def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResp
     if not request.user.is_staff:
         return JsonResponse({"detail": "Only admins can assign policy approvers."}, status=403)
 
-    try:
-        body = parse_json_body(request)
-    except ValidationError as error:
-        return JsonResponse({"detail": str(error)}, status=400)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
 
     if not isinstance(body, dict) or "approver" not in body:
         return JsonResponse({"detail": "Approver is required."}, status=400)
@@ -337,11 +347,24 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["PUT"])
+@require_http_methods(["GET", "POST", "PUT"])
 def risk_register(request: HttpRequest) -> JsonResponse:
-    body = parse_json_body(request)
-    items = body.get("riskRegister") if isinstance(body, dict) and "riskRegister" in body else body
+    if request.method == "GET":
+        return JsonResponse({"riskRegister": list_risk_register()})
 
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
+    if request.method == "POST":
+        payload = body.get("risk") if isinstance(body, dict) and "risk" in body else body
+        try:
+            created_risk = create_risk_record(payload)
+        except ValidationError as error:
+            return JsonResponse({"detail": str(error)}, status=400)
+        return JsonResponse({"risk": created_risk}, status=201)
+
+    items = body.get("riskRegister") if isinstance(body, dict) and "riskRegister" in body else body
     try:
         risk_register_payload = replace_risk_register(items)
     except ValidationError as error:
@@ -352,9 +375,39 @@ def risk_register(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["PATCH", "PUT", "DELETE"])
+def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
+    if request.method == "DELETE":
+        try:
+            deleted_risk = delete_risk_record(risk_id)
+        except ValidationError as error:
+            detail = str(error)
+            status_code = 404 if detail == "Risk record was not found." else 400
+            return JsonResponse({"detail": detail}, status=status_code)
+        return JsonResponse({"deletedRisk": deleted_risk})
+
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
+    payload = body.get("risk") if isinstance(body, dict) and "risk" in body else body
+    try:
+        updated_risk = update_risk_record(risk_id, payload)
+    except ValidationError as error:
+        detail = str(error)
+        status_code = 404 if detail == "Risk record was not found." else 400
+        return JsonResponse({"detail": detail}, status=status_code)
+    return JsonResponse({"risk": updated_risk})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def checklist_items(request: HttpRequest) -> JsonResponse:
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
     payload = body.get("checklistItem") if isinstance(body, dict) and "checklistItem" in body else body
 
     try:
@@ -381,7 +434,10 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
 @policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PUT"])
 def review_state(request: HttpRequest) -> JsonResponse:
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
     payload = body.get("reviewState") if isinstance(body, dict) and "reviewState" in body else body
     username = request.user.get_username() if request.user.is_authenticated else "system"
     display_name = request.user.get_full_name() if request.user.is_authenticated else ""
@@ -397,7 +453,10 @@ def review_state(request: HttpRequest) -> JsonResponse:
 @policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PUT"])
 def control_state(request: HttpRequest) -> JsonResponse:
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
     payload = body.get("controlState") if isinstance(body, dict) and "controlState" in body else body
     normalized = normalize_control_state(payload)
     set_state_payload("control_state", normalized)
@@ -408,7 +467,10 @@ def control_state(request: HttpRequest) -> JsonResponse:
 @policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PUT"])
 def mapping_state(request: HttpRequest) -> JsonResponse:
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
     payload = body.get("mapping") if isinstance(body, dict) and "mapping" in body else body
     normalized = normalize_mapping_payload(payload)
     set_state_payload("mapping_state", normalized)

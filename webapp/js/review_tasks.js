@@ -115,9 +115,31 @@
         method: "DELETE",
       });
 
+      const previousReviewState = normalizeReviewStateValue(state.reviewState);
       state.checklistItems = reviewTaskItems().filter((item) => item.id !== normalizedId);
       clearReviewTaskState(normalizedId);
-      saveReviewState();
+      try {
+        await saveReviewState();
+        if (typeof setReviewPersistenceStatus === "function") {
+          setReviewPersistenceStatus("Review tracking saved.", "success");
+        }
+      } catch (error) {
+        state.reviewState = previousReviewState;
+        const detail = error instanceof Error && error.message
+          ? error.message
+          : "Review tracking state could not be updated.";
+        if (typeof setReviewPersistenceStatus === "function") {
+          setReviewPersistenceStatus(detail, "error");
+        }
+        renderReviewTasksPage();
+        setUploadStatus(
+          els.reviewTasksStatus,
+          `Checklist item was removed, but review tracking did not sync: ${detail}`,
+          "error"
+        );
+        return;
+      }
+
       renderReviewTasksPage();
       setUploadStatus(els.reviewTasksStatus, "Checklist item removed from the shared database.", "success");
     } catch (error) {

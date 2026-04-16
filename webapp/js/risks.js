@@ -204,8 +204,9 @@
       ? state.riskRegister.map((risk) => (risk.id === riskId ? nextRisk : risk))
       : [nextRisk].concat(state.riskRegister);
 
+    let persistedRisk = null;
     try {
-      await saveRiskRegister();
+      persistedRisk = await saveRiskRecord(nextRisk, isEditing ? "update" : "create");
     } catch (error) {
       state.riskRegister = previousRiskRegister;
       setRiskFormStatus(error.message || "Unable to save the risk register entry.", "error");
@@ -213,7 +214,7 @@
       return;
     }
 
-    state.selectedRiskId = riskId;
+    state.selectedRiskId = persistedRisk && persistedRisk.id ? persistedRisk.id : riskId;
     state.isAddingRisk = false;
     setRiskFormStatus(
       isEditing ? `Risk updated in the ${riskRegisterLabel()}.` : `Risk added to the ${riskRegisterLabel()}.`,
@@ -525,6 +526,69 @@
   }
   function isRiskClosed(risk) {
     return Boolean(risk.closedDate);
+  }
+  async function saveRiskRecord(riskRecord, mode) {
+    const normalizedMode = mode === "create" ? "create" : "update";
+    const normalizedRisk = normalizeRiskRecord(riskRecord);
+    if (!normalizedRisk) {
+      throw new Error("Risk entry payload was invalid.");
+    }
+
+    try {
+      const payload = normalizedMode === "create"
+        ? await apiRequest("/risks/", {
+            method: "POST",
+            body: JSON.stringify({ risk: normalizedRisk }),
+          })
+        : await apiRequest(`/risks/${encodeURIComponent(normalizedRisk.id)}/`, {
+            method: "PUT",
+            body: JSON.stringify({ risk: normalizedRisk }),
+          });
+
+      const persistedRisk = applyRiskSavePayload(payload, normalizedRisk.id);
+      if (!persistedRisk) {
+        throw new Error("Risk save response was invalid.");
+      }
+      return persistedRisk;
+    } catch (error) {
+      if (!isLegacyRiskSaveFallbackError(error)) {
+        throw error;
+      }
+      await saveRiskRegister();
+      return state.riskRegister.find((risk) => risk.id === normalizedRisk.id) || null;
+    }
+  }
+  function isLegacyRiskSaveFallbackError(error) {
+    const detail = error instanceof Error && error.message
+      ? error.message
+      : "";
+    return detail.includes("(404)") || detail.includes("(405)");
+  }
+  function applyRiskSavePayload(payload, fallbackRiskId) {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+
+    if (Array.isArray(payload.riskRegister)) {
+      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+      if (!state.riskRegister.length) {
+        return null;
+      }
+      return state.riskRegister.find((risk) => risk.id === fallbackRiskId) || state.riskRegister[0];
+    }
+
+    const persistedRisk = normalizeRiskRecord(payload.risk);
+    if (!persistedRisk) {
+      return null;
+    }
+
+    const existingIndex = state.riskRegister.findIndex((risk) => risk.id === persistedRisk.id);
+    if (existingIndex >= 0) {
+      state.riskRegister[existingIndex] = persistedRisk;
+    } else {
+      state.riskRegister = [persistedRisk].concat(state.riskRegister.filter((risk) => risk.id !== fallbackRiskId));
+    }
+    return persistedRisk;
   }
   async function saveRiskRegister() {
     const payload = await apiRequest("/risks/", {

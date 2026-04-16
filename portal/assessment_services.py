@@ -640,66 +640,77 @@ def finalize_zero_trust_run(
         run.profile.save(update_fields=["last_run_at", "updated_at"])
 
 
+def run_status_is_terminal(status: str) -> bool:
+    return status in {
+        ZeroTrustRunStatus.SUCCEEDED,
+        ZeroTrustRunStatus.SUCCEEDED_WITH_WARNINGS,
+        ZeroTrustRunStatus.FAILED,
+        ZeroTrustRunStatus.STALE,
+    }
+
+
 def process_zero_trust_run(run_id: str, *, worker_id: str) -> ZeroTrustAssessmentRun:
     run = get_zero_trust_run(run_id)
-    with tempfile.TemporaryDirectory(prefix=f"{run.external_id}-") as staging_dir_value:
-        staging_dir = Path(staging_dir_value)
-        output_dir = staging_dir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        script_path = staging_dir / "run_assessment.ps1"
-        script_path.write_text(assessment_script_contents(run, output_dir), encoding="utf-8")
+    sequence = initial_worker_sequence(run)
+    warning_lines: list[str] = []
+    process = None
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"{run.external_id}-") as staging_dir_value:
+            staging_dir = Path(staging_dir_value)
+            output_dir = staging_dir / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            script_path = staging_dir / "run_assessment.ps1"
+            script_path.write_text(assessment_script_contents(run, output_dir), encoding="utf-8")
 
-        run.status = ZeroTrustRunStatus.RUNNING
-        run.status_message = "PowerShell assessment is running."
-        run.started_at = timezone.now()
-        run.last_heartbeat_at = run.started_at
-        run.lease_expires_at = run.started_at + timedelta(seconds=settings.ASSESSMENT_WORKER_LEASE_SECONDS)
-        run.worker_id = worker_id
-        run.save(
-            update_fields=[
-                "status",
-                "status_message",
-                "started_at",
-                "last_heartbeat_at",
-                "lease_expires_at",
-                "worker_id",
-                "updated_at",
-            ]
-        )
-
-        sequence = initial_worker_sequence(run)
-        warning_lines: list[str] = []
-        last_heartbeat = timezone.now()
-        create_run_log(
-            run,
-            "Launching PowerShell assessment process.",
-            level="info",
-            stream="system",
-            sequence=sequence + 1,
-        )
-        sequence += 1
-
-        try:
-            process = subprocess.Popen(
-                ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script_path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
+            run.status = ZeroTrustRunStatus.RUNNING
+            run.status_message = "PowerShell assessment is running."
+            run.started_at = timezone.now()
+            run.last_heartbeat_at = run.started_at
+            run.lease_expires_at = run.started_at + timedelta(seconds=settings.ASSESSMENT_WORKER_LEASE_SECONDS)
+            run.worker_id = worker_id
+            run.save(
+                update_fields=[
+                    "status",
+                    "status_message",
+                    "started_at",
+                    "last_heartbeat_at",
+                    "lease_expires_at",
+                    "worker_id",
+                    "updated_at",
+                ]
             )
-        except FileNotFoundError as error:
-            finalize_zero_trust_run(
+
+            last_heartbeat = timezone.now()
+            create_run_log(
                 run,
-                status=ZeroTrustRunStatus.FAILED,
-                status_message="PowerShell 7 is not installed on the server.",
-                error_summary=str(error),
+                "Launching PowerShell assessment process.",
+                level="info",
+                stream="system",
+                sequence=sequence + 1,
             )
-            create_run_log(run, run.status_message, level="error", stream="system", sequence=sequence + 1)
-            raise
+            sequence += 1
 
-        try:
+            try:
+                process = subprocess.Popen(
+                    ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script_path)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                )
+            except FileNotFoundError as error:
+                finalize_zero_trust_run(
+                    run,
+                    status=ZeroTrustRunStatus.FAILED,
+                    status_message="PowerShell 7 is not installed on the server.",
+                    error_summary=str(error),
+                )
+                sequence += 1
+                create_run_log(run, run.status_message, level="error", stream="system", sequence=sequence)
+                return run
+
             assert process.stdout is not None
             for raw_line in process.stdout:
                 line = raw_line.rstrip()
@@ -770,18 +781,51 @@ def process_zero_trust_run(run_id: str, *, worker_id: str) -> ZeroTrustAssessmen
                 sequence=sequence,
             )
             return run
-        except AssessmentValidationError as error:
+    except AssessmentValidationError as error:
+        exit_code = process.returncode if process is not None and process.poll() is not None else None
+        if not run_status_is_terminal(run.status):
+            status_message = (
+                "Assessment completed but artifact ingestion failed."
+                if run.status == ZeroTrustRunStatus.INGESTING
+                else "Assessment run validation failed."
+            )
             finalize_zero_trust_run(
                 run,
                 status=ZeroTrustRunStatus.FAILED,
-                status_message="Assessment completed but artifact ingestion failed.",
+                status_message=status_message,
                 warning_summary="\n".join(warning_lines[:10]),
                 error_summary=str(error),
-                exit_code=process.returncode if process.poll() is not None else None,
+                exit_code=exit_code,
             )
-            sequence += 1
-            create_run_log(run, str(error), level="error", stream="system", sequence=sequence)
-            return run
+        sequence += 1
+        create_run_log(run, str(error), level="error", stream="system", sequence=sequence)
+        return run
+    except Exception as error:
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    process.kill()
+                    process.wait()
+                except OSError:
+                    pass
+
+        exit_code = process.returncode if process is not None and process.poll() is not None else None
+        error_message = f"{error.__class__.__name__}: {error}"
+        if not run_status_is_terminal(run.status):
+            finalize_zero_trust_run(
+                run,
+                status=ZeroTrustRunStatus.FAILED,
+                status_message="Assessment worker encountered an unexpected error.",
+                warning_summary="\n".join(warning_lines[:10]),
+                error_summary=error_message,
+                exit_code=exit_code,
+            )
+        sequence += 1
+        create_run_log(run, f"Unhandled worker error: {error_message}", level="error", stream="system", sequence=sequence)
+        return run
 
 
 def get_zero_trust_artifact(run_id: str, *, relative_path: str | None = None) -> ZeroTrustAssessmentArtifact:

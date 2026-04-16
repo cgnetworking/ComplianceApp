@@ -43,6 +43,7 @@ urlpatterns = [
     ),
     path("vendors/uploads/", views.upload_vendors, name="api-vendor-uploads"),
     path("risks/", views.risk_register, name="api-risks"),
+    path("risks/<str:risk_id>/", views.risk_record, name="api-risk-record"),
     path("checklist/", views.checklist_items, name="api-checklist-items"),
     path("checklist/<str:checklist_item_id>/", views.checklist_item, name="api-checklist-item"),
     path("state/mapping/", views.mapping_state, name="api-mapping-state"),

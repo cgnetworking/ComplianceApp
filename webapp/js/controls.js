@@ -10,11 +10,73 @@
     selectedDocumentId: "",
     showAll: false,
   };
+  let controlStateMutationVersion = 0;
 
   function renderControlsPage() {
     const controls = filteredControls();
     renderControlsTable(controls);
     renderControlDetail();
+  }
+  function controlPersistenceStatusValue() {
+    if (!state.controlPersistenceStatus || typeof state.controlPersistenceStatus !== "object") {
+      return { message: "", tone: "" };
+    }
+    return {
+      message: typeof state.controlPersistenceStatus.message === "string" ? state.controlPersistenceStatus.message : "",
+      tone: typeof state.controlPersistenceStatus.tone === "string" ? state.controlPersistenceStatus.tone : "",
+    };
+  }
+  function controlPersistenceStatusElement() {
+    if (!els.controlDetail) {
+      return null;
+    }
+    return els.controlDetail.querySelector("[data-control-save-status]");
+  }
+  function controlPersistenceFallbackStatusElement() {
+    if (page === "controls" && els.mappingUploadStatus) {
+      return els.mappingUploadStatus;
+    }
+    if (page === "policies" && els.policyUploadStatus) {
+      return els.policyUploadStatus;
+    }
+    return null;
+  }
+  function renderControlPersistenceStatus() {
+    const status = controlPersistenceStatusValue();
+    const detailStatus = controlPersistenceStatusElement();
+    if (detailStatus) {
+      setUploadStatus(
+        detailStatus,
+        status.message || "Control changes sync with the shared portal database.",
+        status.tone || ""
+      );
+    }
+
+    const fallbackStatus = controlPersistenceFallbackStatusElement();
+    if (fallbackStatus && status.message) {
+      setUploadStatus(fallbackStatus, status.message, status.tone || "");
+    }
+  }
+  function setControlPersistenceStatus(message, tone) {
+    state.controlPersistenceStatus = {
+      message: message || "",
+      tone: tone || "",
+    };
+    renderControlPersistenceStatus();
+  }
+  function cloneControlStateSnapshot() {
+    const snapshot = {};
+    Object.entries(state.controlState || {}).forEach(([controlId, entry]) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const clonedEntry = { ...entry };
+      if (Array.isArray(entry.policyDocumentIds)) {
+        clonedEntry.policyDocumentIds = entry.policyDocumentIds.slice();
+      }
+      snapshot[controlId] = clonedEntry;
+    });
+    return snapshot;
   }
   function renderControlsTable(controls) {
     if (!els.controlsBody) {
@@ -105,6 +167,7 @@
           <span class="status-pill ${control.policyDocumentIds.length ? "is-active" : ""}">${control.policyDocumentIds.length} mapped policies</span>
         </div>
       </div>
+      <p class="helper-note" data-control-save-status></p>
 
       <div class="detail-grid">
         <article class="detail-card">
@@ -196,6 +259,7 @@
       </div>
     `;
     renderControlPolicyOptions();
+    renderControlPersistenceStatus();
   }
   function controlPolicyMapper() {
     if (!els.controlDetail) {
@@ -595,7 +659,7 @@
   function isBaseExcluded(control) {
     return normalizeControlApplicability(control.applicability) === "Excluded";
   }
-  function saveControlStateEntry(controlId, nextState) {
+  async function saveControlStateEntry(controlId, nextState) {
     const applicability = normalizeControlApplicability(nextState.applicability);
     const reason = typeof nextState.reason === "string" ? nextState.reason : "";
     const reviewFrequency = normalizeControlReviewFrequency(nextState.reviewFrequency);
@@ -624,17 +688,38 @@
       entry.preferredDocumentId = preferredDocumentId;
     }
 
+    const previousControlState = cloneControlStateSnapshot();
+    const mutationVersion = ++controlStateMutationVersion;
+    setControlPersistenceStatus("Saving control changes...", "info");
+
     if (!Object.keys(entry).length) {
       delete state.controlState[controlId];
     } else {
       state.controlState[controlId] = entry;
     }
-    saveControlState();
+
+    try {
+      await saveControlState();
+      if (mutationVersion === controlStateMutationVersion) {
+        setControlPersistenceStatus("Control changes saved.", "success");
+      }
+      return mutationVersion === controlStateMutationVersion;
+    } catch (error) {
+      if (mutationVersion !== controlStateMutationVersion) {
+        return false;
+      }
+      state.controlState = previousControlState;
+      const detail = error instanceof Error && error.message
+        ? error.message
+        : "Unable to save control changes.";
+      setControlPersistenceStatus(detail, "error");
+      throw error;
+    }
   }
-  function setControlApplicability(controlId, applicability) {
+  async function setControlApplicability(controlId, applicability) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -645,15 +730,15 @@
     if (nextState.applicability !== "Excluded") {
       nextState.reason = "";
     }
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function setControlExclusion(controlId, excluded) {
-    setControlApplicability(controlId, excluded ? "Excluded" : "");
+  async function setControlExclusion(controlId, excluded) {
+    return setControlApplicability(controlId, excluded ? "Excluded" : "");
   }
-  function updateControlReviewFrequency(controlId, reviewFrequency) {
+  async function updateControlReviewFrequency(controlId, reviewFrequency) {
     const control = controlsById.get(controlId);
     if (!control) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -663,12 +748,12 @@
       ...existing,
       reviewFrequency: normalizedFrequency === baseReviewFrequency ? "" : normalizedFrequency,
     };
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function updateControlOwner(controlId, owner) {
+  async function updateControlOwner(controlId, owner) {
     const control = controlsById.get(controlId);
     if (!control) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -678,12 +763,12 @@
       ...existing,
       owner: normalizedOwner === baseOwner ? "" : normalizedOwner,
     };
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function updateControlReason(controlId, reason) {
+  async function updateControlReason(controlId, reason) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -692,12 +777,12 @@
       applicability: "Excluded",
       reason,
     };
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function updateControlPolicyMapping(controlId, nextPolicyDocumentIds, preferredDocumentId) {
+  async function updateControlPolicyMapping(controlId, nextPolicyDocumentIds, preferredDocumentId) {
     const control = controlsById.get(controlId);
     if (!control) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -728,35 +813,35 @@
       delete nextState.preferredDocumentId;
     }
 
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function mapPolicyToControl(controlId, documentId) {
+  async function mapPolicyToControl(controlId, documentId) {
     const normalizedDocumentId = normalizeControlPreferredDocumentId(documentId);
     if (!normalizedDocumentId || !documentsById.has(normalizedDocumentId)) {
-      return;
+      return false;
     }
 
     const control = getControlView(controlId);
     if (!control || control.policyDocumentIds.includes(normalizedDocumentId)) {
-      return;
+      return false;
     }
 
     const nextPolicyDocumentIds = control.policyDocumentIds.concat(normalizedDocumentId);
-    updateControlPolicyMapping(
+    return updateControlPolicyMapping(
       controlId,
       nextPolicyDocumentIds,
       control.preferredDocumentId || normalizedDocumentId
     );
   }
-  function unmapPolicyFromControl(controlId, documentId) {
+  async function unmapPolicyFromControl(controlId, documentId) {
     const normalizedDocumentId = normalizeControlPreferredDocumentId(documentId);
     if (!normalizedDocumentId) {
-      return;
+      return false;
     }
 
     const control = getControlView(controlId);
     if (!control || !control.policyDocumentIds.includes(normalizedDocumentId)) {
-      return;
+      return false;
     }
 
     const nextPolicyDocumentIds = control.policyDocumentIds.filter((item) => item !== normalizedDocumentId);
@@ -764,7 +849,7 @@
       ? (nextPolicyDocumentIds[0] || "")
       : control.preferredDocumentId;
 
-    updateControlPolicyMapping(controlId, nextPolicyDocumentIds, nextPreferredDocumentId);
+    return updateControlPolicyMapping(controlId, nextPolicyDocumentIds, nextPreferredDocumentId);
   }
   function filteredControls() {
     const searchLower = state.search.trim().toLowerCase();

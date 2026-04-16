@@ -20,7 +20,34 @@ from .assessment_services import (
     list_zero_trust_run_logs,
     save_zero_trust_profile,
 )
-from .views import api_login_required, parse_json_body, render_portal_page
+from .views import api_login_required, parse_json_body_or_400, render_portal_page
+
+
+ASSESSMENT_REPORT_CSP = (
+    "default-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'self'; "
+    "form-action 'none'; "
+    "connect-src 'none'; "
+    "img-src data: blob: http: https:; "
+    "font-src data: http: https:; "
+    "media-src data: blob: http: https:; "
+    "style-src 'unsafe-inline' http: https:; "
+    "script-src 'unsafe-inline' http: https:; "
+    "object-src 'none'; "
+    "sandbox allow-scripts allow-forms allow-downloads allow-modals allow-popups;"
+)
+
+
+def apply_assessment_report_security_headers(response: HttpResponse) -> None:
+    response["Content-Security-Policy"] = ASSESSMENT_REPORT_CSP
+    response["Cross-Origin-Opener-Policy"] = "same-origin"
+    response["Permissions-Policy"] = (
+        "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), "
+        "magnetometer=(), microphone=(), payment=(), usb=()"
+    )
+    response["Referrer-Policy"] = "no-referrer"
+    response["X-Content-Type-Options"] = "nosniff"
 
 
 def assessment_staff_page_required(view_func):
@@ -54,7 +81,10 @@ def assessments_collection(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
         return JsonResponse({"profiles": list_zero_trust_profiles()})
 
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
     payload = body.get("profile") if isinstance(body, dict) and "profile" in body else body
     try:
         profile = save_zero_trust_profile(payload)
@@ -154,14 +184,7 @@ def assessment_run_report(request: HttpRequest, run_id: str) -> HttpResponse:
         return HttpResponse(str(error), status=404, content_type="text/plain; charset=utf-8")
 
     response = HttpResponse(html, content_type="text/html; charset=utf-8")
-    response["Content-Security-Policy"] = (
-        "default-src 'self' data: blob:; "
-        "img-src 'self' data: blob:; "
-        "font-src 'self' data:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval';"
-    )
-    response["X-Content-Type-Options"] = "nosniff"
+    apply_assessment_report_security_headers(response)
     return response
 
 
@@ -175,5 +198,9 @@ def assessment_run_artifact(request: HttpRequest, run_id: str, relative_path: st
         return HttpResponse(str(error), status=404, content_type="text/plain; charset=utf-8")
 
     response = HttpResponse(bytes(artifact.content), content_type=artifact.content_type)
+    if artifact.content_type.lower().startswith("text/html"):
+        apply_assessment_report_security_headers(response)
+    else:
+        response["Referrer-Policy"] = "no-referrer"
     response["X-Content-Type-Options"] = "nosniff"
     return response

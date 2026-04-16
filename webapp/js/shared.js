@@ -150,7 +150,7 @@
       return;
     }
 
-    els.controlDetail.addEventListener("click", (event) => {
+    els.controlDetail.addEventListener("click", async (event) => {
       const addMapping = event.target.closest("[data-control-policy-add]");
       if (addMapping) {
         const controlId = addMapping.dataset.controlPolicyAdd;
@@ -159,7 +159,12 @@
         if (!controlId || !documentId) {
           return;
         }
-        mapPolicyToControl(controlId, documentId);
+        try {
+          await mapPolicyToControl(controlId, documentId);
+        } catch (error) {
+          syncUrlAndRender(renderControlsPage);
+          return;
+        }
         populateFilters();
         syncSelectionToVisibleControls();
         syncUrlAndRender();
@@ -175,13 +180,18 @@
       if (!controlId || !documentId) {
         return;
       }
-      unmapPolicyFromControl(controlId, documentId);
+      try {
+        await unmapPolicyFromControl(controlId, documentId);
+      } catch (error) {
+        syncUrlAndRender(renderControlsPage);
+        return;
+      }
       populateFilters();
       syncSelectionToVisibleControls();
       syncUrlAndRender();
     });
 
-    els.controlDetail.addEventListener("change", (event) => {
+    els.controlDetail.addEventListener("change", async (event) => {
       const policyInput = event.target.closest("[data-control-policy-input]");
       if (policyInput) {
         handleControlPolicyPickerInputChanged();
@@ -190,7 +200,12 @@
 
       const applicability = event.target.closest("[data-control-applicability]");
       if (applicability) {
-        setControlApplicability(applicability.dataset.controlApplicability, applicability.value);
+        try {
+          await setControlApplicability(applicability.dataset.controlApplicability, applicability.value);
+        } catch (error) {
+          syncUrlAndRender(renderControlsPage);
+          return;
+        }
         populateFilters();
         syncSelectionToVisibleControls();
         syncUrlAndRender();
@@ -199,7 +214,12 @@
 
       const reviewFrequency = event.target.closest("[data-control-review-frequency]");
       if (reviewFrequency) {
-        updateControlReviewFrequency(reviewFrequency.dataset.controlReviewFrequency, reviewFrequency.value);
+        try {
+          await updateControlReviewFrequency(reviewFrequency.dataset.controlReviewFrequency, reviewFrequency.value);
+        } catch (error) {
+          syncUrlAndRender(renderControlsPage);
+          return;
+        }
         populateFilters();
         syncSelectionToVisibleControls();
         syncUrlAndRender();
@@ -208,7 +228,12 @@
 
       const owner = event.target.closest("[data-control-owner]");
       if (owner) {
-        updateControlOwner(owner.dataset.controlOwner, owner.value);
+        try {
+          await updateControlOwner(owner.dataset.controlOwner, owner.value);
+        } catch (error) {
+          syncUrlAndRender(renderControlsPage);
+          return;
+        }
         populateFilters();
         syncSelectionToVisibleControls();
         syncUrlAndRender();
@@ -220,7 +245,12 @@
         return;
       }
       const controlId = toggle.dataset.controlExcluded;
-      setControlExclusion(controlId, toggle.checked);
+      try {
+        await setControlExclusion(controlId, toggle.checked);
+      } catch (error) {
+        syncUrlAndRender(renderControlsPage);
+        return;
+      }
       populateFilters();
       syncSelectionToVisibleControls();
       syncUrlAndRender();
@@ -237,7 +267,9 @@
       if (!reason) {
         return;
       }
-      updateControlReason(reason.dataset.exclusionReason, reason.value);
+      void updateControlReason(reason.dataset.exclusionReason, reason.value).catch(() => {
+        syncUrlAndRender(renderControlsPage);
+      });
     });
   }
   function bindPolicyEvents() {
@@ -305,7 +337,13 @@
           if (!documentId || !controlId) {
             return;
           }
-          mapPolicyToControl(controlId, documentId);
+          try {
+            await mapPolicyToControl(controlId, documentId);
+          } catch (error) {
+            initializePolicySelection();
+            syncUrlAndRender(renderPoliciesPage);
+            return;
+          }
           initializePolicySelection();
           syncUrlAndRender(renderPoliciesPage);
           return;
@@ -318,7 +356,13 @@
           if (!controlId || !documentId) {
             return;
           }
-          unmapPolicyFromControl(controlId, documentId);
+          try {
+            await unmapPolicyFromControl(controlId, documentId);
+          } catch (error) {
+            initializePolicySelection();
+            syncUrlAndRender(renderPoliciesPage);
+            return;
+          }
           initializePolicySelection();
           syncUrlAndRender(renderPoliciesPage);
           return;
@@ -371,12 +415,25 @@
     }
 
     if (els.activities) {
-      els.activities.addEventListener("change", (event) => {
+      els.activities.addEventListener("change", async (event) => {
         const target = event.target.closest("[data-activity-id]");
         if (!target) {
           return;
         }
-        updateReviewStateSelection(target.dataset.activityId, target.checked);
+        els.activities.querySelectorAll("[data-activity-id]").forEach((checkbox) => {
+          checkbox.disabled = true;
+        });
+        try {
+          await updateReviewStateSelection(target.dataset.activityId, target.checked);
+        } catch (error) {
+          // The save helper already surfaces a visible error state.
+        } finally {
+          if (els.activities) {
+            els.activities.querySelectorAll("[data-activity-id]").forEach((checkbox) => {
+              checkbox.disabled = false;
+            });
+          }
+        }
       });
     }
 
@@ -592,17 +649,37 @@
       indicator.title = `Completed ${formattedTimestamp}`;
     });
   }
-  function updateReviewStateSelection(itemId, checked) {
+  async function updateReviewStateSelection(itemId, checked) {
     const key = buildReviewStateMonthKey(itemId, state.monthIndex);
-    if (!key) {
+    if (!key || state.reviewStateSaving) {
       return;
     }
-    const wasCompleted = Boolean(state.reviewState.checklist[key] || state.reviewState.activities[key]);
-    state.reviewState.checklist[key] = checked;
-    state.reviewState.activities[key] = checked;
+
+    if (!state.reviewState.checklist || typeof state.reviewState.checklist !== "object") {
+      state.reviewState.checklist = {};
+    }
+    if (!state.reviewState.activities || typeof state.reviewState.activities !== "object") {
+      state.reviewState.activities = {};
+    }
     if (!state.reviewState.completedAt || typeof state.reviewState.completedAt !== "object") {
       state.reviewState.completedAt = {};
     }
+
+    const hadChecklistValue = Object.prototype.hasOwnProperty.call(state.reviewState.checklist, key);
+    const hadActivityValue = Object.prototype.hasOwnProperty.call(state.reviewState.activities, key);
+    const hadCompletedAtValue = Object.prototype.hasOwnProperty.call(state.reviewState.completedAt, key);
+    const previousChecklistValue = state.reviewState.checklist[key];
+    const previousActivityValue = state.reviewState.activities[key];
+    const previousCompletedAtValue = state.reviewState.completedAt[key];
+    const wasCompleted = Boolean(previousChecklistValue || previousActivityValue);
+
+    state.reviewStateSaving = true;
+    if (typeof setReviewPersistenceStatus === "function") {
+      setReviewPersistenceStatus("Saving review activity...", "info");
+    }
+
+    state.reviewState.checklist[key] = checked;
+    state.reviewState.activities[key] = checked;
     if (checked) {
       if (!wasCompleted || !state.reviewState.completedAt[key]) {
         state.reviewState.completedAt[key] = new Date().toISOString();
@@ -610,9 +687,45 @@
     } else {
       delete state.reviewState.completedAt[key];
     }
-    saveReviewState();
     renderReviewsPage();
     renderReviewCompletionIndicators();
+
+    try {
+      await saveReviewState();
+      if (typeof setReviewPersistenceStatus === "function") {
+        setReviewPersistenceStatus("Review activity saved.", "success");
+      }
+      renderReviewsPage();
+      renderReviewCompletionIndicators();
+    } catch (error) {
+      if (hadChecklistValue) {
+        state.reviewState.checklist[key] = previousChecklistValue;
+      } else {
+        delete state.reviewState.checklist[key];
+      }
+      if (hadActivityValue) {
+        state.reviewState.activities[key] = previousActivityValue;
+      } else {
+        delete state.reviewState.activities[key];
+      }
+      if (hadCompletedAtValue) {
+        state.reviewState.completedAt[key] = previousCompletedAtValue;
+      } else {
+        delete state.reviewState.completedAt[key];
+      }
+
+      const detail = error instanceof Error && error.message
+        ? error.message
+        : "Unable to save review activity.";
+      if (typeof setReviewPersistenceStatus === "function") {
+        setReviewPersistenceStatus(detail, "error");
+      }
+      renderReviewsPage();
+      renderReviewCompletionIndicators();
+      throw error;
+    } finally {
+      state.reviewStateSaving = false;
+    }
   }
   function syncSearchSelection() {
     if (page === "policies") {
@@ -870,32 +983,32 @@
       uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : "",
     };
   }
-  function saveReviewState() {
-    void apiRequest("/state/review/", {
+  async function saveReviewState() {
+    const payload = await apiRequest("/state/review/", {
       method: "PUT",
       body: JSON.stringify({ reviewState: state.reviewState }),
-    }).then((payload) => {
-      if (!payload || typeof payload.reviewState !== "object") {
-        return;
-      }
-      state.reviewState = normalizeReviewStateValue(payload.reviewState);
-      if (page === "reviews") {
-        renderReviewsPage();
-        renderReviewCompletionIndicators();
-      } else if (page === "audit-log" && typeof renderAuditLogPage === "function") {
-        renderAuditLogPage();
-      }
-    }).catch(() => {
-      console.error("Failed to persist review state to the API.");
     });
+
+    if (!payload || !payload.reviewState || typeof payload.reviewState !== "object" || Array.isArray(payload.reviewState)) {
+      throw new Error("Review state save response was invalid.");
+    }
+
+    state.reviewState = normalizeReviewStateValue(payload.reviewState);
+    return state.reviewState;
   }
-  function saveControlState() {
-    void apiRequest("/state/control/", {
+  async function saveControlState() {
+    const payload = await apiRequest("/state/control/", {
       method: "PUT",
       body: JSON.stringify({ controlState: state.controlState }),
-    }).catch(() => {
-      console.error("Failed to persist control state to the API.");
     });
+
+    if (!payload || !payload.controlState || typeof payload.controlState !== "object" || Array.isArray(payload.controlState)) {
+      throw new Error("Control state save response was invalid.");
+    }
+
+    state.controlState = payload.controlState;
+    pruneControlState();
+    return state.controlState;
   }
   function setUploadStatus(element, message, tone) {
     if (!element) {

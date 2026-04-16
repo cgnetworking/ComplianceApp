@@ -8,6 +8,7 @@ import re
 import uuid
 from datetime import date, datetime, timezone as dt_timezone
 
+import bleach
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
@@ -26,20 +27,59 @@ from .models import (
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
 SUPPORTED_MAPPING_EXTENSIONS = {"json", "csv"}
 TEXT_VENDOR_EXTENSIONS = {"csv", "json", "txt", "md", "markdown", "html", "htm", "xml"}
-BLOCKED_TAGS_RE = re.compile(
-    r"<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*>.*?<\s*/\s*\1\s*>",
-    re.IGNORECASE | re.DOTALL,
+HTML_ALLOWED_TAGS = frozenset(
+    {
+        "a",
+        "b",
+        "blockquote",
+        "br",
+        "code",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "s",
+        "span",
+        "strong",
+        "sub",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "u",
+        "ul",
+    }
 )
-BLOCKED_SINGLE_TAG_RE = re.compile(
-    r"<\s*(script|style|iframe|object|embed|form|link|meta)\b[^>]*?/?>",
-    re.IGNORECASE,
+HTML_ALLOWED_ATTRIBUTES = {
+    "*": ["class"],
+    "a": ["href", "title", "target", "rel"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"],
+}
+HTML_ALLOWED_PROTOCOLS = frozenset({"http", "https", "mailto"})
+HTML_SANITIZER = bleach.sanitizer.Cleaner(
+    tags=HTML_ALLOWED_TAGS,
+    attributes=HTML_ALLOWED_ATTRIBUTES,
+    protocols=HTML_ALLOWED_PROTOCOLS,
+    strip=True,
+    strip_comments=True,
 )
-EVENT_HANDLER_RE = re.compile(r"\s+on[a-z0-9_-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)", re.IGNORECASE)
-JAVASCRIPT_QUOTED_ATTR_RE = re.compile(
-    r"""\s+(href|src)\s*=\s*(["'])\s*javascript:[^"']*\2""",
-    re.IGNORECASE,
-)
-JAVASCRIPT_UNQUOTED_ATTR_RE = re.compile(r"\s+(href|src)\s*=\s*javascript:[^\s>]+", re.IGNORECASE)
 PURPOSE_RE = re.compile(r"^## 1\. Purpose\s+([\s\S]*?)\s+## ", re.MULTILINE)
 ANNEX_A_CONTROL_DOMAIN_BY_FAMILY = {
     "5": "Organizational",
@@ -80,6 +120,17 @@ CSV_DOCUMENT_FOLDER_FIELDS = ("documentfolder", "policyfolder")
 CSV_DOCUMENT_PURPOSE_FIELDS = ("documentpurpose", "policypurpose")
 POLICY_READER_GROUP_NAME = "Policy Reader"
 PENDING_POLICY_APPROVER = "Pending review"
+RISK_RECORD_MODEL_FIELDS = (
+    "risk",
+    "probability",
+    "impact",
+    "initial_risk_level",
+    "date",
+    "owner",
+    "closed_date",
+    "created_at",
+    "updated_at",
+)
 
 
 class ValidationError(Exception):
@@ -258,7 +309,7 @@ def normalize_mapping_documents(value: object) -> list[dict[str, object]]:
                 "path": normalize_string(item.get("path")),
                 "folder": normalize_string(item.get("folder")),
                 "purpose": normalize_string(item.get("purpose")),
-                "contentHtml": normalize_string(item.get("contentHtml")),
+                "contentHtml": sanitize_uploaded_html(normalize_string(item.get("contentHtml"))),
                 "isUploaded": bool(item.get("isUploaded")),
                 "originalFilename": normalize_string(item.get("originalFilename")),
             }
@@ -1027,37 +1078,96 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
     return [item.to_portal_dict() for item in created_items]
 
 
-def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
+def list_risk_register() -> list[dict[str, object]]:
+    return [item.to_portal_dict() for item in RiskRecord.objects.all()]
+
+
+def risk_record_model_values(record: dict[str, object]) -> dict[str, object]:
+    return {
+        "risk": record["risk"],
+        "probability": record["probability"],
+        "impact": record["impact"],
+        "initial_risk_level": record["initial_risk_level"],
+        "date": record["date"],
+        "owner": record["owner"],
+        "closed_date": record["closed_date"],
+        "created_at": record["created_at"],
+        "updated_at": record["updated_at"],
+    }
+
+
+def upsert_risk_register(items: list[object]) -> list[dict[str, object]]:
     if not isinstance(items, list):
         raise ValidationError("Risk register payload must be a list.")
-
-    identifiers: list[str] = []
 
     with transaction.atomic():
         for item in items:
             record = normalize_risk_record(item)
-            identifiers.append(record["external_id"])
             RiskRecord.objects.update_or_create(
                 external_id=record["external_id"],
-                defaults={
-                    "risk": record["risk"],
-                    "probability": record["probability"],
-                    "impact": record["impact"],
-                    "initial_risk_level": record["initial_risk_level"],
-                    "date": record["date"],
-                    "owner": record["owner"],
-                    "closed_date": record["closed_date"],
-                    "created_at": record["created_at"],
-                    "updated_at": record["updated_at"],
-                },
+                defaults=risk_record_model_values(record),
             )
 
-        if identifiers:
-            RiskRecord.objects.exclude(external_id__in=identifiers).delete()
-        else:
-            RiskRecord.objects.all().delete()
+    return list_risk_register()
 
-    return [item.to_portal_dict() for item in RiskRecord.objects.all()]
+
+def replace_risk_register(items: list[object]) -> list[dict[str, object]]:
+    return upsert_risk_register(items)
+
+
+def create_risk_record(payload: object) -> dict[str, object]:
+    record = normalize_risk_record(payload)
+    if RiskRecord.objects.filter(external_id=record["external_id"]).exists():
+        raise ValidationError("Risk record already exists.")
+
+    created = RiskRecord.objects.create(
+        external_id=record["external_id"],
+        **risk_record_model_values(record),
+    )
+    return created.to_portal_dict()
+
+
+def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
+    normalized_external_id = normalize_string(external_id)
+    if not normalized_external_id:
+        raise ValidationError("Risk id is required.")
+    if not isinstance(payload, dict):
+        raise ValidationError("Risk payload must be an object.")
+
+    try:
+        existing = RiskRecord.objects.get(external_id=normalized_external_id)
+    except RiskRecord.DoesNotExist as error:
+        raise ValidationError("Risk record was not found.") from error
+
+    payload_id = normalize_string(payload.get("id"))
+    if payload_id and payload_id != normalized_external_id:
+        raise ValidationError("Risk id does not match request path.")
+
+    merged_payload = existing.to_portal_dict()
+    merged_payload.update(payload)
+    merged_payload["id"] = normalized_external_id
+    normalized_record = normalize_risk_record(merged_payload)
+    next_values = risk_record_model_values(normalized_record)
+
+    for field_name in RISK_RECORD_MODEL_FIELDS:
+        setattr(existing, field_name, next_values[field_name])
+    existing.save(update_fields=list(RISK_RECORD_MODEL_FIELDS))
+    return existing.to_portal_dict()
+
+
+def delete_risk_record(external_id: str) -> dict[str, object]:
+    normalized_external_id = normalize_string(external_id)
+    if not normalized_external_id:
+        raise ValidationError("Risk id is required.")
+
+    try:
+        record = RiskRecord.objects.get(external_id=normalized_external_id)
+    except RiskRecord.DoesNotExist as error:
+        raise ValidationError("Risk record was not found.") from error
+
+    deleted = record.to_portal_dict()
+    record.delete()
+    return deleted
 
 
 def normalize_review_state_boolean_map(value: object) -> dict[str, bool]:
@@ -1577,13 +1687,13 @@ def extract_purpose_from_markdown(markdown: str) -> str:
 
 
 def sanitize_uploaded_html(value: str) -> str:
-    sanitized = BLOCKED_TAGS_RE.sub("", value)
-    sanitized = BLOCKED_SINGLE_TAG_RE.sub("", sanitized)
-    sanitized = EVENT_HANDLER_RE.sub("", sanitized)
-    sanitized = JAVASCRIPT_QUOTED_ATTR_RE.sub("", sanitized)
-    sanitized = JAVASCRIPT_UNQUOTED_ATTR_RE.sub("", sanitized)
-    sanitized = sanitized.strip()
-    return sanitized or f"<pre class=\"document-pre\">{html.escape(value)}</pre>"
+    raw_html = str(value or "")
+    sanitized = HTML_SANITIZER.clean(raw_html).strip()
+    if sanitized:
+        return sanitized
+    if not raw_html.strip():
+        return ""
+    return f"<pre class=\"document-pre\">{html.escape(raw_html)}</pre>"
 
 
 def build_preview_text(raw_text: str, max_characters: int, max_lines: int) -> str:
