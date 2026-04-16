@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from portal.services.risk_csv import serialize_risk_records_to_csv
 
 
 class RiskMutationTests(TestCase):
@@ -171,3 +175,28 @@ class RiskMutationTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("missing required columns", response.json()["detail"])
+
+    def test_csv_export_escapes_formula_cells(self) -> None:
+        csv_payload = serialize_risk_records_to_csv(
+            [
+                {
+                    "id": "=cmd",
+                    "risk": "+sum(A1:A2)",
+                    "probability": 3,
+                    "impact": 4,
+                    "initialRiskLevel": 12,
+                    "date": "2026-01-10",
+                    "owner": "-owner",
+                    "createdBy": "@creator",
+                    "closedDate": "",
+                    "createdAt": "2026-01-10T00:00:00+00:00",
+                    "updatedAt": "2026-01-10T00:00:00+00:00",
+                }
+            ]
+        )
+
+        row = list(csv.DictReader(io.StringIO(csv_payload)))[0]
+        self.assertEqual(row["id"], "'=cmd")
+        self.assertEqual(row["risk"], "'+sum(A1:A2)")
+        self.assertEqual(row["owner"], "'-owner")
+        self.assertEqual(row["createdBy"], "'@creator")

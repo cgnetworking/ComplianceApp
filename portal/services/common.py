@@ -9,6 +9,7 @@ import uuid
 from datetime import date, datetime, timezone as dt_timezone
 
 import bleach
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
@@ -20,6 +21,20 @@ from ..models import PortalState
 SUPPORTED_POLICY_EXTENSIONS = {"md", "markdown", "txt", "html", "htm"}
 SUPPORTED_MAPPING_EXTENSIONS = {"json", "csv"}
 TEXT_VENDOR_EXTENSIONS = {"csv", "json", "txt", "md", "markdown", "html", "htm", "xml"}
+BINARY_VENDOR_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx"}
+SUPPORTED_VENDOR_EXTENSIONS = TEXT_VENDOR_EXTENSIONS | BINARY_VENDOR_EXTENSIONS
+DANGEROUS_UPLOAD_MIME_TYPES = frozenset(
+    {
+        "application/x-dosexec",
+        "application/x-executable",
+        "application/x-msdos-program",
+        "application/x-msdownload",
+        "application/x-sh",
+        "application/x-shellscript",
+        "application/x-bat",
+    }
+)
+EICAR_SIGNATURE = b"EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
 HTML_ALLOWED_TAGS = frozenset(
     {
         "a",
@@ -1034,14 +1049,105 @@ def file_name_base(file_name: str) -> str:
     return normalized or str(file_name)
 
 
-def decode_upload(uploaded_file: UploadedFile) -> str:
+def upload_size_label(size_bytes: int) -> str:
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} byte(s)"
+
+
+def normalized_upload_content_type(uploaded_file: UploadedFile) -> str:
+    return normalize_string(uploaded_file.content_type).split(";", 1)[0].strip().lower()
+
+
+def read_upload_bytes(uploaded_file: UploadedFile, *, max_bytes: int | None = None) -> bytes:
+    if max_bytes is not None and max_bytes > 0 and int(uploaded_file.size or 0) > max_bytes:
+        raise ValidationError(
+            f"{uploaded_file.name} exceeds the {upload_size_label(max_bytes)} upload limit."
+        )
+
+    chunks: list[bytes] = []
+    bytes_read = 0
+    uploaded_file.seek(0)
     try:
-        return uploaded_file.read().decode("utf-8")
-    except UnicodeDecodeError:
-        uploaded_file.seek(0)
-        return uploaded_file.read().decode("utf-8", errors="replace")
+        for chunk in uploaded_file.chunks():
+            chunk_bytes = chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8", errors="replace")
+            bytes_read += len(chunk_bytes)
+            if max_bytes is not None and max_bytes > 0 and bytes_read > max_bytes:
+                raise ValidationError(
+                    f"{uploaded_file.name} exceeds the {upload_size_label(max_bytes)} upload limit."
+                )
+            chunks.append(chunk_bytes)
     finally:
         uploaded_file.seek(0)
+
+    return b"".join(chunks)
+
+
+def scan_uploaded_file(
+    uploaded_file: UploadedFile,
+    *,
+    max_bytes: int,
+    expect_text: bool,
+) -> None:
+    content_type = normalized_upload_content_type(uploaded_file)
+    if content_type in DANGEROUS_UPLOAD_MIME_TYPES:
+        raise ValidationError(f"{uploaded_file.name} uses a blocked upload type.")
+
+    payload = read_upload_bytes(uploaded_file, max_bytes=max_bytes)
+    if expect_text and b"\x00" in payload:
+        raise ValidationError(f"{uploaded_file.name} appears to be binary data, but a text file was expected.")
+    if bool(getattr(settings, "UPLOAD_SCANNING_ENABLED", True)) and EICAR_SIGNATURE in payload.upper():
+        raise ValidationError(f"{uploaded_file.name} failed upload scanning.")
+
+
+def validate_policy_upload_files(files: list[UploadedFile]) -> None:
+    max_files = int(getattr(settings, "POLICY_UPLOAD_MAX_FILES", 20))
+    if len(files) > max_files:
+        raise ValidationError(f"Upload up to {max_files} policy file(s) at a time.")
+
+    max_bytes = int(getattr(settings, "POLICY_UPLOAD_MAX_FILE_BYTES", 2097152))
+    for uploaded_file in files:
+        extension = file_extension(uploaded_file.name)
+        if extension not in SUPPORTED_POLICY_EXTENSIONS:
+            continue
+        scan_uploaded_file(uploaded_file, max_bytes=max_bytes, expect_text=True)
+
+
+def validate_mapping_upload_file(file_obj: UploadedFile) -> None:
+    extension = file_extension(file_obj.name)
+    if extension not in SUPPORTED_MAPPING_EXTENSIONS:
+        raise ValidationError("Upload a JSON or CSV mapping file (.json, .csv).")
+    scan_uploaded_file(
+        file_obj,
+        max_bytes=int(getattr(settings, "MAPPING_UPLOAD_MAX_FILE_BYTES", 5242880)),
+        expect_text=True,
+    )
+
+
+def validate_vendor_upload_files(files: list[UploadedFile]) -> None:
+    max_files = int(getattr(settings, "VENDOR_UPLOAD_MAX_FILES", 25))
+    if len(files) > max_files:
+        raise ValidationError(f"Upload up to {max_files} vendor response file(s) at a time.")
+
+    max_bytes = int(getattr(settings, "VENDOR_UPLOAD_MAX_FILE_BYTES", 10485760))
+    allowed_extensions = ", ".join(sorted(SUPPORTED_VENDOR_EXTENSIONS))
+    for uploaded_file in files:
+        extension = file_extension(uploaded_file.name)
+        if extension not in SUPPORTED_VENDOR_EXTENSIONS:
+            raise ValidationError(
+                f"{uploaded_file.name} is not a supported vendor upload type. Allowed extensions: {allowed_extensions}."
+            )
+        scan_uploaded_file(uploaded_file, max_bytes=max_bytes, expect_text=extension in TEXT_VENDOR_EXTENSIONS)
+
+
+def decode_upload(uploaded_file: UploadedFile, *, max_bytes: int | None = None) -> str:
+    payload = read_upload_bytes(uploaded_file, max_bytes=max_bytes)
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return payload.decode("utf-8", errors="replace")
 
 
 def inline_markup(text: str) -> str:

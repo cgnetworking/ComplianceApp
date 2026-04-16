@@ -89,6 +89,26 @@ class VendorDownloadServiceTests(TestCase):
         self.assertEqual(content_type, "text/csv; charset=utf-8")
         self.assertSetEqual(ids, {"vendor-download-3", "vendor-download-4"})
 
+    def test_all_vendor_download_escapes_formula_cells(self) -> None:
+        self.create_vendor_response(
+            external_id="=vendor-download-5",
+            vendor_name="+Vendor",
+            file_name="-file.csv",
+            extension="csv",
+            mime_type="text/csv",
+            raw_text="@raw",
+            summary="=summary",
+            status="-status",
+        )
+
+        _, content, _ = build_all_vendor_responses_download()
+        row = list(csv.DictReader(io.StringIO(content.decode("utf-8"))))[0]
+        self.assertEqual(row["id"], "'=vendor-download-5")
+        self.assertEqual(row["vendorName"], "'+Vendor")
+        self.assertEqual(row["fileName"], "'-file.csv")
+        self.assertEqual(row["summary"], "'=summary")
+        self.assertEqual(row["rawText"], "'@raw")
+
 
 class VendorDownloadViewTests(TestCase):
     def setUp(self) -> None:

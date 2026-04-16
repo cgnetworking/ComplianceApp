@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
@@ -137,7 +138,10 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
             )
             continue
 
-        raw_text = decode_upload(uploaded_file)
+        raw_text = decode_upload(
+            uploaded_file,
+            max_bytes=int(getattr(settings, "POLICY_UPLOAD_MAX_FILE_BYTES", 2097152)),
+        )
         content_html = sanitize_uploaded_html(raw_text) if extension in {"html", "htm"} else markdown_to_html(raw_text)
         policy = UploadedPolicy.objects.create(
             document_id=f"UPL-TEMP-{uuid.uuid4().hex[:12]}",
@@ -257,7 +261,14 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
 
     for uploaded_file in files:
         extension = file_extension(uploaded_file.name)
-        raw_text = decode_upload(uploaded_file).replace("\x00", "").strip() if is_text_like_file(uploaded_file, extension) else ""
+        raw_text = (
+            decode_upload(
+                uploaded_file,
+                max_bytes=int(getattr(settings, "VENDOR_UPLOAD_MAX_FILE_BYTES", 10485760)),
+            ).replace("\x00", "").strip()
+            if is_text_like_file(uploaded_file, extension)
+            else ""
+        )
         preview_text = build_preview_text(raw_text, 1400, 20)
         response = VendorResponse.objects.create(
             external_id=f"vendor-{uuid.uuid4().hex[:16]}",

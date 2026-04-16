@@ -35,6 +35,7 @@ from .models import (
 
 RUN_WARNING_RE = re.compile(r"\b(?:warn(?:ing)?|skip(?:ped|ping)?)\b", re.IGNORECASE)
 ENTRYPOINT_CANDIDATE_NAMES = ("ZeroTrustAssessmentReport.html",)
+SAFE_CERTIFICATE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class AssessmentValidationError(Exception):
@@ -92,6 +93,98 @@ def infer_artifact_type(relative_path: str) -> str:
 
 def powershell_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def safe_certificate_component(value: object, fallback: str) -> str:
+    normalized = normalize_string(value)
+    if not normalized:
+        return fallback
+    sanitized = SAFE_CERTIFICATE_COMPONENT_RE.sub("-", normalized).strip("-.")
+    return sanitized or fallback
+
+
+def resolve_assessment_certificate_root() -> Path:
+    configured_root = normalize_string(
+        getattr(settings, "ASSESSMENT_CERTIFICATE_ROOT", "") or os.environ.get("ASSESSMENT_CERTIFICATE_ROOT", "")
+    )
+    if not configured_root:
+        raise AssessmentValidationError("ASSESSMENT_CERTIFICATE_ROOT is not configured on the server.")
+
+    root_path = Path(configured_root).expanduser()
+    try:
+        root_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError as error:
+        raise AssessmentValidationError("Unable to initialize ASSESSMENT_CERTIFICATE_ROOT on the server.") from error
+    try:
+        os.chmod(root_path, 0o700)
+    except OSError:
+        pass
+    if not root_path.is_dir():
+        raise AssessmentValidationError("ASSESSMENT_CERTIFICATE_ROOT is not a directory.")
+    return root_path.resolve()
+
+
+def certificate_storage_directory(profile: ZeroTrustTenantProfile) -> Path:
+    root_path = resolve_assessment_certificate_root()
+    tenant_component = safe_certificate_component(profile.tenant_id, "tenant")
+    profile_component = safe_certificate_component(profile.external_id, "profile")
+    directory = root_path / f"{tenant_component}-{profile_component}"
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError as error:
+        raise AssessmentValidationError("Unable to create certificate directory in ASSESSMENT_CERTIFICATE_ROOT.") from error
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    return directory
+
+
+def certificate_pfx_file_path(profile: ZeroTrustTenantProfile, certificate_id: str, thumbprint: str) -> Path:
+    storage_dir = certificate_storage_directory(profile)
+    certificate_component = safe_certificate_component(certificate_id, "certificate")
+    thumbprint_component = safe_certificate_component(thumbprint.lower(), "thumbprint")
+    return storage_dir / f"{certificate_component}-{thumbprint_component}.pfx"
+
+
+def write_certificate_pfx_file(profile: ZeroTrustTenantProfile, certificate_id: str, thumbprint: str, content: bytes) -> Path:
+    if not content:
+        raise AssessmentValidationError("Certificate key material is empty.")
+
+    target_path = certificate_pfx_file_path(profile, certificate_id, thumbprint)
+    temp_name = f".{target_path.name}.{uuid.uuid4().hex}.tmp"
+    temp_path = target_path.with_name(temp_name)
+    try:
+        temp_path.write_bytes(content)
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, target_path)
+        os.chmod(target_path, 0o600)
+    except OSError as error:
+        try:
+            if temp_path.exists():
+                temp_path.unlink()
+        except OSError:
+            pass
+        raise AssessmentValidationError("Unable to persist certificate key material to ASSESSMENT_CERTIFICATE_ROOT.") from error
+    return target_path
+
+
+def resolve_certificate_pfx_path(value: object) -> Path:
+    normalized_path = normalize_string(value)
+    if not normalized_path:
+        raise AssessmentValidationError("Assessment run certificate is missing its file path.")
+
+    root_path = resolve_assessment_certificate_root()
+    candidate_path = Path(normalized_path).expanduser()
+    if not candidate_path.is_absolute():
+        candidate_path = root_path / candidate_path
+
+    resolved_candidate = candidate_path.resolve()
+    try:
+        resolved_candidate.relative_to(root_path)
+    except ValueError as error:
+        raise AssessmentValidationError("Assessment certificate file path escaped ASSESSMENT_CERTIFICATE_ROOT.") from error
+    return resolved_candidate
 
 
 def current_profile_certificate(profile: ZeroTrustTenantProfile) -> ZeroTrustCertificate | None:
@@ -177,9 +270,22 @@ def delete_zero_trust_profile(profile_id: str) -> dict[str, object]:
         raise AssessmentValidationError("Stop or finish the active assessment run before deleting this tenant.")
 
     deleted_profile = build_profile_payload(profile)
+    certificate_paths = list(profile.certificates.values_list("pfx_path", flat=True))
 
     with transaction.atomic():
         profile.delete()
+
+    for certificate_path in certificate_paths:
+        try:
+            resolved_path = resolve_certificate_pfx_path(certificate_path)
+        except AssessmentValidationError:
+            continue
+        try:
+            resolved_path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
 
     return deleted_profile
 
@@ -304,29 +410,37 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
         cas=None,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    pfx_path = write_certificate_pfx_file(profile, certificate_id, thumbprint, pfx_bytes)
 
-    with transaction.atomic():
-        ZeroTrustCertificate.objects.filter(profile=profile, is_current=True).update(is_current=False)
-        stored_certificate = ZeroTrustCertificate.objects.create(
-            external_id=certificate_id,
-            profile=profile,
-            thumbprint=thumbprint,
-            subject=subject_string,
-            serial_number=format(certificate.serial_number, "x").upper(),
-            not_before=aware_certificate_datetime(
-                getattr(certificate, "not_valid_before_utc", certificate.not_valid_before)
-            ),
-            not_after=aware_certificate_datetime(
-                getattr(certificate, "not_valid_after_utc", certificate.not_valid_after)
-            ),
-            key_algorithm="RSA",
-            key_size=2048,
-            public_certificate_der=public_der,
-            pfx_bytes=pfx_bytes,
-            is_current=True,
-        )
-        profile.certificate_thumbprint = thumbprint
-        profile.save(update_fields=["certificate_thumbprint", "updated_at"])
+    try:
+        with transaction.atomic():
+            ZeroTrustCertificate.objects.filter(profile=profile, is_current=True).update(is_current=False)
+            stored_certificate = ZeroTrustCertificate.objects.create(
+                external_id=certificate_id,
+                profile=profile,
+                thumbprint=thumbprint,
+                subject=subject_string,
+                serial_number=format(certificate.serial_number, "x").upper(),
+                not_before=aware_certificate_datetime(
+                    getattr(certificate, "not_valid_before_utc", certificate.not_valid_before)
+                ),
+                not_after=aware_certificate_datetime(
+                    getattr(certificate, "not_valid_after_utc", certificate.not_valid_after)
+                ),
+                key_algorithm="RSA",
+                key_size=2048,
+                public_certificate_der=public_der,
+                pfx_path=str(pfx_path),
+                is_current=True,
+            )
+            profile.certificate_thumbprint = thumbprint
+            profile.save(update_fields=["certificate_thumbprint", "updated_at"])
+    except Exception:
+        try:
+            pfx_path.unlink()
+        except OSError:
+            pass
+        raise
 
     return {
         "profile": build_profile_payload(profile),
@@ -494,10 +608,19 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
     certificate = run.certificate
     if certificate is None:
         raise AssessmentValidationError("Assessment run is missing a certificate.")
-    if not certificate.pfx_bytes:
-        raise AssessmentValidationError("Assessment run certificate is missing PFX material.")
+    pfx_path = resolve_certificate_pfx_path(certificate.pfx_path)
+    if not pfx_path.exists() or not pfx_path.is_file():
+        raise AssessmentValidationError("Assessment run certificate file is missing from ASSESSMENT_CERTIFICATE_ROOT.")
+    try:
+        pfx_bytes = pfx_path.read_bytes()
+    except OSError as error:
+        raise AssessmentValidationError(
+            "Unable to read assessment run certificate file from ASSESSMENT_CERTIFICATE_ROOT."
+        ) from error
+    if not pfx_bytes:
+        raise AssessmentValidationError("Assessment run certificate file is empty.")
 
-    encoded_pfx = base64.b64encode(bytes(certificate.pfx_bytes)).decode("ascii")
+    encoded_pfx = base64.b64encode(pfx_bytes).decode("ascii")
 
     script_lines = [
         "$ErrorActionPreference = 'Stop'",

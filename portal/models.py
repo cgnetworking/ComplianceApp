@@ -260,7 +260,7 @@ class ZeroTrustCertificate(models.Model):
     key_algorithm = models.CharField(max_length=64, default="RSA")
     key_size = models.PositiveIntegerField(default=2048)
     public_certificate_der = models.BinaryField()
-    pfx_bytes = models.BinaryField(default=b"", blank=True)
+    pfx_path = models.CharField(max_length=512, blank=True, default="")
     is_current = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

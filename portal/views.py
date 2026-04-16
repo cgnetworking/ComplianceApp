@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import time
 from functools import wraps
 
 from django.conf import settings
@@ -8,6 +10,7 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -38,6 +41,9 @@ from .services import (
     update_uploaded_policy_approver,
     update_review_state,
     user_is_policy_reader,
+    validate_mapping_upload_file,
+    validate_policy_upload_files,
+    validate_vendor_upload_files,
 )
 from .services.bootstrap import append_portal_audit_entry
 
@@ -121,6 +127,96 @@ def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
     return normalized_username, normalized_display_name
 
 
+def request_client_ip(request: HttpRequest) -> str:
+    forwarded_for = str(request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+    if forwarded_for:
+        return forwarded_for
+    return str(request.META.get("REMOTE_ADDR") or "").strip() or "unknown"
+
+
+def normalized_login_username(raw_username: object) -> str:
+    return str(raw_username or "").strip().lower()
+
+
+def login_throttle_cache_key(*, username: str, client_ip: str, kind: str) -> str:
+    safe_username = normalized_login_username(username) or "anonymous"
+    safe_ip = client_ip or "unknown"
+    return f"portal:auth:{kind}:{safe_username}:{safe_ip}"
+
+
+def login_lockout_remaining_seconds(*, username: str, client_ip: str) -> int:
+    lockout_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout")
+    lockout_until = cache.get(lockout_key)
+    if not isinstance(lockout_until, (int, float)):
+        return 0
+    remaining_seconds = int(lockout_until - time.time())
+    if remaining_seconds <= 0:
+        cache.delete(lockout_key)
+        return 0
+    return remaining_seconds
+
+
+def clear_login_throttle(*, username: str, client_ip: str) -> None:
+    cache.delete_many(
+        [
+            login_throttle_cache_key(username=username, client_ip=client_ip, kind="attempts"),
+            login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout"),
+        ]
+    )
+
+
+def register_failed_login_attempt(*, username: str, client_ip: str) -> tuple[int, int]:
+    max_attempts = int(getattr(settings, "LOGIN_THROTTLE_MAX_ATTEMPTS", 5))
+    window_seconds = int(getattr(settings, "LOGIN_THROTTLE_WINDOW_SECONDS", 900))
+    lockout_seconds = int(getattr(settings, "LOGIN_THROTTLE_LOCKOUT_SECONDS", 900))
+    attempts_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="attempts")
+    lockout_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout")
+
+    attempts = int(cache.get(attempts_key, 0)) + 1
+    cache.set(attempts_key, attempts, timeout=window_seconds)
+    if attempts >= max_attempts:
+        lockout_until = time.time() + lockout_seconds
+        cache.set(lockout_key, lockout_until, timeout=lockout_seconds)
+        cache.delete(attempts_key)
+        return attempts, lockout_seconds
+    return attempts, 0
+
+
+def audit_failed_login_attempt(
+    request: HttpRequest,
+    *,
+    username: str,
+    reason: str,
+    attempt_count: int,
+    lockout_remaining_seconds: int,
+) -> None:
+    client_ip = request_client_ip(request)
+    normalized_username = normalized_login_username(username)
+    actor_username = normalized_username or "anonymous"
+    if reason == "lockout":
+        summary = f"Blocked password login for {normalized_username or 'anonymous'} during lockout."
+    else:
+        summary = f"Failed password login for {normalized_username or 'anonymous'}."
+
+    append_portal_audit_entry(
+        action="failed_login",
+        entity_type="authentication",
+        entity_id=normalized_username or client_ip,
+        summary=summary,
+        actor_username=actor_username,
+        actor_display_name=normalized_username or "Anonymous",
+        metadata={
+            "source": "auth",
+            "authMode": "password",
+            "reason": reason,
+            "usernameAttempted": normalized_username,
+            "clientIp": client_ip,
+            "attemptCount": attempt_count,
+            "lockoutRemainingSeconds": max(lockout_remaining_seconds, 0),
+        },
+    )
+
+
 def named_item_preview(items: list[object], *, limit: int = 3) -> str:
     names: list[str] = []
     for item in items:
@@ -167,9 +263,35 @@ def login_page(request: HttpRequest) -> HttpResponse:
     form.fields["username"].widget.attrs.update({"autocomplete": "username"})
     form.fields["password"].widget.attrs.update({"autocomplete": "current-password"})
     if request.method == "POST" and request.POST.get("auth_mode") == "password":
-        if form.is_valid():
+        username_attempt = str(request.POST.get("username") or "")
+        client_ip = request_client_ip(request)
+        lockout_remaining = login_lockout_remaining_seconds(username=username_attempt, client_ip=client_ip)
+        if lockout_remaining > 0:
+            retry_minutes = max(1, math.ceil(lockout_remaining / 60))
+            form.add_error(None, f"Too many failed sign-in attempts. Try again in {retry_minutes} minute(s).")
+            audit_failed_login_attempt(
+                request,
+                username=username_attempt,
+                reason="lockout",
+                attempt_count=0,
+                lockout_remaining_seconds=lockout_remaining,
+            )
+        elif form.is_valid():
+            clear_login_throttle(username=username_attempt, client_ip=client_ip)
             auth_login(request, form.get_user())
             return redirect(next_url)
+        else:
+            attempt_count, lockout_seconds = register_failed_login_attempt(username=username_attempt, client_ip=client_ip)
+            if lockout_seconds > 0:
+                retry_minutes = max(1, math.ceil(lockout_seconds / 60))
+                form.add_error(None, f"Too many failed sign-in attempts. Try again in {retry_minutes} minute(s).")
+            audit_failed_login_attempt(
+                request,
+                username=username_attempt,
+                reason="invalid_credentials",
+                attempt_count=attempt_count,
+                lockout_remaining_seconds=lockout_seconds,
+            )
 
     return render(
         request,
@@ -273,6 +395,11 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"detail": "Select at least one policy file to upload."}, status=400)
+
+    try:
+        validate_policy_upload_files(files)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
 
     try:
         documents, messages = create_uploaded_policies(files)
@@ -406,6 +533,11 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": "Select a mapping file to upload."}, status=400)
 
     try:
+        validate_mapping_upload_file(file_obj)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    try:
         mapping_payload = replace_mapping_payload(file_obj)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
@@ -443,6 +575,11 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"detail": "Select at least one vendor response file to import."}, status=400)
+
+    try:
+        validate_vendor_upload_files(files)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
 
     responses = create_vendor_responses(files)
     actor_username, actor_display_name = current_audit_actor(request)

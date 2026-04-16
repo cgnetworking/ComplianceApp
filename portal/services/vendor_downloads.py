@@ -23,6 +23,7 @@ MIME_TYPE_BY_EXTENSION = {
     "txt": "text/plain; charset=utf-8",
     "xml": "application/xml; charset=utf-8",
 }
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 def sanitize_filename_component(value: object, fallback: str) -> str:
@@ -78,6 +79,13 @@ def normalize_download_mime_type(raw_mime_type: object, extension: str) -> str:
     return MIME_TYPE_BY_EXTENSION.get(extension, "text/plain; charset=utf-8")
 
 
+def escape_csv_formula(value: object) -> str:
+    normalized = "" if value is None else str(value)
+    if normalized.startswith(CSV_FORMULA_PREFIXES):
+        return f"'{normalized}"
+    return normalized
+
+
 def build_single_vendor_response_download(response_id: object) -> tuple[str, bytes, str]:
     response = get_vendor_response_for_download(response_id)
     raw_text = (response.raw_text or "").replace("\x00", "")
@@ -128,16 +136,16 @@ def build_all_vendor_responses_download() -> tuple[str, bytes, str]:
     for item in rows:
         writer.writerow(
             {
-                "id": item.external_id,
-                "vendorName": item.vendor_name,
-                "fileName": item.file_name,
-                "extension": item.extension,
-                "mimeType": item.mime_type,
-                "fileSize": int(item.file_size or 0),
-                "importedAt": item.imported_at.isoformat(),
-                "summary": item.summary,
-                "status": item.status,
-                "rawText": item.raw_text or "",
+                "id": escape_csv_formula(item.external_id),
+                "vendorName": escape_csv_formula(item.vendor_name),
+                "fileName": escape_csv_formula(item.file_name),
+                "extension": escape_csv_formula(item.extension),
+                "mimeType": escape_csv_formula(item.mime_type),
+                "fileSize": escape_csv_formula(int(item.file_size or 0)),
+                "importedAt": escape_csv_formula(item.imported_at.isoformat()),
+                "summary": escape_csv_formula(item.summary),
+                "status": escape_csv_formula(item.status),
+                "rawText": escape_csv_formula(item.raw_text or ""),
             }
         )
 

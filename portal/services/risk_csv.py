@@ -33,6 +33,7 @@ RISK_CSV_IMPORT_ALIASES = {
     "createdAt": ("createdat",),
     "updatedAt": ("updatedat",),
 }
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 def _normalize_csv_column(value: object) -> str:
@@ -76,6 +77,13 @@ def _parse_optional_int(value: str, *, field: str, row_number: int, minimum: int
     if parsed < minimum or parsed > maximum:
         raise ValidationError(f"Row {row_number}: {field} must be between {minimum} and {maximum}.")
     return parsed
+
+
+def _escape_csv_formula(value: object) -> str:
+    normalized = "" if value is None else str(value)
+    if normalized.startswith(CSV_FORMULA_PREFIXES):
+        return f"'{normalized}"
+    return normalized
 
 
 def parse_risk_csv_text(value: object) -> list[dict[str, object]]:
@@ -189,17 +197,17 @@ def serialize_risk_records_to_csv(records: list[dict[str, object]]) -> str:
 
     for record in records:
         row = {
-            "id": record.get("id") or "",
-            "risk": record.get("risk") or "",
-            "probability": record.get("probability") or "",
-            "impact": record.get("impact") or "",
-            "initialRiskLevel": record.get("initialRiskLevel") or "",
-            "date": record.get("date") or "",
-            "owner": record.get("owner") or "",
-            "createdBy": record.get("createdBy") or "",
-            "closedDate": record.get("closedDate") or "",
-            "createdAt": record.get("createdAt") or "",
-            "updatedAt": record.get("updatedAt") or "",
+            "id": _escape_csv_formula(record.get("id")),
+            "risk": _escape_csv_formula(record.get("risk")),
+            "probability": _escape_csv_formula(record.get("probability")),
+            "impact": _escape_csv_formula(record.get("impact")),
+            "initialRiskLevel": _escape_csv_formula(record.get("initialRiskLevel")),
+            "date": _escape_csv_formula(record.get("date")),
+            "owner": _escape_csv_formula(record.get("owner")),
+            "createdBy": _escape_csv_formula(record.get("createdBy")),
+            "closedDate": _escape_csv_formula(record.get("closedDate")),
+            "createdAt": _escape_csv_formula(record.get("createdAt")),
+            "updatedAt": _escape_csv_formula(record.get("updatedAt")),
         }
         writer.writerow(row)
 

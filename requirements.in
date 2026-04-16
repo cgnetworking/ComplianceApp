@@ -1,0 +1,7 @@
+Django
+bleach
+cryptography
+gunicorn
+psycopg[binary]
+social-auth-app-django
+whitenoise
