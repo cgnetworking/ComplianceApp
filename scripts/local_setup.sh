@@ -67,6 +67,18 @@ print(secrets.token_urlsafe(48))
 PY
 }
 
+ensure_local_env_file_permissions() {
+  if [ ! -e "$ENV_FILE" ]; then
+    return
+  fi
+
+  if chmod 0600 "$ENV_FILE" 2>/dev/null; then
+    return
+  fi
+
+  run_as_root chmod 0600 "$ENV_FILE"
+}
+
 ensure_assessment_pfx_password_source_file() {
   local credential_dir="$1"
   local managed_name="$2"
@@ -1007,6 +1019,7 @@ if not replaced:
 
 env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
 PY
+  ensure_local_env_file_permissions
 }
 
 prompt_for_database_password() {
@@ -1250,8 +1263,10 @@ if [ ! -f "$ENV_FILE" ]; then
     "# SOCIAL_AUTH_OIDC_SECRET=your-client-secret" \
     "SOCIAL_AUTH_OIDC_SCOPE=openid,profile,email" \
     > "$ENV_FILE"
+  ensure_local_env_file_permissions
   echo "Created $ENV_FILE"
 else
+  ensure_local_env_file_permissions
   echo "Using existing $ENV_FILE"
 fi
 
