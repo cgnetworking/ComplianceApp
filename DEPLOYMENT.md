@@ -69,6 +69,8 @@ Recommended:
 
 `scripts/local_setup.sh` is designed for Ubuntu 24.04+.
 
+The repo now targets Django 5.2 LTS, which requires Python 3.10 or newer. The supported Ubuntu 24.04 setup path uses Python 3.12.
+
 1. Run `./scripts/local_setup.sh` from the repository root.
 2. Run `python manage.py createsuperuser` if you want Django admin access.
 
