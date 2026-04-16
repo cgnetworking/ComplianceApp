@@ -732,9 +732,6 @@
     }
     return saveControlStateEntry(controlId, nextState);
   }
-  async function setControlExclusion(controlId, excluded) {
-    return setControlApplicability(controlId, excluded ? "Excluded" : "");
-  }
   async function updateControlReviewFrequency(controlId, reviewFrequency) {
     const control = controlsById.get(controlId);
     if (!control) {

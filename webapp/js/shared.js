@@ -257,21 +257,6 @@
         syncUrlAndRender();
         return;
       }
-
-      const toggle = event.target.closest("[data-control-excluded]");
-      if (!toggle) {
-        return;
-      }
-      const controlId = toggle.dataset.controlExcluded;
-      try {
-        await setControlExclusion(controlId, toggle.checked);
-      } catch (error) {
-        syncUrlAndRender(renderControlsPage);
-        return;
-      }
-      populateFilters();
-      syncSelectionToVisibleControls();
-      syncUrlAndRender();
     });
 
     els.controlDetail.addEventListener("input", (event) => {

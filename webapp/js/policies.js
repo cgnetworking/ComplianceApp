@@ -546,94 +546,6 @@
     }
     setUploadStatus(els.mappingUploadStatus, message, tone);
   }
-  function inlineMarkup(text) {
-    let rendered = escapeHtml(text);
-    rendered = rendered.replace(/`([^`]+)`/g, "<code>$1</code>");
-    rendered = rendered.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    rendered = rendered.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    return rendered;
-  }
-  function tableCells(line) {
-    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
-  }
-  function isTableSeparator(line) {
-    const stripped = line.trim();
-    if (!stripped.startsWith("|")) {
-      return false;
-    }
-    const cells = tableCells(stripped);
-    return cells.length > 0 && cells.every((cell) => cell && /^[\-:]+$/.test(cell));
-  }
-  function markdownToHtml(markdown) {
-    const lines = String(markdown).split(/\r?\n/);
-    const blocks = [];
-
-    for (let index = 0; index < lines.length;) {
-      const line = lines[index].replace(/\s+$/, "");
-      const stripped = line.trim();
-
-      if (!stripped) {
-        index += 1;
-        continue;
-      }
-
-      if (stripped.startsWith("|") && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
-        const header = tableCells(lines[index]);
-        index += 2;
-        const body = [];
-        while (index < lines.length && lines[index].trim().startsWith("|")) {
-          body.push(tableCells(lines[index]));
-          index += 1;
-        }
-        blocks.push(
-          "<table><thead><tr>"
-            + header.map((cell) => `<th>${inlineMarkup(cell)}</th>`).join("")
-            + "</tr></thead><tbody>"
-            + body.map((row) => `<tr>${row.map((cell) => `<td>${inlineMarkup(cell)}</td>`).join("")}</tr>`).join("")
-            + "</tbody></table>",
-        );
-        continue;
-      }
-
-      if (stripped.startsWith("- ")) {
-        const items = [];
-        while (index < lines.length && lines[index].trim().startsWith("- ")) {
-          items.push(lines[index].trim().slice(2));
-          index += 1;
-        }
-        blocks.push(`<ul>${items.map((item) => `<li>${inlineMarkup(item)}</li>`).join("")}</ul>`);
-        continue;
-      }
-
-      if (stripped.startsWith("#")) {
-        const level = Math.min(stripped.match(/^#+/)[0].length, 6);
-        blocks.push(`<h${level}>${inlineMarkup(stripped.slice(level).trim())}</h${level}>`);
-        index += 1;
-        continue;
-      }
-
-      const paragraph = [stripped];
-      index += 1;
-      while (index < lines.length) {
-        const candidate = lines[index].trim();
-        if (!candidate) {
-          index += 1;
-          break;
-        }
-        if (candidate.startsWith("#") || candidate.startsWith("- ")) {
-          break;
-        }
-        if (candidate.startsWith("|") && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
-          break;
-        }
-        paragraph.push(candidate);
-        index += 1;
-      }
-      blocks.push(`<p>${inlineMarkup(paragraph.join(" "))}</p>`);
-    }
-
-    return blocks.join("\n");
-  }
   function renderSelectedControlBanner() {
     if (!els.selectedControlBanner) {
       return;
@@ -868,7 +780,7 @@
         <div class="quick-add-row" data-policy-control-mapper="${escapeHtml(documentItem.id)}">
           <label class="form-field" for="policy-control-picker-input">
             <span>Control</span>
-            <div class="recommendation-picker" data-policy-control-picker>
+            <div class="recommendation-picker">
               <input
                 id="policy-control-picker-input"
                 type="search"
