@@ -480,6 +480,13 @@
       });
       els.riskForm.addEventListener("submit", handleRiskFormSubmit);
     }
+
+    if (els.riskDeleteButton && !els.riskDeleteButton.dataset.bound) {
+      els.riskDeleteButton.dataset.bound = "true";
+      els.riskDeleteButton.addEventListener("click", () => {
+        void handleRiskDelete();
+      });
+    }
   }
   function isReviewTaskCompleted(itemId, monthIndex = state.monthIndex) {
     const key = buildReviewStateMonthKey(itemId, monthIndex);

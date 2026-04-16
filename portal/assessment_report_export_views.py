@@ -4,6 +4,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
 
 from .assessment_services import AssessmentValidationError
+from .services.bootstrap import append_portal_audit_entry
 from .assessment_views import assessment_staff_api_required
 from .services.assessment_report_exports import (
     create_assessment_reports_export,
@@ -43,6 +44,24 @@ def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpRespo
         file_name, content = create_assessment_run_report_export(run_id)
     except AssessmentValidationError as error:
         return assessment_export_error_response(error)
+
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    append_portal_audit_entry(
+        action="export_assessment_report",
+        entity_type="assessment_run",
+        entity_id=run_id,
+        summary=f"Exported stored assessment report for run {run_id}.",
+        actor_username=username or "system",
+        actor_display_name=display_name or username or "System",
+        metadata={
+            "source": "assessments",
+            "exportType": "assessment_report_selected",
+            "runId": run_id,
+            "fileName": file_name,
+            "sizeBytes": len(content),
+        },
+    )
     return assessment_export_response(file_name, content)
 
 
@@ -54,4 +73,23 @@ def assessment_reports_export(request: HttpRequest) -> HttpResponse:
         file_name, content = create_assessment_reports_export(profile_id=profile_id)
     except AssessmentValidationError as error:
         return assessment_export_error_response(error)
+
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    entity_id = profile_id or "all"
+    append_portal_audit_entry(
+        action="export_assessment_reports",
+        entity_type="assessment_run",
+        entity_id=entity_id,
+        summary="Exported stored assessment reports.",
+        actor_username=username or "system",
+        actor_display_name=display_name or username or "System",
+        metadata={
+            "source": "assessments",
+            "exportType": "assessment_reports_all",
+            "profileId": profile_id,
+            "fileName": file_name,
+            "sizeBytes": len(content),
+        },
+    )
     return assessment_export_response(file_name, content)

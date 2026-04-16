@@ -214,6 +214,24 @@
     link.remove();
     URL.revokeObjectURL(url);
   }
+  function parseAuditExportFilename(dispositionHeader, fallbackName) {
+    if (typeof dispositionHeader !== "string" || !dispositionHeader.trim()) {
+      return fallbackName;
+    }
+    const utf8Match = dispositionHeader.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1]);
+      } catch (error) {
+        // Ignore malformed filenames and use fallback handling below.
+      }
+    }
+    const plainMatch = dispositionHeader.match(/filename=\"?([^\";]+)\"?/i);
+    if (plainMatch && plainMatch[1]) {
+      return plainMatch[1];
+    }
+    return fallbackName;
+  }
 
   async function loadAuditEntriesForExport() {
     try {
@@ -240,16 +258,38 @@
       setAuditExportStatus("Building CSV export from the review state audit log...", "info");
 
       try {
-        const entries = await loadAuditEntriesForExport();
-        const checklistById = auditChecklistLookup();
-        const csvText = buildAuditLogCsv(entries, checklistById);
-        triggerAuditLogCsvDownload(csvText, auditExportFileName());
-        setAuditExportStatus(
-          entries.length
-            ? `Exported ${entries.length} audit ${entries.length === 1 ? "entry" : "entries"} to CSV.`
-            : "No audit entries found. Exported a CSV file with headers only.",
-          "success",
+        const response = await fetch(`${resolveApiBaseUrl()}/audit-log/export.csv`, {
+          method: "GET",
+          headers: { Accept: "text/csv" },
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          let detail = `Unable to export the audit log (${response.status}).`;
+          try {
+            const errorPayload = await response.json();
+            if (errorPayload && typeof errorPayload.detail === "string" && errorPayload.detail.trim()) {
+              detail = errorPayload.detail;
+            }
+          } catch (error) {
+            // Ignore non-JSON errors and keep fallback detail.
+          }
+          throw new Error(detail);
+        }
+
+        const csvBlob = await response.blob();
+        const fileName = parseAuditExportFilename(
+          response.headers.get("Content-Disposition"),
+          auditExportFileName(),
         );
+        const downloadUrl = URL.createObjectURL(csvBlob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = fileName;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+        setAuditExportStatus("Audit log CSV exported.", "success");
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unable to export the audit log.";
         setAuditExportStatus(detail, "error");

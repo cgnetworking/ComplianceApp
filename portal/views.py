@@ -24,6 +24,7 @@ from .services import (
     delete_risk_record,
     delete_review_checklist_item,
     delete_uploaded_policy,
+    delete_vendor_response,
     get_bootstrap_payload,
     get_policy_document,
     list_risk_register,
@@ -38,6 +39,7 @@ from .services import (
     update_review_state,
     user_is_policy_reader,
 )
+from .services.bootstrap import append_portal_audit_entry
 
 
 def safe_next_url(request: HttpRequest) -> str:
@@ -109,6 +111,14 @@ def current_user_context(request: HttpRequest) -> dict[str, object]:
         "isStaff": bool(request.user.is_staff),
         "isPolicyReader": is_policy_reader,
     }
+
+
+def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    normalized_username = username or "system"
+    normalized_display_name = display_name or username or "System"
+    return normalized_username, normalized_display_name
 
 
 def render_portal_page(
@@ -254,6 +264,24 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
 
+    actor_username, actor_display_name = current_audit_actor(request)
+    append_portal_audit_entry(
+        action="import_policy_documents",
+        entity_type="policy",
+        entity_id=f"{len(documents)}",
+        summary=f"Imported {len(documents)} policy document{'s' if len(documents) != 1 else ''}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "importType": "policy_upload",
+            "documentCount": len(documents),
+            "documentIds": [str(item.get("id") or "") for item in documents if isinstance(item, dict)],
+            "fileNames": [str(getattr(file, "name", "") or "") for file in files],
+            "messages": messages,
+        },
+    )
+
     return JsonResponse({"documents": documents, "messages": messages})
 
 
@@ -277,6 +305,23 @@ def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
         deleted_document = delete_uploaded_policy(document_id)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=404)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    deleted_document_id = str(deleted_document.get("id") or "")
+    deleted_document_title = str(deleted_document.get("title") or deleted_document_id)
+    append_portal_audit_entry(
+        action="delete_policy_document",
+        entity_type="policy",
+        entity_id=deleted_document_id,
+        summary=f"Deleted policy {deleted_document_title}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "policyId": deleted_document_id,
+            "policyTitle": deleted_document_title,
+        },
+    )
 
     return JsonResponse({"deletedDocument": deleted_document})
 
@@ -344,6 +389,25 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
 
+    actor_username, actor_display_name = current_audit_actor(request)
+    controls = mapping_payload.get("controls") if isinstance(mapping_payload.get("controls"), list) else []
+    documents = mapping_payload.get("documents") if isinstance(mapping_payload.get("documents"), list) else []
+    append_portal_audit_entry(
+        action="import_mapping",
+        entity_type="mapping",
+        entity_id=str(getattr(file_obj, "name", "") or "mapping-upload"),
+        summary=f"Imported mapping file {getattr(file_obj, 'name', 'mapping file')}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "importType": "mapping_upload",
+            "fileName": str(getattr(file_obj, "name", "") or ""),
+            "controlCount": len(controls),
+            "documentCount": len(documents),
+        },
+    )
+
     return JsonResponse({"mapping": mapping_payload})
 
 
@@ -359,7 +423,54 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": "Select at least one vendor response file to import."}, status=400)
 
     responses = create_vendor_responses(files)
+    actor_username, actor_display_name = current_audit_actor(request)
+    append_portal_audit_entry(
+        action="import_vendor_responses",
+        entity_type="vendor_response",
+        entity_id=f"{len(responses)}",
+        summary=f"Imported {len(responses)} vendor response file{'s' if len(responses) != 1 else ''}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "vendors",
+            "importType": "vendor_response_upload",
+            "responseCount": len(responses),
+            "responseIds": [str(item.get("id") or "") for item in responses if isinstance(item, dict)],
+            "fileNames": [str(getattr(file, "name", "") or "") for file in files],
+        },
+    )
     return JsonResponse({"responses": responses})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["DELETE"])
+def vendor_response(request: HttpRequest, response_id: str) -> JsonResponse:
+    try:
+        deleted_response = delete_vendor_response(response_id)
+    except ValidationError as error:
+        detail = str(error)
+        status_code = 404 if detail == "Vendor response was not found." else 400
+        return JsonResponse({"detail": detail}, status=status_code)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    deleted_response_id = str(deleted_response.get("id") or "")
+    vendor_name = str(deleted_response.get("vendorName") or deleted_response_id)
+    append_portal_audit_entry(
+        action="delete_vendor_response",
+        entity_type="vendor_response",
+        entity_id=deleted_response_id,
+        summary=f"Deleted vendor response for {vendor_name}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "vendors",
+            "vendorName": vendor_name,
+            "fileName": str(deleted_response.get("fileName") or ""),
+            "responseId": deleted_response_id,
+        },
+    )
+    return JsonResponse({"deletedResponse": deleted_response})
 
 
 @api_login_required
@@ -387,6 +498,22 @@ def risk_register(request: HttpRequest) -> JsonResponse:
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
 
+    if isinstance(items, str):
+        actor_username, actor_display_name = current_audit_actor(request)
+        append_portal_audit_entry(
+            action="import_risk_csv",
+            entity_type="risk_register",
+            entity_id=f"{len(risk_register_payload)}",
+            summary=f"Imported risk CSV with {len(risk_register_payload)} risk record{'s' if len(risk_register_payload) != 1 else ''}.",
+            actor_username=actor_username,
+            actor_display_name=actor_display_name,
+            metadata={
+                "source": "risks",
+                "importType": "risk_csv",
+                "recordCount": len(risk_register_payload),
+            },
+        )
+
     return JsonResponse({"riskRegister": risk_register_payload})
 
 
@@ -401,6 +528,21 @@ def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
             detail = str(error)
             status_code = 404 if detail == "Risk record was not found." else 400
             return JsonResponse({"detail": detail}, status=status_code)
+        actor_username, actor_display_name = current_audit_actor(request)
+        deleted_risk_id = str(deleted_risk.get("id") or "")
+        append_portal_audit_entry(
+            action="delete_risk_record",
+            entity_type="risk",
+            entity_id=deleted_risk_id,
+            summary=f"Deleted risk record {deleted_risk_id}.",
+            actor_username=actor_username,
+            actor_display_name=actor_display_name,
+            metadata={
+                "source": "risks",
+                "riskId": deleted_risk_id,
+                "risk": str(deleted_risk.get("risk") or ""),
+            },
+        )
         return JsonResponse({"deletedRisk": deleted_risk})
 
     body, error_response = parse_json_body_or_400(request)
@@ -443,6 +585,22 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
         deleted_checklist_item = delete_review_checklist_item(checklist_item_id)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=404)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    deleted_item_id = str(deleted_checklist_item.get("id") or "")
+    append_portal_audit_entry(
+        action="delete_checklist_item",
+        entity_type="checklist_item",
+        entity_id=deleted_item_id,
+        summary=f"Deleted checklist item {deleted_item_id}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "review-tasks",
+            "checklistItemId": deleted_item_id,
+            "item": str(deleted_checklist_item.get("item") or ""),
+        },
+    )
 
     return JsonResponse({"deletedChecklistItem": deleted_checklist_item})
 

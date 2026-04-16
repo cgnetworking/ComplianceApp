@@ -280,6 +280,21 @@ def list_vendor_responses() -> list[dict[str, object]]:
     return [item.to_portal_dict() for item in VendorResponse.objects.all()]
 
 
+def delete_vendor_response(response_id: str) -> dict[str, object]:
+    normalized_id = normalize_string(response_id)
+    if not normalized_id:
+        raise ValidationError("Vendor response id is required.")
+
+    try:
+        response = VendorResponse.objects.get(external_id=normalized_id)
+    except VendorResponse.DoesNotExist as error:
+        raise ValidationError("Vendor response was not found.") from error
+
+    deleted_payload = response.to_portal_dict()
+    response.delete()
+    return deleted_payload
+
+
 __all__ = [
     "ValidationError",
     "serialize_policy_document_payload",
@@ -296,4 +311,5 @@ __all__ = [
     "approve_uploaded_policy",
     "create_vendor_responses",
     "list_vendor_responses",
+    "delete_vendor_response",
 ]

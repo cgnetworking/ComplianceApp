@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
 
+from .services.bootstrap import append_portal_audit_entry
 from .services.policy_downloads import (
     ValidationError,
     build_all_policies_download,
@@ -10,6 +11,14 @@ from .services.policy_downloads import (
     build_policy_document_download,
 )
 from .views import api_login_required, policy_reader_api_access
+
+
+def policy_download_actor(request: HttpRequest) -> tuple[str, str]:
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    normalized_username = username or "system"
+    normalized_display_name = display_name or username or "System"
+    return normalized_username, normalized_display_name
 
 
 @api_login_required
@@ -26,6 +35,22 @@ def policy_document_download(request: HttpRequest, document_id: str) -> HttpResp
     response = HttpResponse(artifact.content, content_type=artifact.content_type)
     response["Content-Disposition"] = build_attachment_content_disposition(artifact.filename)
     response["X-Content-Type-Options"] = "nosniff"
+
+    actor_username, actor_display_name = policy_download_actor(request)
+    append_portal_audit_entry(
+        action="export_policy_document",
+        entity_type="policy",
+        entity_id=document_id,
+        summary=f"Exported policy document {document_id}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "exportType": "single_policy",
+            "policyId": document_id,
+            "fileName": artifact.filename,
+        },
+    )
     return response
 
 
@@ -43,6 +68,20 @@ def policy_documents_download_all(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(artifact.content, content_type=artifact.content_type)
     response["Content-Disposition"] = build_attachment_content_disposition(artifact.filename)
     response["X-Content-Type-Options"] = "nosniff"
-    return response
 
+    actor_username, actor_display_name = policy_download_actor(request)
+    append_portal_audit_entry(
+        action="export_policy_documents",
+        entity_type="policy",
+        entity_id="all",
+        summary="Exported all policy documents.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "exportType": "all_policies",
+            "fileName": artifact.filename,
+        },
+    )
+    return response
 

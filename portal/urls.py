@@ -70,6 +70,7 @@ urlpatterns = [
         name="api-policy-documents-download-all",
     ),
     path("vendors/uploads/", views.upload_vendors, name="api-vendor-uploads"),
+    path("vendors/responses/<str:response_id>/", views.vendor_response, name="api-vendor-response"),
     path(
         "vendors/downloads/",
         vendor_download_views.vendor_response_downloads,

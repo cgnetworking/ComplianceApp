@@ -35,6 +35,7 @@
 
   function renderVendorsPage() {
     bindVendorDownloadEvents();
+    bindVendorDetailEvents();
     syncVendorSelection();
     updateVendorDownloadControls();
     ensureVendorUploadHelperCopy();
@@ -67,6 +68,19 @@
         handleVendorDownloadAll();
       });
     }
+  }
+  function bindVendorDetailEvents() {
+    if (!els.vendorDetail || els.vendorDetail.dataset.vendorDetailBound === "true") {
+      return;
+    }
+    els.vendorDetail.dataset.vendorDetailBound = "true";
+    els.vendorDetail.addEventListener("click", (event) => {
+      const deleteButton = event.target.closest("[data-vendor-delete]");
+      if (!deleteButton || !deleteButton.dataset.vendorDelete) {
+        return;
+      }
+      void handleVendorDelete(deleteButton.dataset.vendorDelete);
+    });
   }
   function updateVendorDownloadControls() {
     const selectedButton = document.getElementById("vendor-download-trigger");
@@ -278,6 +292,11 @@
           </div>
         </div>
         <div class="doc-section">
+          <div class="button-row button-row-wrap">
+            <button class="ghost-button danger-button" type="button" data-vendor-delete="${escapeHtml(response.id)}">Delete Response</button>
+          </div>
+        </div>
+        <div class="doc-section">
           <strong>Suggested next steps</strong>
           <div class="preview-block">
             <ul class="detail-list">
@@ -289,6 +308,56 @@
         </div>
       </article>
     `;
+  }
+  async function deleteVendorResponseFromApi(responseId) {
+    return apiRequest(`/vendors/responses/${encodeURIComponent(responseId)}/`, {
+      method: "DELETE",
+    });
+  }
+  async function handleVendorDelete(responseId) {
+    const selectedResponse = vendorSurveyResponses.find((item) => item.id === responseId);
+    if (!selectedResponse) {
+      setUploadStatus(els.vendorUploadStatus, "Select an imported vendor response to delete.", "error");
+      return;
+    }
+
+    if (!window.confirm(`Delete ${selectedResponse.vendorName} / ${selectedResponse.fileName}? This cannot be undone.`)) {
+      return;
+    }
+
+    const previousResponses = vendorSurveyResponses.slice();
+    vendorSurveyResponses = vendorSurveyResponses.filter((item) => item.id !== responseId);
+    if (state.selectedVendorResponseId === responseId) {
+      state.selectedVendorResponseId = "";
+    }
+    syncVendorSelection();
+    syncUrl();
+    renderVendorsPage();
+
+    try {
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.vendorUploadStatus, message, tone);
+        },
+        {
+          pending: `Deleting ${selectedResponse.fileName}...`,
+          success: "Vendor response deleted from the intake queue.",
+          error: "Unable to delete the selected vendor response.",
+        },
+        async () => {
+          await deleteVendorResponseFromApi(responseId);
+          return true;
+        }
+      );
+    } catch (error) {
+      vendorSurveyResponses = previousResponses;
+      if (!vendorSurveyResponses.some((item) => item.id === state.selectedVendorResponseId)) {
+        state.selectedVendorResponseId = selectedResponse.id;
+      }
+      syncVendorSelection();
+      syncUrl();
+      renderVendorsPage();
+    }
   }
   function filteredVendorResponses() {
     const searchLower = state.search.trim().toLowerCase();

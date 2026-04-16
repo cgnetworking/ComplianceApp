@@ -386,7 +386,6 @@
     }
 
     const profile = selectedZeroTrustProfile();
-    const activeRun = selectedZeroTrustRun();
     const certificate = profile && profile.currentCertificate ? profile.currentCertificate : null;
     const profileId = profile ? profile.id : "";
     const hasCertificate = Boolean(certificate && certificate.thumbprint);
@@ -447,25 +446,6 @@
           </label>
         </div>
 
-        <div class="detail-grid">
-          <div class="detail-card">
-            <strong>Certificate</strong>
-            <div class="mini-copy">${escapeHtml(hasCertificate ? `${certificate.subject} / expires ${formatDateWithOrdinal(certificate.notAfter)}` : "No server-side certificate has been generated for this tenant yet.")}</div>
-          </div>
-          <div class="detail-card">
-            <strong>Report storage</strong>
-            <div class="mini-copy">${escapeHtml(activeRun && activeRun.hasReport ? "The selected run has a PostgreSQL-backed embedded report bundle." : "Reports are copied into PostgreSQL after ingestion and removed from the staging folder.")}</div>
-          </div>
-          <div class="detail-card">
-            <strong>Current thumbprint</strong>
-            <div class="mini-copy">${escapeHtml(profile && profile.certificateThumbprint ? profile.certificateThumbprint : "Generate a certificate to prefill the thumbprint.")}</div>
-          </div>
-          <div class="detail-card">
-            <strong>Latest run</strong>
-            <div class="mini-copy">${escapeHtml(profile && profile.latestRun ? `${profile.latestRun.statusLabel} / ${formatShortDateTime(profile.latestRun.createdAt)}` : "No run has been queued for this tenant yet.")}</div>
-          </div>
-        </div>
-
         <div class="button-row button-row-wrap">
           <button class="primary-button" type="button" data-assessment-save-profile="${escapeHtml(profileId)}">Save Settings</button>
           <button class="ghost-button" type="button" data-assessment-create-certificate="${escapeHtml(profileId)}"${profile ? "" : " disabled"}>Create Certificate</button>
@@ -520,7 +500,7 @@
               <h3>Stored report viewer</h3>
             </div>
             <p class="detail-subline">
-              The selected assessment report opens here after the worker stores its HTML bundle in PostgreSQL.
+              The selected Tenant Profile displays here if an assessment has been run.
             </p>
           </div>
           <div class="button-row button-row-wrap">

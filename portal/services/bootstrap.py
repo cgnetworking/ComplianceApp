@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -18,6 +18,7 @@ from .common import (
     normalize_control_state,
     normalize_review_state,
     normalize_review_state_audit_log,
+    normalize_audit_metadata,
     normalize_string,
     parse_optional_iso_date,
     parse_review_state_month_scope,
@@ -81,6 +82,69 @@ def append_review_state_audit_entries(entries: list[object]) -> dict[str, object
         record.payload = next_state
         record.save(update_fields=["payload", "updated_at"])
         return next_state
+
+
+def build_portal_audit_entry(
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    summary: str,
+    actor_username: str,
+    actor_display_name: str,
+    metadata: dict[str, object] | None = None,
+    occurred_at: datetime | None = None,
+) -> dict[str, object]:
+    normalized_action = normalize_string(action, "state_changed").replace(" ", "_").lower()
+    normalized_entity_type = normalize_string(entity_type, "record").replace(" ", "_").lower()
+    normalized_entity_id = normalize_string(entity_id)
+    normalized_summary = normalize_string(summary, "State updated.")
+    normalized_actor_username = normalize_string(actor_username, "system")
+    normalized_actor_display_name = normalize_string(actor_display_name, normalized_actor_username)
+    timestamp = occurred_at or timezone.now()
+    if timezone.is_naive(timestamp):
+        timestamp = timezone.make_aware(timestamp, timezone=dt_timezone.utc)
+
+    return {
+        "id": f"audit-{uuid.uuid4().hex[:12]}",
+        "action": normalized_action,
+        "entityType": normalized_entity_type,
+        "entityId": normalized_entity_id,
+        "summary": normalized_summary,
+        "actor": {
+            "username": normalized_actor_username,
+            "displayName": normalized_actor_display_name,
+        },
+        "occurredAt": timestamp.isoformat(),
+        "metadata": normalize_audit_metadata(metadata or {}),
+    }
+
+
+def append_portal_audit_entry(
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    summary: str,
+    actor_username: str,
+    actor_display_name: str,
+    metadata: dict[str, object] | None = None,
+    occurred_at: datetime | None = None,
+) -> dict[str, object]:
+    return append_review_state_audit_entries(
+        [
+            build_portal_audit_entry(
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                summary=summary,
+                actor_username=actor_username,
+                actor_display_name=actor_display_name,
+                metadata=metadata,
+                occurred_at=occurred_at,
+            )
+        ]
+    )
 
 
 def build_policy_approval_audit_entry(
@@ -284,6 +348,8 @@ __all__ = [
     "list_assignable_users",
     "review_state_payload_template",
     "append_review_state_audit_entries",
+    "build_portal_audit_entry",
+    "append_portal_audit_entry",
     "build_policy_approval_audit_entry",
     "create_review_checklist_item",
     "delete_review_checklist_item",

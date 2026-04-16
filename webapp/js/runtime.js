@@ -149,6 +149,7 @@
     riskOwnerInput: document.getElementById("risk-owner"),
     riskClosedDateInput: document.getElementById("risk-closed-date"),
     riskSubmitButton: document.getElementById("risk-submit-button"),
+    riskDeleteButton: document.getElementById("risk-delete-button"),
     riskFormStatus: document.getElementById("risk-form-status"),
     riskProbabilityInput: document.querySelector(
       '#risk-probability, select[name="risk-probability"], select[name="probability"], select[name="initial-risk-probability"], input[name="risk-probability"]:not([type="radio"]), input[name="probability"]:not([type="radio"]), input[name="initial-risk-probability"]:not([type="radio"])'

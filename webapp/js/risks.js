@@ -141,6 +141,10 @@
     if (els.riskSubmitButton) {
       els.riskSubmitButton.textContent = isEditing ? "Save Changes" : "Save Risk";
     }
+    if (els.riskDeleteButton) {
+      els.riskDeleteButton.hidden = !isEditing;
+      els.riskDeleteButton.disabled = !isEditing;
+    }
 
     setRiskFormFactorSelections(isEditing ? selectedRisk.probability : 3, isEditing ? selectedRisk.impact : 3);
     renderRiskFormStatus();
@@ -625,6 +629,58 @@
       state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
     }
   }
+  async function deleteRiskRecordFromApi(riskId) {
+    return apiRequest(`/risks/${encodeURIComponent(riskId)}/`, {
+      method: "DELETE",
+    });
+  }
+  async function handleRiskDelete() {
+    const selectedRisk = getSelectedRisk();
+    if (!selectedRisk) {
+      setRiskFormStatus("Select a risk before deleting it.", "error");
+      renderRiskFormStatus();
+      return;
+    }
+
+    if (!window.confirm(`Delete risk "${selectedRisk.risk}"? This cannot be undone.`)) {
+      return;
+    }
+
+    const deletedRiskId = selectedRisk.id;
+    const previousRiskRegister = state.riskRegister.slice();
+    const previousSelectedRiskId = state.selectedRiskId;
+    const previousIsAddingRisk = state.isAddingRisk;
+
+    state.riskRegister = state.riskRegister.filter((risk) => risk.id !== deletedRiskId);
+    state.selectedRiskId = "";
+    state.isAddingRisk = true;
+    syncUrl();
+    renderRisksPage();
+
+    try {
+      await runAsyncOperation(
+        (message, tone) => {
+          setRiskFormStatus(message, tone);
+          renderRiskFormStatus();
+        },
+        {
+          pending: "Deleting risk entry...",
+          success: `Risk deleted from the ${riskRegisterLabel()}.`,
+          error: "Unable to delete the selected risk.",
+        },
+        async () => {
+          await deleteRiskRecordFromApi(deletedRiskId);
+          return true;
+        }
+      );
+    } catch (error) {
+      state.riskRegister = previousRiskRegister;
+      state.selectedRiskId = previousSelectedRiskId;
+      state.isAddingRisk = previousIsAddingRisk;
+      syncUrl();
+      renderRisksPage();
+    }
+  }
   function normalizeRiskRecord(item) {
     if (!item || typeof item !== "object") {
       return null;
@@ -698,10 +754,8 @@
     }
   }
   function handleRiskCsvExport() {
-    const csvText = buildRiskRegisterCsv(state.riskRegister);
-    const fileName = `risk-register-${todayDateValue()}.csv`;
-    downloadTextFile(fileName, csvText, "text/csv;charset=utf-8");
-    setRiskFormStatus(`Downloaded ${state.riskRegister.length} risk record${state.riskRegister.length === 1 ? "" : "s"} as CSV.`, "success");
+    window.location.assign(`${resolveApiBaseUrl()}/risks/export.csv`);
+    setRiskFormStatus(`Exporting ${state.riskRegister.length} risk record${state.riskRegister.length === 1 ? "" : "s"} as CSV.`, "success");
     renderRiskFormStatus();
   }
   async function handleRiskCsvImport(importInput) {

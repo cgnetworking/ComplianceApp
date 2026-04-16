@@ -6,6 +6,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET, require_http_methods
 
+from .services.bootstrap import append_portal_audit_entry
 from .assessment_services import (
     AssessmentValidationError,
     create_zero_trust_run,
@@ -68,6 +69,14 @@ def assessment_staff_api_required(view_func):
     return api_login_required(wrapped)
 
 
+def assessment_audit_actor(request: HttpRequest) -> tuple[str, str]:
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    normalized_username = username or "system"
+    normalized_display_name = display_name or username or "System"
+    return normalized_username, normalized_display_name
+
+
 @login_required(login_url="portal-login")
 @assessment_staff_page_required
 @ensure_csrf_cookie
@@ -103,6 +112,23 @@ def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResp
             detail = str(error)
             status_code = 404 if detail == "Assessment profile was not found." else 400
             return JsonResponse({"detail": detail}, status=status_code)
+
+        actor_username, actor_display_name = assessment_audit_actor(request)
+        deleted_profile_id = str(deleted_profile.get("id") or "")
+        append_portal_audit_entry(
+            action="delete_assessment_profile",
+            entity_type="assessment_profile",
+            entity_id=deleted_profile_id,
+            summary=f"Deleted assessment profile {deleted_profile_id}.",
+            actor_username=actor_username,
+            actor_display_name=actor_display_name,
+            metadata={
+                "source": "assessments",
+                "profileId": deleted_profile_id,
+                "tenantId": str(deleted_profile.get("tenantId") or ""),
+                "displayName": str(deleted_profile.get("displayName") or ""),
+            },
+        )
         return JsonResponse({"deletedProfile": deleted_profile})
 
     try:
@@ -133,6 +159,22 @@ def assessment_profile_certificate_download(request: HttpRequest, profile_id: st
     response = HttpResponse(content, content_type="application/pkix-cert")
     response["Content-Disposition"] = f'attachment; filename="{file_name}"'
     response["X-Content-Type-Options"] = "nosniff"
+
+    actor_username, actor_display_name = assessment_audit_actor(request)
+    append_portal_audit_entry(
+        action="export_assessment_certificate",
+        entity_type="assessment_profile",
+        entity_id=profile_id,
+        summary=f"Exported certificate for assessment profile {profile_id}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "assessments",
+            "exportType": "assessment_certificate",
+            "profileId": profile_id,
+            "fileName": file_name,
+        },
+    )
     return response
 
 
