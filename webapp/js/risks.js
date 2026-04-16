@@ -5,6 +5,7 @@
     renderRiskAssigneeFilter();
     renderRiskStatusFilter();
     renderRiskLevelFilter();
+    bindRiskCsvActions();
     const risks = filteredRisks();
     syncSelectionToVisibleRisks(risks);
     renderRiskOverview();
@@ -80,6 +81,7 @@
               <th>Score</th>
               <th>Date</th>
               <th>Risk Owner</th>
+              <th>Created By</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -98,6 +100,7 @@
                 </td>
                 <td>${escapeHtml(formatDate(risk.date))}</td>
                 <td>${escapeHtml(formatRiskOwnerLabel(risk.owner))}</td>
+                <td>${escapeHtml(formatRiskCreatorLabel(risk.createdBy))}</td>
                 <td>
                   <span class="status-pill ${isRiskClosed(risk) ? "is-closed" : "is-active"}">
                     ${escapeHtml(isRiskClosed(risk) ? `Closed ${formatDate(risk.closedDate)}` : "Open")}
@@ -194,6 +197,7 @@
       initialRiskLevel,
       date: raisedDate,
       owner: riskOwner,
+      createdBy: isEditing ? (existingRisk.createdBy || "") : currentRiskActorUsername(),
       closedDate,
       createdAt: isEditing ? existingRisk.createdAt || now : now,
       updatedAt: now,
@@ -449,6 +453,13 @@
     const matchingUser = state.assignableUsers.find((user) => user && user.username === normalizedOwner);
     return matchingUser ? formatAssignableUserLabel(matchingUser) : normalizedOwner;
   }
+  function formatRiskCreatorLabel(createdBy) {
+    const normalizedCreator = typeof createdBy === "string" ? createdBy.trim() : "";
+    if (!normalizedCreator) {
+      return "-";
+    }
+    return formatRiskOwnerLabel(normalizedCreator) || normalizedCreator;
+  }
   function normalizeRiskOwnerLabel(label, fallbackValue) {
     if (typeof label === "string" && label.trim()) {
       return label.trim();
@@ -482,10 +493,13 @@
           return true;
         }
         const ownerLabel = formatRiskOwnerLabel(risk.owner);
+        const creatorLabel = formatRiskCreatorLabel(risk.createdBy);
         const searchableText = [
           risk.risk,
           risk.owner,
           ownerLabel,
+          risk.createdBy,
+          creatorLabel,
           risk.date,
           risk.closedDate,
           `probability ${risk.probability}`,
@@ -633,6 +647,11 @@
       initialRiskLevel,
       date: raisedDate,
       owner: typeof item.owner === "string" ? item.owner.trim() : "",
+      createdBy: typeof item.createdBy === "string"
+        ? item.createdBy.trim()
+        : typeof item.created_by === "string"
+          ? item.created_by.trim()
+          : "",
       closedDate: normalizeDateInputValue(item.closedDate),
       createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
       updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "",
@@ -643,6 +662,143 @@
   }
   function riskRegisterLabel() {
     return "shared portal register";
+  }
+  function currentRiskActorUsername() {
+    if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
+      return "";
+    }
+    const currentUser = window.ISMS_PORTAL_CONFIG.currentUser;
+    if (!currentUser || typeof currentUser !== "object") {
+      return "";
+    }
+    return typeof currentUser.username === "string" ? currentUser.username.trim() : "";
+  }
+  function bindRiskCsvActions() {
+    const exportTrigger = document.getElementById("risk-export-trigger");
+    const importTrigger = document.getElementById("risk-import-trigger");
+    const importInput = document.getElementById("risk-import-input");
+
+    if (exportTrigger && !exportTrigger.dataset.bound) {
+      exportTrigger.dataset.bound = "true";
+      exportTrigger.addEventListener("click", handleRiskCsvExport);
+    }
+    if (importTrigger && !importTrigger.dataset.bound) {
+      importTrigger.dataset.bound = "true";
+      importTrigger.addEventListener("click", () => {
+        if (importInput) {
+          importInput.click();
+        }
+      });
+    }
+    if (importInput && !importInput.dataset.bound) {
+      importInput.dataset.bound = "true";
+      importInput.addEventListener("change", () => {
+        void handleRiskCsvImport(importInput);
+      });
+    }
+  }
+  function handleRiskCsvExport() {
+    const csvText = buildRiskRegisterCsv(state.riskRegister);
+    const fileName = `risk-register-${todayDateValue()}.csv`;
+    downloadTextFile(fileName, csvText, "text/csv;charset=utf-8");
+    setRiskFormStatus(`Downloaded ${state.riskRegister.length} risk record${state.riskRegister.length === 1 ? "" : "s"} as CSV.`, "success");
+    renderRiskFormStatus();
+  }
+  async function handleRiskCsvImport(importInput) {
+    if (!importInput || !importInput.files || !importInput.files.length) {
+      return;
+    }
+    const [file] = importInput.files;
+    if (!file) {
+      return;
+    }
+
+    try {
+      const csvText = await file.text();
+      await runAsyncOperation(
+        (message, tone) => {
+          setRiskFormStatus(message, tone);
+          renderRiskFormStatus();
+        },
+        {
+          pending: `Importing risk CSV (${file.name})...`,
+          success: (count) => `Imported ${count} risk record${count === 1 ? "" : "s"} from CSV.`,
+          error: "Unable to import risk CSV.",
+        },
+        async () => {
+          const payload = await apiRequest("/risks/", {
+            method: "PUT",
+            body: JSON.stringify({ riskRegister: csvText }),
+          });
+
+          if (!payload || !Array.isArray(payload.riskRegister)) {
+            throw new Error("Risk CSV import response was invalid.");
+          }
+
+          state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+          state.isAddingRisk = false;
+          syncSelectionToVisibleRisks();
+          syncUrl();
+          renderRisksPage();
+          return state.riskRegister.length;
+        }
+      );
+    } catch (error) {
+      // The shared async helper already surfaces an actionable error message.
+    } finally {
+      importInput.value = "";
+    }
+  }
+  function buildRiskRegisterCsv(risks) {
+    const rows = [
+      [
+        "id",
+        "risk",
+        "probability",
+        "impact",
+        "initialRiskLevel",
+        "date",
+        "owner",
+        "createdBy",
+        "closedDate",
+        "createdAt",
+        "updatedAt",
+      ],
+    ];
+    risks.forEach((risk) => {
+      rows.push([
+        risk.id || "",
+        risk.risk || "",
+        risk.probability || "",
+        risk.impact || "",
+        risk.initialRiskLevel || "",
+        risk.date || "",
+        risk.owner || "",
+        risk.createdBy || "",
+        risk.closedDate || "",
+        risk.createdAt || "",
+        risk.updatedAt || "",
+      ]);
+    });
+    return `${rows.map((row) => row.map((value) => escapeCsvValue(value)).join(",")).join("\r\n")}\r\n`;
+  }
+  function escapeCsvValue(value) {
+    const stringValue = value === null || value === undefined ? "" : String(value);
+    if (!/[\",\r\n]/.test(stringValue)) {
+      return stringValue;
+    }
+    return `"${stringValue.replace(/\"/g, "\"\"")}"`;
+  }
+  function downloadTextFile(fileName, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType || "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   }
   function readFirstFormValue(formData, keys) {
     for (const key of keys) {

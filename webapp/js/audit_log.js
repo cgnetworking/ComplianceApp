@@ -1,7 +1,4 @@
-  function auditLogEntries() {
-    const reviewState = state.reviewState && typeof state.reviewState === "object" ? state.reviewState : {};
-    const entries = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
-
+  function normalizeAuditLogEntries(entries) {
     return entries
       .filter((entry) => entry && typeof entry === "object")
       .map((entry) => ({
@@ -19,6 +16,12 @@
         const rightTime = Date.parse(right.occurredAt) || 0;
         return rightTime - leftTime;
       });
+  }
+
+  function auditLogEntries() {
+    const reviewState = state.reviewState && typeof state.reviewState === "object" ? state.reviewState : {};
+    const entries = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
+    return normalizeAuditLogEntries(entries);
   }
 
   function auditActionLabel(entry) {
@@ -118,9 +121,149 @@
     return haystack.includes(query);
   }
 
+  function setAuditExportStatus(message, tone) {
+    const statusElement = document.getElementById("audit-log-export-status");
+    if (!statusElement) {
+      return;
+    }
+    if (typeof setUploadStatus === "function") {
+      setUploadStatus(statusElement, message, tone || "");
+      return;
+    }
+    statusElement.textContent = message;
+  }
+
+  function auditMetadataCsvValue(metadata) {
+    if (!metadata || typeof metadata !== "object") {
+      return "{}";
+    }
+    try {
+      return JSON.stringify(metadata);
+    } catch (error) {
+      return "{}";
+    }
+  }
+
+  function auditCsvEscape(value) {
+    const normalizedValue = value === null || value === undefined ? "" : String(value);
+    if (!/[",\r\n]/.test(normalizedValue)) {
+      return normalizedValue;
+    }
+    return `"${normalizedValue.replaceAll('"', '""')}"`;
+  }
+
+  function buildAuditLogCsv(entries, checklistById = null) {
+    const headers = [
+      "id",
+      "action",
+      "action_label",
+      "entity_type",
+      "entity_id",
+      "record",
+      "summary",
+      "actor_display_name",
+      "actor_username",
+      "occurred_at",
+      "occurred_at_display",
+      "metadata_json",
+    ];
+    const rows = entries.map((entry) => {
+      const actor = entry.actor && typeof entry.actor === "object" ? entry.actor : {};
+      const actorUsername = typeof actor.username === "string" ? actor.username.trim() : "";
+      return [
+        entry.id,
+        entry.action,
+        auditActionLabel(entry),
+        entry.entityType,
+        entry.entityId,
+        auditRecordLabel(entry, checklistById),
+        entry.summary,
+        auditActorLabel(entry),
+        actorUsername,
+        entry.occurredAt,
+        formatDateTime(entry.occurredAt),
+        auditMetadataCsvValue(entry.metadata),
+      ];
+    });
+
+    return [headers]
+      .concat(rows)
+      .map((row) => row.map((value) => auditCsvEscape(value)).join(","))
+      .join("\r\n");
+  }
+
+  function auditExportFileName(now = new Date()) {
+    const parsed = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const year = String(parsed.getFullYear()).padStart(4, "0");
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    const hour = String(parsed.getHours()).padStart(2, "0");
+    const minute = String(parsed.getMinutes()).padStart(2, "0");
+    const second = String(parsed.getSeconds()).padStart(2, "0");
+    return `audit_log_export_${year}${month}${day}_${hour}${minute}${second}.csv`;
+  }
+
+  function triggerAuditLogCsvDownload(csvText, fileName) {
+    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function loadAuditEntriesForExport() {
+    try {
+      const payload = await apiRequest("/state/?page=audit-log");
+      const reviewState = payload && typeof payload.reviewState === "object" ? payload.reviewState : {};
+      const auditLog = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
+      return normalizeAuditLogEntries(auditLog);
+    } catch (error) {
+      return auditLogEntries();
+    }
+  }
+
+  function bindAuditLogExportTrigger() {
+    const exportTrigger = document.getElementById("audit-log-export-trigger");
+    if (!exportTrigger || exportTrigger.dataset.auditExportBound === "true") {
+      return;
+    }
+
+    exportTrigger.dataset.auditExportBound = "true";
+    exportTrigger.addEventListener("click", async () => {
+      const originalLabel = exportTrigger.textContent;
+      exportTrigger.disabled = true;
+      exportTrigger.textContent = "Exporting...";
+      setAuditExportStatus("Building CSV export from the review state audit log...", "info");
+
+      try {
+        const entries = await loadAuditEntriesForExport();
+        const checklistById = auditChecklistLookup();
+        const csvText = buildAuditLogCsv(entries, checklistById);
+        triggerAuditLogCsvDownload(csvText, auditExportFileName());
+        setAuditExportStatus(
+          entries.length
+            ? `Exported ${entries.length} audit ${entries.length === 1 ? "entry" : "entries"} to CSV.`
+            : "No audit entries found. Exported a CSV file with headers only.",
+          "success",
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unable to export the audit log.";
+        setAuditExportStatus(detail, "error");
+      } finally {
+        exportTrigger.disabled = false;
+        exportTrigger.textContent = originalLabel;
+      }
+    });
+  }
+
   function renderAuditLogPage() {
     const summaryElement = document.getElementById("audit-log-summary");
     const listElement = document.getElementById("audit-log-list");
+    bindAuditLogExportTrigger();
     if (!listElement) {
       return;
     }

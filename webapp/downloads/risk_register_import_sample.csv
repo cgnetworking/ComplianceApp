@@ -1,0 +1,3 @@
+id,risk,probability,impact,date,owner,createdBy,closedDate
+,Third-party API outage affects onboarding workflows,4,4,2026-03-01,IT Operations,security.lead,
+,Key contract renewal delayed beyond compliance deadline,3,5,2026-03-05,Legal,compliance.manager,

@@ -15,8 +15,6 @@
     "November",
     "December",
   ];
-  const shortMonths = monthNames.map((month) => month.slice(0, 3));
-  const cadenceLabels = ["Annual", "Quarterly", "Monthly", "Event", "Change"];
   const defaultChecklistCategories = [
     "ISMS Governance",
     "Risk",
@@ -65,8 +63,6 @@
   const state = {
     search: params.get("q") || "",
     domain: params.get("domain") || "All",
-    applicability: params.get("applicability") || "All",
-    frequency: params.get("frequency") || "All",
     riskAssignee: params.get("assignee") || "All",
     riskStatus: params.get("status") || "All",
     riskLevel: params.get("level") || "All",
@@ -94,13 +90,8 @@
     generatedAt: document.getElementById("generated-at"),
     searchInput: document.getElementById("search-input"),
     domainFilter: document.getElementById("domain-filter"),
-    applicabilityFilter: document.getElementById("applicability-filter"),
-    frequencyFilter: document.getElementById("frequency-filter"),
     clearFilters: document.getElementById("clear-filters"),
     overview: document.getElementById("overview"),
-    frameworkChart: document.getElementById("framework-chart"),
-    timelineChart: document.getElementById("timeline-chart"),
-    reportDomains: document.getElementById("report-domains"),
     controlsBody: document.getElementById("controls-body"),
     controlDetail: document.getElementById("control-detail"),
     selectedControlBanner: document.getElementById("selected-control-banner"),

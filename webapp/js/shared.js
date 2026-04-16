@@ -5,26 +5,9 @@
       els.domainFilter.value = valueOrFallback(els.domainFilter, state.domain);
       state.domain = els.domainFilter.value;
     }
-    if (els.applicabilityFilter) {
-      populateSelect(els.applicabilityFilter, ["All", "Applicable", "Excluded"]);
-      els.applicabilityFilter.value = valueOrFallback(els.applicabilityFilter, state.applicability);
-      state.applicability = els.applicabilityFilter.value;
-    } else {
-      state.applicability = "All";
-    }
-    if (els.frequencyFilter) {
-      populateSelect(
-        els.frequencyFilter,
-        ["All"].concat(uniqueValues(controls, "effectiveReviewFrequency").filter((value) => value))
-      );
-      els.frequencyFilter.value = valueOrFallback(els.frequencyFilter, state.frequency);
-      state.frequency = els.frequencyFilter.value;
-    } else {
-      state.frequency = "All";
-    }
   }
   function initializeSelection() {
-    if (page === "controls" || page === "reports") {
+    if (page === "controls") {
       syncSelectionToVisibleControls();
     }
     if (page === "policies") {
@@ -59,7 +42,7 @@
       return;
     }
 
-    const searchablePages = new Set(["controls", "reports", "policies", "risks", "vendors", "audit-log", "assessments"]);
+    const searchablePages = new Set(["controls", "policies", "risks", "vendors", "audit-log", "assessments"]);
     if (!searchablePages.has(page)) {
       els.searchInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") {
@@ -87,39 +70,15 @@
       });
     }
 
-    if (els.applicabilityFilter) {
-      els.applicabilityFilter.addEventListener("change", (event) => {
-        state.applicability = event.target.value;
-        syncSelectionToVisibleControls();
-        syncUrlAndRender();
-      });
-    }
-
-    if (els.frequencyFilter) {
-      els.frequencyFilter.addEventListener("change", (event) => {
-        state.frequency = event.target.value;
-        syncSelectionToVisibleControls();
-        syncUrlAndRender();
-      });
-    }
-
     if (els.clearFilters) {
       els.clearFilters.addEventListener("click", () => {
         state.search = "";
         state.domain = "All";
-        state.applicability = "All";
-        state.frequency = "All";
         if (els.searchInput) {
           els.searchInput.value = "";
         }
         if (els.domainFilter) {
           els.domainFilter.value = "All";
-        }
-        if (els.applicabilityFilter) {
-          els.applicabilityFilter.value = "All";
-        }
-        if (els.frequencyFilter) {
-          els.frequencyFilter.value = "All";
         }
         if (page === "policies") {
           initializePolicySelection();
@@ -672,9 +631,6 @@
       case "home":
         renderHomePage();
         break;
-      case "reports":
-        renderReportsPage();
-        break;
       case "controls":
         renderControlsPage();
         break;
@@ -721,53 +677,28 @@
       : monthlyActivities(overviewMonthIndex);
     const checklistDone = checklistItems.filter((item) => isReviewTaskCompleted(item.id, overviewMonthIndex)).length;
     const activityDone = monthActivities.filter((item) => isReviewTaskCompleted(item.id, overviewMonthIndex)).length;
-    const mappedPolicies = new Set(controls.flatMap((control) => control.policyDocumentIds)).size;
-
-    const cards = options.mode === "reports"
-      ? [
-          {
-            label: "Controls in view",
-            value: controls.length,
-            note: controls.length === getAllControlViews().length ? "All controls included in the report." : "Filtered control population for this report.",
-          },
-          {
-            label: "Applicable controls",
-            value: controls.filter((control) => getControlView(control).effectiveApplicability === "Applicable").length,
-            note: "Applicable controls in the currently filtered set.",
-          },
-          {
-            label: "Mapped policies",
-            value: mappedPolicies,
-            note: "Unique policies referenced by the visible controls.",
-          },
-          {
-            label: "Current month queue",
-            value: `${activityDone}/${monthActivities.length}`,
-            note: "Review activities completed in the shared checklist tracker.",
-          },
-        ]
-      : [
-          {
-            label: "Total controls",
-            value: controls.length,
-            note: "Default Annex A control list available in the portal.",
-          },
-          {
-            label: "Policies embedded",
-            value: data.summary.policyCount,
-            note: "Policy pages appear when mapping documents are provided.",
-          },
-          {
-            label: `${monthNames[overviewMonthIndex]} queue`,
-            value: `${activityDone}/${monthActivities.length}`,
-            note: "Checklist tasks due this month.",
-          },
-          {
-            label: "Checklist progress",
-            value: `${checklistDone}/${checklistItems.length}`,
-            note: "Recurring review checks marked complete.",
-          },
-        ];
+    const cards = [
+      {
+        label: "Total controls",
+        value: controls.length,
+        note: "Default Annex A control list available in the portal.",
+      },
+      {
+        label: "Policies embedded",
+        value: data.summary.policyCount,
+        note: "Policy pages appear when mapping documents are provided.",
+      },
+      {
+        label: `${monthNames[overviewMonthIndex]} queue`,
+        value: `${activityDone}/${monthActivities.length}`,
+        note: "Checklist tasks due this month.",
+      },
+      {
+        label: "Checklist progress",
+        value: `${checklistDone}/${checklistItems.length}`,
+        note: "Recurring review checks marked complete.",
+      },
+    ];
 
     els.overview.innerHTML = cards.map((card) => `
       <article class="stat-card">
@@ -780,19 +711,13 @@
   function syncUrl() {
     const query = new URLSearchParams();
 
-    if (page === "controls" || page === "reports" || page === "policies" || page === "risks" || page === "vendors" || page === "audit-log" || page === "assessments") {
+    if (page === "controls" || page === "policies" || page === "risks" || page === "vendors" || page === "audit-log" || page === "assessments") {
       if (state.search) {
         query.set("q", state.search);
       }
     }
-    if ((page === "controls" || page === "reports") && state.domain !== "All") {
+    if (page === "controls" && state.domain !== "All") {
       query.set("domain", state.domain);
-    }
-    if (page === "reports" && state.applicability !== "All") {
-      query.set("applicability", state.applicability);
-    }
-    if (page === "reports" && state.frequency !== "All") {
-      query.set("frequency", state.frequency);
     }
     if (page === "controls" && state.selectedControlId) {
       query.set("control", state.selectedControlId);

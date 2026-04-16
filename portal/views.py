@@ -180,12 +180,6 @@ def controls_page(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
-def reports_page(request: HttpRequest) -> HttpResponse:
-    return render_portal_page(request, "portal/reports.html")
-
-
-@login_required(login_url="portal-login")
-@ensure_csrf_cookie
 def reviews_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/reviews.html")
 

@@ -832,20 +832,12 @@
   }
   function filteredControls() {
     const searchLower = state.search.trim().toLowerCase();
-    const usesDomainFilter = page === "controls" || page === "reports";
-    const usesReportOnlyFilters = page === "reports";
 
     return getAllControlViews().filter((view) => {
-      if (usesDomainFilter && state.domain !== "All" && view.domain !== state.domain) {
+      if (page === "controls" && state.domain !== "All" && view.domain !== state.domain) {
         return false;
       }
-      if (usesReportOnlyFilters && state.applicability !== "All" && view.effectiveApplicability !== state.applicability) {
-        return false;
-      }
-      if (usesReportOnlyFilters && state.frequency !== "All" && view.effectiveReviewFrequency !== state.frequency) {
-        return false;
-      }
-      if (!searchLower || (page !== "controls" && page !== "reports")) {
+      if (!searchLower || page !== "controls") {
         return true;
       }
 
@@ -875,37 +867,4 @@
     if (!state.selectedControlId || !controls.some((control) => control.id === state.selectedControlId)) {
       state.selectedControlId = controls[0].id;
     }
-  }
-  function reviewCadence(reviewFrequency) {
-    const value = String(reviewFrequency || "").toLowerCase();
-    if (value.includes("monthly")) {
-      return "Monthly";
-    }
-    if (value.includes("quarterly")) {
-      return "Quarterly";
-    }
-    if (value.includes("significant change")) {
-      return "Change";
-    }
-    if (value.includes("per event") || value.includes("after incidents")) {
-      return "Event";
-    }
-    return "Annual";
-  }
-  function buildSmoothPath(points) {
-    if (!points.length) {
-      return "";
-    }
-    if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y}`;
-    }
-
-    let path = `M ${points[0].x} ${points[0].y}`;
-    for (let index = 0; index < points.length - 1; index += 1) {
-      const current = points[index];
-      const next = points[index + 1];
-      const midX = (current.x + next.x) / 2;
-      path += ` C ${midX} ${current.y}, ${midX} ${next.y}, ${next.x} ${next.y}`;
-    }
-    return path;
   }

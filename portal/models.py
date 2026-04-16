@@ -91,6 +91,7 @@ class RiskRecord(models.Model):
     initial_risk_level = models.PositiveSmallIntegerField(validators=RISK_SCORE_VALIDATORS)
     date = models.DateField()
     owner = models.CharField(max_length=255)
+    created_by = models.CharField(max_length=255, blank=True, default="")
     closed_date = models.DateField(blank=True, null=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(default=timezone.now)
@@ -118,6 +119,7 @@ class RiskRecord(models.Model):
             "initialRiskLevel": initial_risk_level,
             "date": self.date.isoformat(),
             "owner": self.owner,
+            "createdBy": self.created_by,
             "closedDate": self.closed_date.isoformat() if self.closed_date else "",
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat(),

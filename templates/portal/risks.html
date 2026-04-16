@@ -1,4 +1,5 @@
 {% extends "portal/base.html" %}
+{% load static %}
 
 {% block title %}ISMS Risk Register{% endblock %}
 {% block body_page %}risks{% endblock %}
@@ -8,25 +9,42 @@
 {% endblock %}
 
 {% block content %}
-  <section class="report-header">
-    <p class="section-kicker">Risk Register</p>
-    <h1>Business risk register</h1>
-    <p class="report-copy">
-      Track business risks in one place, assign owners, and score each entry by probability and impact.
-    </p>
-    <div class="filter-bar">
-      <label class="pill-select">
-        <span>Assignee</span>
-        <select id="risk-assignee-filter" aria-label="Filter risks by assigned user"></select>
-      </label>
-      <label class="pill-select">
-        <span>Status</span>
-        <select id="risk-status-filter" aria-label="Filter risks by status"></select>
-      </label>
-      <label class="pill-select">
-        <span>Risk Level</span>
-        <select id="risk-level-filter" aria-label="Filter risks by matrix level"></select>
-      </label>
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Risk Register</p>
+      <h1>Business risk register</h1>
+      <p class="report-copy">
+        Track business risks in one place, assign owners, and score each entry by probability and impact.
+      </p>
+      <div class="filter-bar">
+        <label class="pill-select">
+          <span>Assignee</span>
+          <select id="risk-assignee-filter" aria-label="Filter risks by assigned user"></select>
+        </label>
+        <label class="pill-select">
+          <span>Status</span>
+          <select id="risk-status-filter" aria-label="Filter risks by status"></select>
+        </label>
+        <label class="pill-select">
+          <span>Risk Level</span>
+          <select id="risk-level-filter" aria-label="Filter risks by matrix level"></select>
+        </label>
+      </div>
+    </div>
+    <div class="report-actions">
+      <input id="risk-import-input" type="file" accept=".csv,text/csv" hidden>
+      <a
+        class="ghost-button"
+        href="{% static 'downloads/risk_register_import_sample.csv' %}"
+        download="risk_register_import_sample.csv"
+      >
+        Download Sample CSV
+      </a>
+      <button class="ghost-button" id="risk-import-trigger" type="button">Import CSV</button>
+      <button class="ghost-button" id="risk-export-trigger" type="button">Export All Risks (.csv)</button>
+      <p class="helper-note upload-status">
+        Download the sample CSV, update the rows, and import to bulk add risks. Export downloads the entire risk register.
+      </p>
     </div>
   </section>
 

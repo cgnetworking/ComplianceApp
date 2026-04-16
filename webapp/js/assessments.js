@@ -3,6 +3,7 @@
   let zeroTrustRuns = [];
   let zeroTrustLogs = [];
   let zeroTrustPollTimer = 0;
+  let zeroTrustExportInFlight = false;
 
   function selectedZeroTrustProfile() {
     const profileId = state.selectedAssessmentProfileId;
@@ -25,6 +26,157 @@
 
   function zeroTrustRunIsActive(run) {
     return Boolean(run && ["queued", "claimed", "running", "ingesting"].includes(run.status));
+  }
+
+  function resolveAssessmentApiBaseUrl() {
+    if (typeof resolveApiBaseUrl === "function") {
+      return resolveApiBaseUrl();
+    }
+    if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl === "string") {
+      return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
+    }
+    return "/api";
+  }
+
+  function zeroTrustHasStoredReports() {
+    if (zeroTrustRuns.some((run) => Boolean(run && run.hasReport))) {
+      return true;
+    }
+    return zeroTrustProfiles.some((profile) => Boolean(profile && profile.latestRun && profile.latestRun.hasReport));
+  }
+
+  function normalizeAssessmentDownloadFilename(fileName, fallbackName) {
+    const raw = typeof fileName === "string" ? fileName.trim() : "";
+    const sanitized = raw.replace(/[\\/]/g, "-").replace(/\s+/g, " ");
+    if (sanitized) {
+      return sanitized;
+    }
+    return fallbackName;
+  }
+
+  function parseAssessmentExportFilename(dispositionHeader, fallbackName) {
+    const disposition = typeof dispositionHeader === "string" ? dispositionHeader : "";
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) {
+      try {
+        return normalizeAssessmentDownloadFilename(decodeURIComponent(utf8Match[1]), fallbackName);
+      } catch (error) {
+        return normalizeAssessmentDownloadFilename(utf8Match[1], fallbackName);
+      }
+    }
+
+    const plainMatch = disposition.match(/filename="?([^\";]+)"?/i);
+    if (plainMatch && plainMatch[1]) {
+      return normalizeAssessmentDownloadFilename(plainMatch[1], fallbackName);
+    }
+    return fallbackName;
+  }
+
+  function triggerAssessmentArchiveDownload(blob, fileName) {
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = normalizeAssessmentDownloadFilename(fileName, "assessment-reports.zip");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(objectUrl);
+    }, 1000);
+  }
+
+  async function downloadAssessmentArchive(url, fallbackName) {
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/zip",
+      },
+    });
+    if (response.status === 401) {
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.href = `${resolveLoginUrl()}?next=${encodeURIComponent(next)}`;
+      throw new Error("Authentication required.");
+    }
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      let detail = "";
+      if (responseText) {
+        try {
+          const payload = JSON.parse(responseText);
+          detail = payload && (payload.detail || payload.message) ? String(payload.detail || payload.message) : "";
+        } catch (error) {
+          detail = "";
+        }
+      }
+      throw new Error(detail || `Request failed (${response.status}).`);
+    }
+
+    const fileName = parseAssessmentExportFilename(response.headers.get("Content-Disposition"), fallbackName);
+    const archiveBlob = await response.blob();
+    triggerAssessmentArchiveDownload(archiveBlob, fileName);
+  }
+
+  async function runAssessmentExport(messages, operation) {
+    if (zeroTrustExportInFlight) {
+      return;
+    }
+
+    zeroTrustExportInFlight = true;
+    renderZeroTrustReport();
+    setUploadStatus(els.assessmentStatus, messages.pending, "info");
+    try {
+      await operation();
+      setUploadStatus(els.assessmentStatus, messages.success, "success");
+    } catch (error) {
+      const fallbackMessage = error instanceof Error ? error.message : messages.error;
+      setUploadStatus(els.assessmentStatus, fallbackMessage, "error");
+    } finally {
+      zeroTrustExportInFlight = false;
+      renderZeroTrustReport();
+    }
+  }
+
+  async function handleZeroTrustSelectedReportDownload(runId) {
+    const selectedRunId = typeof runId === "string" ? runId.trim() : "";
+    const run = zeroTrustRuns.find((item) => item.id === selectedRunId) || null;
+    if (!run || !run.hasReport) {
+      setUploadStatus(els.assessmentStatus, "Select a stored assessment report before exporting.", "error");
+      return;
+    }
+
+    const fallbackName = `assessment-report-${run.id}.zip`;
+    const downloadUrl = `${resolveAssessmentApiBaseUrl()}/assessments/runs/${encodeURIComponent(run.id)}/export/`;
+    await runAssessmentExport(
+      {
+        pending: "Preparing selected report export...",
+        success: "Selected report exported.",
+        error: "Unable to export the selected report.",
+      },
+      async () => {
+        await downloadAssessmentArchive(downloadUrl, fallbackName);
+      }
+    );
+  }
+
+  async function handleZeroTrustAllReportsDownload() {
+    if (!zeroTrustHasStoredReports()) {
+      setUploadStatus(els.assessmentStatus, "No stored assessment reports are available to export yet.", "error");
+      return;
+    }
+
+    const downloadUrl = `${resolveAssessmentApiBaseUrl()}/assessments/reports/export/`;
+    await runAssessmentExport(
+      {
+        pending: "Preparing export for all stored assessment reports...",
+        success: "All stored assessment reports exported.",
+        error: "Unable to export all stored assessment reports.",
+      },
+      async () => {
+        await downloadAssessmentArchive(downloadUrl, "assessment-reports.zip");
+      }
+    );
   }
 
   function filteredZeroTrustProfiles() {
@@ -357,6 +509,7 @@
       return;
     }
 
+    const hasStoredReports = zeroTrustHasStoredReports();
     const run = selectedZeroTrustRun();
     if (!run) {
       els.assessmentReport.innerHTML = `
@@ -369,6 +522,11 @@
             <p class="detail-subline">
               The selected assessment report opens here after the worker stores its HTML bundle in PostgreSQL.
             </p>
+          </div>
+          <div class="button-row button-row-wrap">
+            <button class="ghost-button" type="button" data-assessment-report-download-all${hasStoredReports && !zeroTrustExportInFlight ? "" : " disabled"}>
+              Download All Reports
+            </button>
           </div>
         </div>
       `;
@@ -385,6 +543,14 @@
             </div>
             <p class="detail-subline">${escapeHtml(run.statusMessage || "The selected run does not have a stored report bundle yet.")}</p>
           </div>
+          <div class="button-row button-row-wrap">
+            <button class="ghost-button" type="button" data-assessment-report-download-selected="${escapeHtml(run.id)}" disabled>
+              Download Selected Report
+            </button>
+            <button class="ghost-button" type="button" data-assessment-report-download-all${hasStoredReports && !zeroTrustExportInFlight ? "" : " disabled"}>
+              Download All Reports
+            </button>
+          </div>
         </div>
       `;
       return;
@@ -398,8 +564,16 @@
         </div>
         <div class="chip-row">
           <span class="status-pill ${zeroTrustRunIsActive(run) ? "is-active" : run.status === "failed" ? "is-danger" : "is-success"}">${escapeHtml(run.statusLabel)}</span>
-          <a class="ghost-button" href="${escapeHtml(run.reportUrl)}" target="_blank" rel="noopener">Open Full Report</a>
         </div>
+      </div>
+      <div class="button-row button-row-wrap">
+        <button class="ghost-button" type="button" data-assessment-report-download-selected="${escapeHtml(run.id)}"${zeroTrustExportInFlight ? " disabled" : ""}>
+          Download Selected Report
+        </button>
+        <button class="ghost-button" type="button" data-assessment-report-download-all${hasStoredReports && !zeroTrustExportInFlight ? "" : " disabled"}>
+          Download All Reports
+        </button>
+        <a class="ghost-button" href="${escapeHtml(run.reportUrl)}" target="_blank" rel="noopener">Open Full Report</a>
       </div>
       <iframe
         class="assessment-report-frame"
@@ -659,6 +833,21 @@
           syncUrlAndRender(renderZeroTrustPage);
           void refreshSelectedZeroTrustRun();
           return;
+        }
+      });
+    }
+
+    if (els.assessmentReport) {
+      els.assessmentReport.addEventListener("click", (event) => {
+        const downloadSelected = event.target.closest("[data-assessment-report-download-selected]");
+        if (downloadSelected && downloadSelected.dataset.assessmentReportDownloadSelected) {
+          void handleZeroTrustSelectedReportDownload(downloadSelected.dataset.assessmentReportDownloadSelected);
+          return;
+        }
+
+        const downloadAll = event.target.closest("[data-assessment-report-download-all]");
+        if (downloadAll) {
+          void handleZeroTrustAllReportsDownload();
         }
       });
     }

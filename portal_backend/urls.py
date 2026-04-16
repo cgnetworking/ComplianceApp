@@ -13,7 +13,6 @@ urlpatterns = [
     path("api/", include("portal.urls")),
     path("", portal_views.home_page, name="portal-home"),
     path("controls/", portal_views.controls_page, name="portal-controls"),
-    path("reports/", portal_views.reports_page, name="portal-reports"),
     path("reviews/", portal_views.reviews_page, name="portal-reviews"),
     path("review-tasks/", portal_views.review_tasks_page, name="portal-review-tasks"),
     path("audit-log/", portal_views.audit_log_page, name="portal-audit-log"),

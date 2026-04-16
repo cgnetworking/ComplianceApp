@@ -186,6 +186,47 @@
       method: "POST",
     });
   }
+  function policyDocumentDownloadUrl(documentId) {
+    const normalizedId = String(documentId || "").trim();
+    if (!normalizedId) {
+      return "";
+    }
+    const apiBaseUrl = typeof resolveApiBaseUrl === "function" ? resolveApiBaseUrl() : "/api";
+    return `${apiBaseUrl}/policies/${encodeURIComponent(normalizedId)}/download/`;
+  }
+  function policyAllDocumentsDownloadUrl() {
+    const apiBaseUrl = typeof resolveApiBaseUrl === "function" ? resolveApiBaseUrl() : "/api";
+    return `${apiBaseUrl}/policies/downloads/all/`;
+  }
+  function bindPolicyDownloadAllTrigger(buttonElement) {
+    if (!buttonElement || buttonElement.dataset.policyDownloadBound === "true") {
+      return;
+    }
+    buttonElement.dataset.policyDownloadBound = "true";
+    buttonElement.addEventListener("click", (event) => {
+      if (getPolicyLibraryRows().length) {
+        return;
+      }
+      event.preventDefault();
+      setPolicyUploadStatus("No policy documents are available to download.", "error");
+    });
+  }
+  function syncPolicyDownloadAllTrigger() {
+    const downloadTrigger = document.getElementById("policy-download-all-trigger");
+    if (!downloadTrigger) {
+      return;
+    }
+    bindPolicyDownloadAllTrigger(downloadTrigger);
+
+    const hasPolicies = getPolicyLibraryRows().length > 0;
+    downloadTrigger.setAttribute("href", policyAllDocumentsDownloadUrl());
+    downloadTrigger.setAttribute("aria-disabled", hasPolicies ? "false" : "true");
+    if (hasPolicies) {
+      downloadTrigger.classList.remove("disabled");
+    } else {
+      downloadTrigger.classList.add("disabled");
+    }
+  }
   function policyApprovalDateLabel(value) {
     const formatted = typeof formatDateWithOrdinal === "function" ? formatDateWithOrdinal(value) : "";
     return formatted && formatted !== "-" ? formatted : "";
@@ -404,6 +445,7 @@
     bindPolicyLibraryTabs();
     renderPolicyLibraryTabs();
     syncPoliciesPageCapabilities();
+    syncPolicyDownloadAllTrigger();
     initializePolicySelection();
     renderSelectedControlBanner();
     renderPolicyCoverageList(filteredPolicyCoverage(), true);
@@ -789,9 +831,14 @@
           ${documentItem.reviewFrequency ? `<span class="chip">${escapeHtml(documentItem.reviewFrequency)}</span>` : ""}
         </div>
       `;
-    const documentActions = documentItem.isUploaded && !isPolicyReader
-      ? `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
-      : "";
+    const documentActions = [
+      `<a class="ghost-button" href="${escapeHtml(policyDocumentDownloadUrl(documentItem.id))}" download>Download Policy</a>`,
+    ];
+    if (documentItem.isUploaded && !isPolicyReader) {
+      documentActions.push(
+        `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
+      );
+    }
     const shouldLoadDocumentContent = !documentItem.contentLoaded && documentItem.contentAvailable !== false;
     if (shouldLoadDocumentContent) {
       void ensurePolicyDocumentContentLoaded(documentItem.id);
@@ -859,7 +906,7 @@
           </div>
           ${controlMappingEditor}
         </div>
-        ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}
+        ${documentActions.length ? `<div class="document-actions">${documentActions.join("")}</div>` : ""}
       </div>
       <div class="content-frame">${contentMarkup}</div>
     `;

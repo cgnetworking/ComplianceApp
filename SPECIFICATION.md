@@ -409,7 +409,7 @@ The implemented JSON API is private to the web application and session-authentic
 | Area | Primary backend files | Primary frontend files | Primary persistence |
 | --- | --- | --- | --- |
 | Auth, shell, bootstrap | `portal_backend/settings.py`, `portal/views.py`, `portal_backend/urls.py` | `templates/portal/login.html`, `_sidebar.html`, `_auth_controls.html`, `_app_scripts.html`, `webapp/js/shared.js`, `webapp/js/runtime.js` | session auth, `PortalState` bootstrap reads |
-| Controls, reports, home | `portal/views.py`, control and mapping sections of `portal/services.py` | `templates/portal/index.html`, `controls.html`, `reports.html`, `webapp/js/home.js`, `controls.js`, `reports.js`, `shared.js`, `runtime.js` | `PortalState.mapping_state`, `PortalState.control_state` |
+| Controls and home | `portal/views.py`, control and mapping sections of `portal/services.py` | `templates/portal/index.html`, `controls.html`, `webapp/js/home.js`, `controls.js`, `shared.js`, `runtime.js` | `PortalState.mapping_state`, `PortalState.control_state` |
 | Policies and approvals | `portal/views.py`, policy sections of `portal/services.py` | `templates/portal/policies.html`, `webapp/js/policies.js`, `shared.js`, `runtime.js` | `UploadedPolicy`, `PortalState.review_state`, mapping/control overlays |
 | Reviews and audit | `portal/views.py`, review sections of `portal/services.py` | `templates/portal/reviews.html`, `review_tasks.html`, `audit_log.html`, `webapp/js/reviews.js`, `review_tasks.js`, `audit_log.js`, `shared.js`, `runtime.js` | `ReviewChecklistItem`, `ReviewChecklistRecommendation`, `PortalState.review_state` |
 | Risks and vendors | `portal/views.py`, risk and vendor sections of `portal/services.py` | `templates/portal/risks.html`, `vendors.html`, `webapp/js/risks.js`, `vendors.js`, `shared.js`, `runtime.js` | `RiskRecord`, `VendorResponse` |
@@ -468,4 +468,3 @@ Any future plan derived from this specification should preserve these invariants
 - Uploaded original files are not exposed for later download.
 - Shared browser and service modules are broad and will slow parallel feature development.
 - The repository does not currently show an automated test suite, so future plans should budget explicit verification work.
-

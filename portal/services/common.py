@@ -115,7 +115,6 @@ BOOTSTRAP_PAGES = frozenset(
     {
         "home",
         "controls",
-        "reports",
         "reviews",
         "review-tasks",
         "audit-log",
@@ -126,7 +125,7 @@ BOOTSTRAP_PAGES = frozenset(
     }
 )
 BOOTSTRAP_PAGES_WITH_REVIEW_STATE = frozenset({"home", "reviews", "review-tasks", "audit-log"})
-BOOTSTRAP_PAGES_WITH_CONTROL_STATE = frozenset({"home", "controls", "reports", "policies"})
+BOOTSTRAP_PAGES_WITH_CONTROL_STATE = frozenset({"home", "controls", "policies"})
 
 
 class ValidationError(Exception):

@@ -8,12 +8,20 @@
 {% endblock %}
 
 {% block content %}
-  <section class="report-header">
-    <p class="section-kicker">Audit</p>
-    <h1>Audit log</h1>
-    <p class="report-copy">
-      Review recorded system actions for this workspace. Each entry includes action, record, user, and timestamp details.
-    </p>
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Audit</p>
+      <h1>Audit log</h1>
+      <p class="report-copy">
+        Review recorded system actions for this workspace. Each entry includes action, record, user, and timestamp details.
+      </p>
+    </div>
+    <div class="report-actions">
+      <button class="ghost-button" id="audit-log-export-trigger" type="button">Export CSV</button>
+      <p class="helper-note upload-status" id="audit-log-export-status">
+        Export recorded audit entries as a CSV file.
+      </p>
+    </div>
   </section>
 
   <section class="page-grid">

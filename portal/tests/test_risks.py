@@ -12,8 +12,16 @@ class RiskMutationTests(TestCase):
         self.user = user_model.objects.create_user(username="risk-user", password="password")
         self.client.force_login(self.user)
 
-    def risk_payload(self, risk_id: str, risk_text: str, *, probability: int = 3, impact: int = 3) -> dict[str, object]:
-        return {
+    def risk_payload(
+        self,
+        risk_id: str,
+        risk_text: str,
+        *,
+        probability: int = 3,
+        impact: int = 3,
+        created_by: str = "",
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
             "id": risk_id,
             "risk": risk_text,
             "probability": probability,
@@ -21,11 +29,14 @@ class RiskMutationTests(TestCase):
             "date": "2026-01-10",
             "owner": "Risk Owner",
         }
+        if created_by:
+            payload["createdBy"] = created_by
+        return payload
 
-    def create_risk(self, risk_id: str, risk_text: str) -> None:
+    def create_risk(self, risk_id: str, risk_text: str, *, created_by: str = "") -> None:
         response = self.client.post(
             "/api/risks/",
-            data=json.dumps({"risk": self.risk_payload(risk_id, risk_text)}),
+            data=json.dumps({"risk": self.risk_payload(risk_id, risk_text, created_by=created_by)}),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 201)
@@ -79,3 +90,84 @@ class RiskMutationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "Risk id does not match request path.")
 
+    def test_create_sets_created_by_when_payload_includes_actor(self) -> None:
+        response = self.client.post(
+            "/api/risks/",
+            data=json.dumps(
+                {
+                    "risk": self.risk_payload(
+                        "risk-actor",
+                        "Actor sourced risk",
+                        created_by="risk-user",
+                    )
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        created = response.json()["risk"]
+        self.assertEqual(created["createdBy"], "risk-user")
+
+    def test_record_level_update_preserves_created_by_when_omitted(self) -> None:
+        self.create_risk("risk-1", "Risk one", created_by="risk-user")
+
+        response = self.client.put(
+            "/api/risks/risk-1/",
+            data=json.dumps({"risk": {"risk": "Risk one updated"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["risk"]["createdBy"], "risk-user")
+
+    def test_bulk_put_preserves_existing_created_by_when_missing_from_payload(self) -> None:
+        self.create_risk("risk-1", "Risk one", created_by="risk-user")
+
+        response = self.client.put(
+            "/api/risks/",
+            data=json.dumps(
+                {
+                    "riskRegister": [
+                        {
+                            "id": "risk-1",
+                            "risk": "Risk one updated",
+                            "probability": 4,
+                            "impact": 4,
+                            "date": "2026-01-10",
+                            "owner": "Risk Owner",
+                        }
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        record = next(item for item in response.json()["riskRegister"] if item["id"] == "risk-1")
+        self.assertEqual(record["createdBy"], "risk-user")
+
+    def test_bulk_put_accepts_csv_text_to_import_risks(self) -> None:
+        csv_payload = (
+            "id,risk,probability,impact,date,owner,createdBy\\n"
+            ",Imported risk 1,3,4,2026-02-01,Risk Owner,risk-user\\n"
+            ",Imported risk 2,2,2,2026-02-02,Risk Owner,\\n"
+        )
+        response = self.client.put(
+            "/api/risks/",
+            data=json.dumps({"riskRegister": csv_payload}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        register = response.json()["riskRegister"]
+        self.assertEqual(len(register), 2)
+        imported_by_name = {item["risk"]: item for item in register}
+        self.assertEqual(imported_by_name["Imported risk 1"]["createdBy"], "risk-user")
+        self.assertEqual(imported_by_name["Imported risk 2"]["createdBy"], "")
+
+    def test_bulk_put_rejects_csv_missing_required_columns(self) -> None:
+        csv_payload = "risk,probability,impact,date\\nMissing owner,2,3,2026-02-01\\n"
+        response = self.client.put(
+            "/api/risks/",
+            data=json.dumps({"riskRegister": csv_payload}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("missing required columns", response.json()["detail"])

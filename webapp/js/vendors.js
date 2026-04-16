@@ -1,5 +1,7 @@
   let vendorResponsesLoadPromise = null;
 
+  const vendorHelperCopy = "Download the sample CSV, replace the sample answers, and import completed questionnaires or exports into the shared database.";
+
   async function loadVendorResponsesState(force = false) {
     if (force) {
       state.vendorResponsesLoaded = false;
@@ -32,10 +34,91 @@
   }
 
   function renderVendorsPage() {
+    bindVendorDownloadEvents();
     syncVendorSelection();
+    updateVendorDownloadControls();
+    ensureVendorUploadHelperCopy();
     renderVendorOverview();
     renderVendorResponseList();
     renderVendorDetail();
+  }
+  function ensureVendorUploadHelperCopy() {
+    if (!els.vendorUploadStatus) {
+      return;
+    }
+    if (els.vendorUploadStatus.classList.contains("is-success") || els.vendorUploadStatus.classList.contains("is-error")) {
+      return;
+    }
+    setUploadStatus(els.vendorUploadStatus, vendorHelperCopy, "");
+  }
+  function bindVendorDownloadEvents() {
+    const selectedButton = document.getElementById("vendor-download-trigger");
+    if (selectedButton && selectedButton.dataset.vendorDownloadBound !== "true") {
+      selectedButton.dataset.vendorDownloadBound = "true";
+      selectedButton.addEventListener("click", () => {
+        handleVendorDownloadSelected();
+      });
+    }
+
+    const allButton = document.getElementById("vendor-download-all-trigger");
+    if (allButton && allButton.dataset.vendorDownloadBound !== "true") {
+      allButton.dataset.vendorDownloadBound = "true";
+      allButton.addEventListener("click", () => {
+        handleVendorDownloadAll();
+      });
+    }
+  }
+  function updateVendorDownloadControls() {
+    const selectedButton = document.getElementById("vendor-download-trigger");
+    const allButton = document.getElementById("vendor-download-all-trigger");
+    const selectedResponse = vendorSurveyResponses.find((response) => response.id === state.selectedVendorResponseId);
+
+    if (selectedButton) {
+      selectedButton.disabled = !selectedResponse;
+      selectedButton.title = selectedResponse
+        ? `Download ${selectedResponse.fileName}`
+        : "Select an imported vendor response to download.";
+    }
+    if (allButton) {
+      allButton.disabled = vendorSurveyResponses.length === 0;
+      allButton.title = vendorSurveyResponses.length
+        ? "Download all imported vendor responses as a CSV export."
+        : "Import vendor responses to enable download.";
+    }
+  }
+  function handleVendorDownloadSelected() {
+    const selectedResponse = vendorSurveyResponses.find((response) => response.id === state.selectedVendorResponseId);
+    if (!selectedResponse) {
+      setUploadStatus(els.vendorUploadStatus, "Select an imported vendor response to download.", "warning");
+      updateVendorDownloadControls();
+      return;
+    }
+    setUploadStatus(els.vendorUploadStatus, `Preparing download for ${selectedResponse.fileName}...`, "info");
+    triggerVendorDownload({ responseId: selectedResponse.id });
+  }
+  function handleVendorDownloadAll() {
+    if (!vendorSurveyResponses.length) {
+      setUploadStatus(els.vendorUploadStatus, "Import vendor responses before downloading all responses.", "warning");
+      updateVendorDownloadControls();
+      return;
+    }
+    setUploadStatus(
+      els.vendorUploadStatus,
+      `Preparing download for ${vendorSurveyResponses.length} imported vendor response${vendorSurveyResponses.length === 1 ? "" : "s"}...`,
+      "info"
+    );
+    triggerVendorDownload({ scope: "all" });
+  }
+  function triggerVendorDownload(options) {
+    const query = new URLSearchParams();
+    if (options.scope === "all") {
+      query.set("scope", "all");
+    } else if (options.responseId) {
+      query.set("responseId", options.responseId);
+    }
+
+    const apiBaseUrl = resolveApiBaseUrl();
+    window.location.assign(`${apiBaseUrl}/vendors/downloads/?${query.toString()}`);
   }
   function renderVendorOverview() {
     if (!els.vendorOverview) {
@@ -44,8 +127,7 @@
 
     const responses = filteredVendorResponses();
     const vendorCount = new Set(responses.map((response) => response.vendorName)).size;
-    const previewCount = responses.filter((response) => response.previewText).length;
-    const metadataOnlyCount = responses.filter((response) => !response.previewText).length;
+    const selectedResponse = responses.find((response) => response.id === state.selectedVendorResponseId) || null;
     const lastImported = responses[0] ? formatShortDateTime(responses[0].importedAt) : "None";
 
     const cards = [
@@ -60,9 +142,11 @@
         note: `Files stored in the ${portalWorkspaceLabel()} for follow-up review.`,
       },
       {
-        label: "Preview ready",
-        value: previewCount,
-        note: metadataOnlyCount ? `${metadataOnlyCount} file(s) are metadata only.` : "All visible files include an inline preview.",
+        label: "Selected response",
+        value: selectedResponse ? selectedResponse.vendorName : "None",
+        note: selectedResponse
+          ? "Use Download to export the selected vendor response."
+          : "Select an imported response to enable single-file download.",
       },
       {
         label: "Last import",
@@ -98,7 +182,7 @@
       <div class="vendor-list">
         ${responses.map((response) => {
           const isActive = response.id === state.selectedVendorResponseId;
-          const statusClass = response.previewText ? "is-success" : "is-active";
+          const statusClass = "is-success";
           return `
             <button class="vendor-card ${isActive ? "is-selected" : ""}" type="button" data-vendor-response="${escapeHtml(response.id)}">
               <div class="vendor-card-top">
@@ -106,7 +190,7 @@
                   <strong>${escapeHtml(response.vendorName)}</strong>
                   <div class="mini-copy">${escapeHtml(response.fileName)}</div>
                 </div>
-                <span class="status-pill ${statusClass}">${escapeHtml(response.status)}</span>
+                <span class="status-pill ${statusClass}">Imported</span>
               </div>
               <div class="vendor-meta-row">
                 <span class="chip">${escapeHtml(response.extension.toUpperCase())}</span>
@@ -135,7 +219,7 @@
               <h3>Stage supplier responses for review</h3>
             </div>
             <p class="detail-subline">
-              Import completed due diligence questionnaires, spreadsheets, or exported response files into the ${escapeHtml(portalWorkspaceLabel())}. Text-based uploads create searchable previews in this queue.
+              Import completed due diligence questionnaires, spreadsheets, or exported response files into the ${escapeHtml(portalWorkspaceLabel())}. Imported responses can be downloaded from this page for follow-up review and evidence mapping.
             </p>
           </div>
           <div class="detail-grid">
@@ -145,13 +229,13 @@
             </div>
             <div class="detail-card">
               <strong>Search behavior</strong>
-              <div class="mini-copy">Search matches vendor names, file names, extracted previews, and import summaries.</div>
+              <div class="mini-copy">Search matches vendor names, file names, import summaries, and file metadata.</div>
             </div>
           </div>
           <div class="preview-block">
             <ul class="detail-list">
               <li>Use one file per vendor response when possible so the queue stays attributable.</li>
-              <li>Re-upload text exports if you want inline preview content for PDF or spreadsheet responses.</li>
+              <li>Use Download to export the selected response or Download All for bulk export.</li>
               <li>After import, use the selected response as the intake source for supplier review and evidence mapping.</li>
             </ul>
           </div>
@@ -160,7 +244,7 @@
       return;
     }
 
-    const statusClass = response.previewText ? "is-success" : "is-active";
+    const statusClass = "is-success";
     els.vendorDetail.innerHTML = `
       <article class="detail-panel">
         <div class="detail-header">
@@ -169,7 +253,7 @@
             <h3>${escapeHtml(response.vendorName)}</h3>
           </div>
           <div class="chip-row">
-            <span class="status-pill ${statusClass}">${escapeHtml(response.status)}</span>
+            <span class="status-pill ${statusClass}">Imported</span>
             <span class="chip">${escapeHtml(response.extension.toUpperCase())}</span>
             <span class="chip">${escapeHtml(formatFileSize(response.fileSize))}</span>
           </div>
@@ -203,14 +287,6 @@
             </ul>
           </div>
         </div>
-        <div class="doc-section">
-          <strong>Imported preview</strong>
-          <div class="preview-block">
-            ${response.previewText
-              ? `<pre class="response-preview">${escapeHtml(response.previewText)}</pre>`
-              : '<div class="empty-state">This file was staged with metadata only. Upload a text export if you need searchable inline preview content.</div>'}
-          </div>
-        </div>
       </article>
     `;
   }
@@ -227,7 +303,6 @@
           response.vendorName,
           response.fileName,
           response.summary,
-          response.previewText,
           response.extension,
           response.mimeType,
           response.status,
