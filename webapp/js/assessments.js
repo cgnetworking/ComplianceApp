@@ -319,6 +319,7 @@
           <button class="ghost-button" type="button" data-assessment-create-certificate="${escapeHtml(profileId)}"${profile ? "" : " disabled"}>Create Certificate</button>
           <a class="ghost-button${hasCertificate ? "" : " is-disabled"}" ${hasCertificate ? `href="/api/assessments/${encodeURIComponent(profileId)}/certificate.cer"` : 'aria-disabled="true"'}>Download .cer</a>
           <button class="ghost-button" type="button" data-assessment-run-start="${escapeHtml(profileId)}"${hasCertificate ? "" : " disabled"}>Run Assessment</button>
+          <button class="ghost-button" type="button" data-assessment-delete-profile="${escapeHtml(profileId)}"${profile ? "" : " disabled"}>Delete Tenant</button>
         </div>
 
         <div class="doc-section">
@@ -467,6 +468,42 @@
     }
   }
 
+  async function handleZeroTrustProfileDelete(profileId) {
+    if (!profileId) {
+      setUploadStatus(els.assessmentStatus, "Select a saved tenant profile before deleting it.", "error");
+      return;
+    }
+    const profile = zeroTrustProfiles.find((item) => item.id === profileId) || zeroTrustProfileDetail;
+    const label = profile ? (profile.displayName || profile.tenantId) : "this tenant";
+    if (!window.confirm(`Delete ${label} and all stored assessment history for it? This cannot be undone.`)) {
+      return;
+    }
+
+    setUploadStatus(els.assessmentStatus, "Deleting the saved tenant profile...", "info");
+    try {
+      await apiRequest(`/assessments/${encodeURIComponent(profileId)}/`, {
+        method: "DELETE",
+      });
+      stopZeroTrustPolling();
+      zeroTrustProfiles = zeroTrustProfiles.filter((item) => item.id !== profileId);
+      zeroTrustProfileDetail = null;
+      zeroTrustRuns = [];
+      zeroTrustLogs = [];
+      state.selectedAssessmentProfileId = "";
+      state.selectedAssessmentRunId = "";
+      syncZeroTrustSelection();
+      syncUrl();
+      if (state.selectedAssessmentProfileId) {
+        await loadZeroTrustProfileDetail(state.selectedAssessmentProfileId);
+      } else {
+        renderZeroTrustPage();
+      }
+      setUploadStatus(els.assessmentStatus, "Tenant profile and stored assessment history deleted.", "success");
+    } catch (error) {
+      setUploadStatus(els.assessmentStatus, error instanceof Error ? error.message : "Unable to delete the tenant profile.", "error");
+    }
+  }
+
   async function refreshSelectedZeroTrustRun() {
     const run = selectedZeroTrustRun();
     if (!run) {
@@ -561,6 +598,12 @@
         const startRun = event.target.closest("[data-assessment-run-start]");
         if (startRun) {
           void handleZeroTrustRunStart(startRun.dataset.assessmentRunStart || "");
+          return;
+        }
+
+        const deleteProfile = event.target.closest("[data-assessment-delete-profile]");
+        if (deleteProfile) {
+          void handleZeroTrustProfileDelete(deleteProfile.dataset.assessmentDeleteProfile || "");
           return;
         }
 

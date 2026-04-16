@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 from .assessment_services import (
     AssessmentValidationError,
     create_zero_trust_run,
+    delete_zero_trust_profile,
     generate_zero_trust_certificate,
     get_zero_trust_artifact,
     get_zero_trust_certificate_download,
@@ -63,8 +64,17 @@ def assessments_collection(request: HttpRequest) -> JsonResponse:
 
 
 @assessment_staff_api_required
-@require_GET
+@require_http_methods(["GET", "DELETE"])
 def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResponse:
+    if request.method == "DELETE":
+        try:
+            deleted_profile = delete_zero_trust_profile(profile_id)
+        except AssessmentValidationError as error:
+            detail = str(error)
+            status_code = 404 if detail == "Assessment profile was not found." else 400
+            return JsonResponse({"detail": detail}, status=status_code)
+        return JsonResponse({"deletedProfile": deleted_profile})
+
     try:
         detail = get_zero_trust_profile_detail(profile_id)
     except AssessmentValidationError as error:

@@ -201,6 +201,50 @@ def get_zero_trust_profile_detail(profile_id: str) -> dict[str, object]:
     }
 
 
+def remove_tree_if_exists(path: Path) -> None:
+    if not path.exists():
+        return
+    shutil.rmtree(path)
+
+
+def delete_zero_trust_profile(profile_id: str) -> dict[str, object]:
+    profile = get_zero_trust_profile(profile_id)
+    active_statuses = [
+        ZeroTrustRunStatus.QUEUED,
+        ZeroTrustRunStatus.CLAIMED,
+        ZeroTrustRunStatus.RUNNING,
+        ZeroTrustRunStatus.INGESTING,
+    ]
+    if profile.assessment_runs.filter(status__in=active_statuses).exists():
+        raise AssessmentValidationError("Stop or finish the active assessment run before deleting this tenant.")
+
+    deleted_profile = build_profile_payload(profile)
+    certificate_root = assessment_certificate_root() / profile.external_id
+    staged_paths = [
+        normalize_string(path_value)
+        for path_value in profile.assessment_runs.exclude(staged_path="").values_list("staged_path", flat=True)
+    ]
+
+    with transaction.atomic():
+        profile.delete()
+
+        def cleanup_deleted_profile() -> None:
+            for staged_path in staged_paths:
+                if staged_path:
+                    try:
+                        remove_tree_if_exists(Path(staged_path))
+                    except OSError:
+                        pass
+            try:
+                remove_tree_if_exists(certificate_root)
+            except OSError:
+                pass
+
+        transaction.on_commit(cleanup_deleted_profile)
+
+    return deleted_profile
+
+
 def save_zero_trust_profile(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise AssessmentValidationError("Assessment profile payload must be an object.")
