@@ -115,6 +115,38 @@ class AssessmentCertificateStorageTests(TestCase):
         self.assertIn("[System.IO.File]::ReadAllText($pfxPasswordPath).Trim()", script)
         self.assertNotIn("test-assessment-password", script)
 
+    @override_settings(ASSESSMENT_MODULE_VERSION="2.2.0")
+    def test_assessment_script_requires_pinned_module_without_runtime_install(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-script-module",
+            display_name="Script Module Tenant",
+            tenant_id="tenant-script-module",
+            client_id="client-script-module",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                payload = generate_zero_trust_certificate(profile.external_id)
+                certificate = ZeroTrustCertificate.objects.get(external_id=payload["certificate"]["id"])
+
+            run = ZeroTrustAssessmentRun.objects.create(
+                external_id="zt-run-script-module",
+                profile=profile,
+                certificate=certificate,
+            )
+
+            script = assessment_script_contents(run, Path(certificate_root) / "output")
+
+        self.assertIn("$requiredModuleVersion = '2.2.0'", script)
+        self.assertIn("Import-Module ZeroTrustAssessment -RequiredVersion $requiredModuleVersion -Force", script)
+        self.assertIn("Run scripts/local_setup.sh to install the pinned module before starting the worker.", script)
+        self.assertNotIn("Install-Module ZeroTrustAssessment", script)
+        self.assertNotIn("Install-PSResource -Name ZeroTrustAssessment", script)
+
     @override_settings(ASSESSMENT_CERTIFICATE_ROOT="")
     def test_certificate_generation_requires_certificate_root_setting(self) -> None:
         profile = ZeroTrustTenantProfile.objects.create(

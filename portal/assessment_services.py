@@ -654,25 +654,21 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
 
     encoded_pfx = base64.b64encode(pfx_bytes).decode("ascii")
     pfx_password_path = str(resolve_assessment_pfx_password_path())
+    module_version = normalize_string(getattr(settings, "ASSESSMENT_MODULE_VERSION", ""), "2.2.0")
 
     script_lines = [
         "$ErrorActionPreference = 'Stop'",
         "$ProgressPreference = 'SilentlyContinue'",
         "$InformationPreference = 'Continue'",
         "try {",
-        "  if (Get-Command Set-PSRepository -ErrorAction SilentlyContinue) {",
-        "    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue | Out-Null",
+        f"  $requiredModuleVersion = {powershell_literal(module_version)}",
+        "  $module = Get-Module -ListAvailable -Name ZeroTrustAssessment | Where-Object { $_.Version -eq [version]$requiredModuleVersion } | Select-Object -First 1",
+        "  if (-not $module) {",
+        "    throw ('ZeroTrustAssessment PowerShell module version ' + $requiredModuleVersion + ' is not installed for the runtime user. Run scripts/local_setup.sh to install the pinned module before starting the worker.')",
         "  }",
-        "  if (-not (Get-Module -ListAvailable -Name ZeroTrustAssessment)) {",
-        "    if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {",
-        "      Install-PSResource -Name ZeroTrustAssessment -Scope CurrentUser -TrustRepository -Quiet",
-        "    } else {",
-        "      Install-Module ZeroTrustAssessment -Scope CurrentUser -Force -AllowClobber",
-        "    }",
-        "  }",
-        "  Import-Module ZeroTrustAssessment -Force",
+        "  Import-Module ZeroTrustAssessment -RequiredVersion $requiredModuleVersion -Force",
         "  $moduleVersion = ''",
-        "  $module = Get-Module ZeroTrustAssessment | Select-Object -First 1",
+        "  $module = Get-Module ZeroTrustAssessment | Where-Object { $_.Version -eq [version]$requiredModuleVersion } | Select-Object -First 1",
         "  if ($module) { $moduleVersion = $module.Version.ToString() }",
         "  $metadata = @{",
         "    moduleVersion = $moduleVersion",

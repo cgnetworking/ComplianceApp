@@ -112,9 +112,9 @@ The assessment feature is Ubuntu 24.04-only and assumes:
 
 - PowerShell 7 (`pwsh`) is installed on the server
 - The runtime venv includes the Python dependency `cryptography`
-- The worker service can install or import the `ZeroTrustAssessment` PowerShell module for the runtime user
+- The runtime user already has the pinned `ZeroTrustAssessment` PowerShell module installed
 
-`scripts/local_setup.sh` now installs PowerShell 7 automatically on Ubuntu 24.04 using Microsoft's preferred package-repository method from the official install guide, then bootstraps the `ZeroTrustAssessment` PowerShell module for the runtime user during setup. If you are deploying manually instead of using the setup script, perform those steps yourself before starting the worker.
+`scripts/local_setup.sh` installs PowerShell 7 automatically on Ubuntu 24.04 using Microsoft's preferred package-repository method from the official install guide. During setup it downloads `PSFramework 1.13.419` and `ZeroTrustAssessment 2.2.0` from PowerShell Gallery, verifies each package against a pinned SHA-256, and installs them for the runtime user. At runtime the worker only imports the pinned `ZeroTrustAssessment` version and fails closed if it is missing. If you are deploying manually instead of using the setup script, perform those steps yourself before starting the worker.
 
 The worker stores private assessment certificate material on disk and stores generated report bundles in PostgreSQL after ingestion. The staging export directory is transient and is removed after the report is copied into the database.
 
@@ -125,6 +125,8 @@ The setup script writes these environment variables into the managed runtime env
 - `ASSESSMENT_STORAGE_ROOT`
 - `ASSESSMENT_CERTIFICATE_ROOT`
 - `ASSESSMENT_STAGING_ROOT`
+- `ASSESSMENT_MODULE_VERSION`
+- `ASSESSMENT_MODULE_SHA256`
 
 Default production layout from `scripts/local_setup.sh`:
 

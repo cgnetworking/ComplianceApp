@@ -10,6 +10,10 @@ DEFAULT_DATABASE_URL="${LOCAL_SETUP_DATABASE_URL:-postgresql://localhost:5432/co
 DEFAULT_DATABASE_USER="${LOCAL_SETUP_DATABASE_USER:-postgres}"
 DEFAULT_NGINX_SERVER_NAME="${LOCAL_SETUP_NGINX_SERVER_NAME:-localhost}"
 DEFAULT_NGINX_STATIC_ROOT="${LOCAL_SETUP_NGINX_STATIC_ROOT:-/var/www/complianceapp/staticfiles}"
+DEFAULT_ASSESSMENT_MODULE_VERSION="${LOCAL_SETUP_ASSESSMENT_MODULE_VERSION:-2.2.0}"
+DEFAULT_ASSESSMENT_MODULE_SHA256="${LOCAL_SETUP_ASSESSMENT_MODULE_SHA256:-78a82e566190ffec320bb042c8978e8708ef1f46ac9e17ed84b588d22b2386f0}"
+DEFAULT_PSFRAMEWORK_MODULE_VERSION="1.13.419"
+DEFAULT_PSFRAMEWORK_MODULE_SHA256="d9bf13aa683ee87e6f791a054db87b63743bb5478547a3f65fb9dcb6e0f2051b"
 NGINX_SERVER_NAME="$DEFAULT_NGINX_SERVER_NAME"
 DEFAULT_ALLOWED_HOSTS="localhost,127.0.0.1"
 NGINX_STATIC_ROOT="$DEFAULT_NGINX_STATIC_ROOT"
@@ -673,6 +677,8 @@ setup_assessment_worker_systemd_service() {
   local assessment_storage_root=""
   local assessment_certificate_root=""
   local assessment_staging_root=""
+  local assessment_module_version=""
+  local assessment_module_sha256=""
   local tmp_file=""
   local tmp_env=""
   local module_bootstrap_script=""
@@ -699,13 +705,28 @@ setup_assessment_worker_systemd_service() {
   assessment_storage_root="${LOCAL_SETUP_ASSESSMENT_STORAGE_ROOT:-/var/lib/$GUNICORN_RUNTIME_USER/assessments}"
   assessment_certificate_root="${LOCAL_SETUP_ASSESSMENT_CERTIFICATE_ROOT:-$assessment_storage_root/certificates}"
   assessment_staging_root="${LOCAL_SETUP_ASSESSMENT_STAGING_ROOT:-$assessment_storage_root/staging}"
+  assessment_module_version="${LOCAL_SETUP_ASSESSMENT_MODULE_VERSION:-$(read_env_var ASSESSMENT_MODULE_VERSION)}"
+  assessment_module_sha256="${LOCAL_SETUP_ASSESSMENT_MODULE_SHA256:-$(read_env_var ASSESSMENT_MODULE_SHA256)}"
+
+  if [ -z "$assessment_module_version" ]; then
+    assessment_module_version="$DEFAULT_ASSESSMENT_MODULE_VERSION"
+  fi
+  if [ -z "$assessment_module_sha256" ]; then
+    assessment_module_sha256="$DEFAULT_ASSESSMENT_MODULE_SHA256"
+  fi
+  assessment_module_sha256="${assessment_module_sha256,,}"
+
+  if [[ ! "$assessment_module_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ASSESSMENT_MODULE_SHA256 must be a 64-character lowercase SHA-256 hex string." >&2
+    exit 1
+  fi
 
   run_as_root install -d -m 0700 -o "$GUNICORN_RUNTIME_USER" -g "$GUNICORN_RUNTIME_GROUP" \
     "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root"
 
   tmp_env="$(mktemp)"
   cp "$GUNICORN_ENV_FILE" "$tmp_env"
-  "$PYTHON_BIN" - "$tmp_env" "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root" <<'PY'
+  "$PYTHON_BIN" - "$tmp_env" "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root" "$assessment_module_version" "$assessment_module_sha256" <<'PY'
 from pathlib import Path
 import sys
 
@@ -713,11 +734,15 @@ env_path = Path(sys.argv[1])
 storage_root = sys.argv[2]
 certificate_root = sys.argv[3]
 staging_root = sys.argv[4]
+module_version = sys.argv[5]
+module_sha256 = sys.argv[6]
 
 desired = {
     "ASSESSMENT_STORAGE_ROOT": storage_root,
     "ASSESSMENT_CERTIFICATE_ROOT": certificate_root,
     "ASSESSMENT_STAGING_ROOT": staging_root,
+    "ASSESSMENT_MODULE_VERSION": module_version,
+    "ASSESSMENT_MODULE_SHA256": module_sha256,
 }
 
 lines = env_path.read_text(encoding="utf-8").splitlines()
@@ -765,24 +790,84 @@ PY
   module_bootstrap_script="$(mktemp)"
   cat > "$module_bootstrap_script" <<'EOF'
 $ErrorActionPreference = 'Stop'
-if (-not (Get-Module -ListAvailable -Name ZeroTrustAssessment)) {
-  if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {
-    Install-PSResource -Name ZeroTrustAssessment -Scope CurrentUser -TrustRepository -Quiet
-  } else {
-    if (Get-Command Set-PSRepository -ErrorAction SilentlyContinue) {
-      Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue | Out-Null
+$ProgressPreference = 'SilentlyContinue'
+
+$packages = @(
+  @{
+    Name = 'PSFramework'
+    Version = $env:PSFRAMEWORK_MODULE_VERSION
+    ExpectedSha256 = $env:PSFRAMEWORK_MODULE_SHA256
+  },
+  @{
+    Name = 'ZeroTrustAssessment'
+    Version = $env:ASSESSMENT_MODULE_VERSION
+    ExpectedSha256 = $env:ASSESSMENT_MODULE_SHA256
+  }
+)
+
+$userModuleRoot = ($env:PSModulePath -split [System.IO.Path]::PathSeparator | Where-Object {
+  $_ -and $_.StartsWith($HOME, [System.StringComparison]::OrdinalIgnoreCase) -and $_ -like '*powershell*Modules*'
+} | Select-Object -First 1)
+if (-not $userModuleRoot) {
+  $userModuleRoot = Join-Path $HOME '.local/share/powershell/Modules'
+}
+
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('zta-module-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+try {
+  foreach ($package in $packages) {
+    if ([string]::IsNullOrWhiteSpace($package.Version)) {
+      throw ('Missing module version for ' + $package.Name + '.')
     }
-    Install-Module ZeroTrustAssessment -Scope CurrentUser -Force -AllowClobber
+    if ([string]::IsNullOrWhiteSpace($package.ExpectedSha256)) {
+      throw ('Missing SHA-256 pin for ' + $package.Name + '.')
+    }
+
+    $downloadUri = 'https://www.powershellgallery.com/api/v2/package/{0}/{1}' -f $package.Name, $package.Version
+    $downloadPath = Join-Path $tempRoot ('{0}.{1}.nupkg' -f $package.Name, $package.Version)
+    $expandedPath = Join-Path $tempRoot ('{0}.{1}' -f $package.Name, $package.Version)
+
+    Invoke-WebRequest -Uri $downloadUri -OutFile $downloadPath
+
+    $actualSha256 = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualSha256 -ne $package.ExpectedSha256.ToLowerInvariant()) {
+      throw ('SHA-256 mismatch for ' + $package.Name + ' ' + $package.Version + '. Expected ' + $package.ExpectedSha256 + ' but downloaded ' + $actualSha256 + '.')
+    }
+
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($downloadPath, $expandedPath)
+    $manifest = Get-ChildItem -LiteralPath $expandedPath -Filter ($package.Name + '.psd1') -File -Recurse | Where-Object {
+      $_.FullName -notmatch '[\\/](package|_rels)[\\/]'
+    } | Select-Object -First 1
+    if (-not $manifest) {
+      throw ('Unable to locate the module manifest for ' + $package.Name + ' ' + $package.Version + '.')
+    }
+
+    $targetRoot = Join-Path (Join-Path $userModuleRoot $package.Name) $package.Version
+    New-Item -ItemType Directory -Path (Split-Path -Parent $targetRoot) -Force | Out-Null
+    if (Test-Path -LiteralPath $targetRoot) {
+      Remove-Item -LiteralPath $targetRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+    Get-ChildItem -LiteralPath $manifest.Directory.FullName -Force | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $targetRoot -Recurse -Force
+    }
+
+    Import-Module $package.Name -RequiredVersion $package.Version -Force
   }
 }
-Import-Module ZeroTrustAssessment -Force
+finally {
+  if (Test-Path -LiteralPath $tempRoot) {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+  }
+}
 EOF
   chmod 0644 "$module_bootstrap_script"
-  log "Ensuring the ZeroTrustAssessment PowerShell module is available for $GUNICORN_RUNTIME_USER"
-  if ! run_as_root runuser -u "$GUNICORN_RUNTIME_USER" -- pwsh -NoLogo -NoProfile -NonInteractive -File "$module_bootstrap_script"; then
+  log "Installing pinned PowerShell assessment modules for $GUNICORN_RUNTIME_USER"
+  if ! run_as_root env PSFRAMEWORK_MODULE_VERSION="$DEFAULT_PSFRAMEWORK_MODULE_VERSION" PSFRAMEWORK_MODULE_SHA256="$DEFAULT_PSFRAMEWORK_MODULE_SHA256" ASSESSMENT_MODULE_VERSION="$assessment_module_version" ASSESSMENT_MODULE_SHA256="$assessment_module_sha256" runuser -u "$GUNICORN_RUNTIME_USER" -- pwsh -NoLogo -NoProfile -NonInteractive -File "$module_bootstrap_script"; then
     rm -f "$module_bootstrap_script"
-    echo "Unable to install or import the ZeroTrustAssessment PowerShell module for $GUNICORN_RUNTIME_USER." >&2
-    echo "Verify that pwsh is installed and that the server can reach PSGallery, then rerun scripts/local_setup.sh." >&2
+    echo "Unable to install the pinned PowerShell assessment modules for $GUNICORN_RUNTIME_USER." >&2
+    echo "Verify that pwsh is installed, the server can reach PSGallery, and the configured module SHA pins are correct, then rerun scripts/local_setup.sh." >&2
     exit 1
   fi
   rm -f "$module_bootstrap_script"
@@ -1250,6 +1335,8 @@ if [ ! -f "$ENV_FILE" ]; then
     "DATABASE_URL=$DEFAULT_DATABASE_URL" \
     "DATABASE_USER=$DEFAULT_DATABASE_USER" \
     "DATABASE_PASSWORD=" \
+    "ASSESSMENT_MODULE_VERSION=$DEFAULT_ASSESSMENT_MODULE_VERSION" \
+    "ASSESSMENT_MODULE_SHA256=$DEFAULT_ASSESSMENT_MODULE_SHA256" \
     "" \
     "# Default SSO configuration uses generic OpenID Connect." \
     "SOCIAL_AUTH_SSO_BACKEND_PATH=social_core.backends.open_id_connect.OpenIdConnectAuth" \

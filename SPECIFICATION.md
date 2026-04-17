@@ -314,7 +314,7 @@ Important: manual mapping edits from Controls and Policies are persisted in `con
 - Host OS is Ubuntu 24.04 in the supported deployment path.
 - `pwsh` is installed.
 - Python dependency `cryptography` is installed.
-- The runtime user can install or import the `ZeroTrustAssessment` PowerShell module.
+- The runtime user already has the pinned `ZeroTrustAssessment` PowerShell module installed.
 
 ### Run lifecycle
 
