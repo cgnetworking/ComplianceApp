@@ -208,7 +208,7 @@ assessment::setup_worker_service() {
     "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root"
 
   tmp_env="$(mktemp)"
-  cp "$GUNICORN_ENV_FILE" "$tmp_env"
+  common::run_as_root cp "$GUNICORN_ENV_FILE" "$tmp_env"
   "$PYTHON_BIN" - "$tmp_env" "$assessment_storage_root" "$assessment_certificate_root" "$assessment_staging_root" "$assessment_module_version" "$assessment_module_sha256" <<'PY'
 from pathlib import Path
 import sys
