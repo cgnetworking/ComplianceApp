@@ -5,7 +5,7 @@ from django.views.decorators.http import require_GET
 
 from .services.bootstrap import append_portal_audit_entry
 from .services.audit_log_exports import build_review_state_audit_log_export
-from .views import api_login_required, current_audit_actor, policy_reader_api_access, staff_api_access
+from .view_helpers import api_login_required, current_audit_actor, policy_reader_api_access, staff_api_access
 
 
 @api_login_required

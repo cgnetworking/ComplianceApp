@@ -23,7 +23,13 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from .services.common import upload_size_label
+from .contracts import (
+    serialize_zero_trust_certificate,
+    serialize_zero_trust_run,
+    serialize_zero_trust_run_log,
+    serialize_zero_trust_tenant_profile,
+)
+from .services.uploads import upload_size_label
 from .models import (
     ZeroTrustAssessmentArtifact,
     ZeroTrustAssessmentRun,
@@ -244,10 +250,10 @@ def create_run_log(
 
 
 def build_profile_payload(profile: ZeroTrustTenantProfile) -> dict[str, object]:
-    payload = profile.to_portal_dict()
+    payload = serialize_zero_trust_tenant_profile(profile)
     certificate = current_profile_certificate(profile)
     latest_run = profile.assessment_runs.select_related("certificate").order_by("-created_at").first()
-    payload["currentCertificate"] = certificate.to_portal_dict() if certificate else None
+    payload["currentCertificate"] = serialize_zero_trust_certificate(certificate) if certificate else None
     payload["latestRun"] = build_run_payload(latest_run) if latest_run else None
     return payload
 
@@ -255,7 +261,7 @@ def build_profile_payload(profile: ZeroTrustTenantProfile) -> dict[str, object]:
 def build_run_payload(run: ZeroTrustAssessmentRun | None) -> dict[str, object] | None:
     if run is None:
         return None
-    payload = run.to_portal_dict()
+    payload = serialize_zero_trust_run(run)
     payload["reportUrl"] = f"/assessments/runs/{run.external_id}/report/" if run.has_report else ""
     payload["assetBaseUrl"] = f"/assessments/runs/{run.external_id}/files/"
     return payload
@@ -476,7 +482,7 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
 
     return {
         "profile": build_profile_payload(profile),
-        "certificate": stored_certificate.to_portal_dict(),
+        "certificate": serialize_zero_trust_certificate(stored_certificate),
         "downloadUrl": f"/api/assessments/{profile.external_id}/certificate.cer",
     }
 
@@ -536,7 +542,7 @@ def get_zero_trust_run(run_id: str) -> ZeroTrustAssessmentRun:
 def list_zero_trust_run_logs(run_id: str, *, after_sequence: int = 0, limit: int = 200) -> list[dict[str, object]]:
     run = get_zero_trust_run(run_id)
     logs = run.logs.filter(sequence__gt=max(0, after_sequence)).order_by("sequence")[: max(1, min(limit, 500))]
-    return [log.to_portal_dict() for log in logs]
+    return [serialize_zero_trust_run_log(log) for log in logs]
 
 
 def get_zero_trust_run_detail(run_id: str) -> dict[str, object]:

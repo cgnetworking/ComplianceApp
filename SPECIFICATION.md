@@ -88,9 +88,9 @@ The application is a server-rendered HTML product with page-specific vanilla Jav
 
 - Templates live in `templates/portal/`.
 - Static CSS and JavaScript live in `webapp/`.
-- `_app_scripts.html` loads all JavaScript bundles on every page.
+- `_app_scripts.html` loads a shared script set plus the page-specific bundles required by the current template.
 - `webapp/js/runtime.js` selects behavior by `document.body.dataset.page`.
-- `webapp/js/shared.js` owns shared bootstrap, API, filters, state persistence, and event wiring.
+- `webapp/js/shared.js` owns shared bootstrap, API, filters, state persistence, and page-aware event wiring.
 
 ### Deployment model
 
@@ -409,10 +409,10 @@ The implemented JSON API is private to the web application and session-authentic
 | Area | Primary backend files | Primary frontend files | Primary persistence |
 | --- | --- | --- | --- |
 | Auth, shell, bootstrap | `portal_backend/settings.py`, `portal/views.py`, `portal_backend/urls.py` | `templates/portal/login.html`, `_sidebar.html`, `_auth_controls.html`, `_app_scripts.html`, `webapp/js/shared.js`, `webapp/js/runtime.js` | session auth, `PortalState` bootstrap reads |
-| Controls and home | `portal/views.py`, control and mapping sections of `portal/services.py` | `templates/portal/index.html`, `controls.html`, `webapp/js/home.js`, `controls.js`, `shared.js`, `runtime.js` | `PortalState.mapping_state`, `PortalState.control_state` |
-| Policies and approvals | `portal/views.py`, policy sections of `portal/services.py` | `templates/portal/policies.html`, `webapp/js/policies.js`, `shared.js`, `runtime.js` | `UploadedPolicy`, `PortalState.review_state`, mapping/control overlays |
-| Reviews and audit | `portal/views.py`, review sections of `portal/services.py` | `templates/portal/reviews.html`, `review_tasks.html`, `audit_log.html`, `webapp/js/reviews.js`, `review_tasks.js`, `audit_log.js`, `shared.js`, `runtime.js` | `ReviewChecklistItem`, `ReviewChecklistRecommendation`, `PortalState.review_state` |
-| Risks and vendors | `portal/views.py`, risk and vendor sections of `portal/services.py` | `templates/portal/risks.html`, `vendors.html`, `webapp/js/risks.js`, `vendors.js`, `shared.js`, `runtime.js` | `RiskRecord`, `VendorResponse` |
+| Controls and home | `portal/views.py`, `portal/services/mapping.py`, `portal/services/common.py`, `portal/view_helpers.py` | `templates/portal/index.html`, `controls.html`, `webapp/js/home.js`, `controls.js`, `shared.js`, `runtime.js` | `PortalState.mapping_state`, `PortalState.control_state` |
+| Policies and approvals | `portal/views.py`, `portal/policy_download_views.py`, `portal/services/policies.py`, `portal/services/uploads.py`, `portal/services/html_sanitization.py`, `portal/contracts.py` | `templates/portal/policies.html`, `webapp/js/policies.js`, `shared.js`, `runtime.js` | `UploadedPolicy`, `PortalState.review_state`, mapping/control overlays |
+| Reviews and audit | `portal/views.py`, `portal/audit_log_export_views.py`, `portal/services/bootstrap.py`, `portal/services/common.py`, `portal/contracts.py` | `templates/portal/reviews.html`, `review_tasks.html`, `audit_log.html`, `webapp/js/reviews.js`, `review_tasks.js`, `audit_log.js`, `shared.js`, `runtime.js` | `ReviewChecklistItem`, `ReviewChecklistRecommendation`, `PortalState.review_state` |
+| Risks and vendors | `portal/views.py`, `portal/risk_csv_views.py`, `portal/vendor_download_views.py`, `portal/services/risks.py`, `portal/services/risk_validation.py`, `portal/services/policies.py`, `portal/contracts.py` | `templates/portal/risks.html`, `vendors.html`, `webapp/js/risks.js`, `vendors.js`, `shared.js`, `runtime.js` | `RiskRecord`, `VendorResponse` |
 | Assessments | `portal/assessment_views.py`, `portal/assessment_services.py`, `portal/management/commands/run_assessment_worker.py` | `templates/portal/assessments.html`, `webapp/js/assessments.js`, `shared.js`, `runtime.js` | Zero Trust assessment models |
 | Deployment and operations | `scripts/local_setup.sh`, `deploy/`, `DEPLOYMENT.md` | none | runtime env, NGINX, systemd |
 
@@ -420,7 +420,8 @@ The implemented JSON API is private to the web application and session-authentic
 
 ### Current high-conflict files
 
-- `portal/services.py`
+- `portal/views.py`
+- `portal/services/common.py`
 - `webapp/js/shared.js`
 - `webapp/js/runtime.js`
 
@@ -444,7 +445,7 @@ The cleanest high-level delegation units are:
 ### Required sequencing for a parallel plan
 
 - Any plan that changes cross-cutting browser bootstrap should isolate that work first.
-- Any plan that changes `portal/services.py` in multiple domains should either extract modules first or assign a single owner for integration.
+- Any plan that changes `portal/services/common.py` across multiple domains should either extract another focused module first or assign a single owner for integration.
 - Assessment work can be delegated most independently because it already lives in separate service and view modules.
 - Deployment work is mostly independent from UI and domain logic.
 
@@ -467,4 +468,4 @@ Any future plan derived from this specification should preserve these invariants
 - Audit logging is partial rather than comprehensive.
 - Uploaded original files are not exposed for later download.
 - Shared browser and service modules are broad and will slow parallel feature development.
-- The repository does not currently show an automated test suite, so future plans should budget explicit verification work.
+- Django tests exist under `portal/tests/`, but shared state, page wiring, and deployment flows still need broader regression coverage.

@@ -179,7 +179,7 @@ For local Ubuntu 24.04+ setup, `./scripts/local_setup.sh` handles NGINX automati
 - Creates `/etc/nginx/sites-enabled/complianceapp.conf` symlink
 - Validates config and starts/enables `nginx` if valid
 
-For manual/custom deployment, use [deploy/nginx/complianceapp.conf](/Users/coreygeorge/Documents/ISO27001/deploy/nginx/complianceapp.conf) as the template and apply your environment-specific values.
+For manual/custom deployment, use [deploy/nginx/complianceapp.conf](deploy/nginx/complianceapp.conf) as the template and apply your environment-specific values.
 
 Example manual reload on Ubuntu:
 
@@ -191,7 +191,7 @@ Example manual reload on Ubuntu:
 - `scripts/local_setup.sh` runs Gunicorn as a dedicated locked system user with a non-login shell (default user: `complianceapp`).
 - `scripts/local_setup.sh` points Gunicorn at a root-owned runtime app tree (default `/opt/complianceapp/app`) and runtime venv (default `/opt/complianceapp/venv`).
 - `python manage.py run_assessment_worker` is the Zero Trust assessment worker entrypoint.
-- The example worker unit template lives at [deploy/systemd/portal-assessment-worker.service](/Users/coreygeorge/Documents/ISO27001/deploy/systemd/portal-assessment-worker.service). Replace the placeholder values with your runtime user, env file, app root, and venv path if you deploy it manually.
+- The example worker unit template lives at [deploy/systemd/portal-assessment-worker.service](deploy/systemd/portal-assessment-worker.service). Replace the placeholder values with your runtime user, env file, app root, and venv path if you deploy it manually.
 - `scripts/local_setup.sh` already runs `python manage.py collectstatic --noinput`.
 - The current implementation keeps uploaded content in PostgreSQL-backed records, but does not expose raw file downloads. That avoids adding object storage as a hard dependency for the first hosted version.
 - Zero Trust assessment report bundles are stored in PostgreSQL so they remain viewable in the portal after the worker deletes the staged export directory.

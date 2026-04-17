@@ -26,14 +26,34 @@
   function bindEvents() {
     bindSearchEvents();
     bindFilterEvents();
-    bindControlEvents();
-    bindPolicyEvents();
-    bindUploadEvents();
-    bindVendorEvents();
-    bindReviewEvents();
-    bindReviewTaskEvents();
-    bindRiskEvents();
-    if (typeof bindZeroTrustEvents === "function") {
+    if (page === "controls") {
+      bindControlEvents();
+      bindUploadEvents();
+      return;
+    }
+    if (page === "policies") {
+      bindPolicyEvents();
+      bindUploadEvents();
+      return;
+    }
+    if (page === "vendors") {
+      bindUploadEvents();
+      bindVendorEvents();
+      return;
+    }
+    if (page === "reviews") {
+      bindReviewEvents();
+      return;
+    }
+    if (page === "review-tasks" && typeof bindReviewTaskEvents === "function") {
+      bindReviewTaskEvents();
+      return;
+    }
+    if (page === "risks") {
+      bindRiskEvents();
+      return;
+    }
+    if (page === "assessments" && typeof bindZeroTrustEvents === "function") {
       bindZeroTrustEvents();
     }
   }

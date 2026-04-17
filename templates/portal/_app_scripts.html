@@ -1,16 +1,8 @@
 {% load static %}
-<script nonce="{{ csp_nonce }}" src="{% static 'js/portal_config.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/api.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/state.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/accessibility.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/shared.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/home.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/controls.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/policies.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/reviews.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/review_tasks.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/audit_log.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/risks.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/vendors.js' %}"></script>
-<script nonce="{{ csp_nonce }}" src="{% static 'js/assessments.js' %}"></script>
+{% for script_path in common_scripts %}
+<script nonce="{{ csp_nonce }}" src="{% static script_path %}"></script>
+{% endfor %}
+{% for script_path in page_scripts %}
+<script nonce="{{ csp_nonce }}" src="{% static script_path %}"></script>
+{% endfor %}
 <script nonce="{{ csp_nonce }}" src="{% static 'js/runtime.js' %}"></script>

@@ -5,11 +5,11 @@ from django.views.decorators.http import require_GET
 
 from .assessment_services import AssessmentValidationError
 from .services.bootstrap import append_portal_audit_entry
-from .assessment_views import assessment_audit_actor, assessment_staff_api_required
 from .services.assessment_report_exports import (
     create_assessment_reports_export,
     create_assessment_run_report_export,
 )
+from .view_helpers import api_login_required, current_audit_actor, staff_api_access
 
 ASSESSMENT_EXPORT_NOT_FOUND_ERRORS = frozenset(
     {
@@ -37,7 +37,8 @@ def assessment_export_error_response(error: AssessmentValidationError) -> JsonRe
     return JsonResponse({"detail": detail}, status=status_code)
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail="Only staff users can manage assessments.")
 @require_GET
 def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpResponse:
     try:
@@ -45,7 +46,11 @@ def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpRespo
     except AssessmentValidationError as error:
         return assessment_export_error_response(error)
 
-    username, display_name = assessment_audit_actor(request)
+    username, display_name = current_audit_actor(
+        request,
+        error_cls=AssessmentValidationError,
+        message="Authenticated assessment actions require a username.",
+    )
     append_portal_audit_entry(
         action="export_assessment_report",
         entity_type="assessment_run",
@@ -64,7 +69,8 @@ def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpRespo
     return assessment_export_response(file_name, content)
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail="Only staff users can manage assessments.")
 @require_GET
 def assessment_reports_export(request: HttpRequest) -> HttpResponse:
     profile_id = str(request.GET.get("profileId") or "").strip()
@@ -73,7 +79,11 @@ def assessment_reports_export(request: HttpRequest) -> HttpResponse:
     except AssessmentValidationError as error:
         return assessment_export_error_response(error)
 
-    username, display_name = assessment_audit_actor(request)
+    username, display_name = current_audit_actor(
+        request,
+        error_cls=AssessmentValidationError,
+        message="Authenticated assessment actions require a username.",
+    )
     entity_id = profile_id
     append_portal_audit_entry(
         action="export_assessment_reports",

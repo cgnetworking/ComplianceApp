@@ -4,15 +4,14 @@ from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 
 from .common import (
-    SUPPORTED_MAPPING_EXTENSIONS,
     ValidationError,
     default_mapping_payload,
-    decode_upload,
     get_state_payload,
     normalize_mapping_payload,
     parse_mapping_text,
     set_state_payload,
 )
+from .uploads import SUPPORTED_MAPPING_EXTENSIONS, decode_upload
 
 
 def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:

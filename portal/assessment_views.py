@@ -21,7 +21,17 @@ from .assessment_services import (
     list_zero_trust_run_logs,
     save_zero_trust_profile,
 )
-from .views import api_login_required, parse_json_body_or_400, render_portal_page
+from .view_helpers import (
+    api_login_required,
+    current_audit_actor,
+    parse_json_body_or_400,
+    render_portal_page,
+    staff_api_access,
+    staff_page_required,
+)
+
+
+ASSESSMENT_STAFF_DETAIL = "Only staff users can manage assessments."
 
 
 ASSESSMENT_REPORT_CSP = (
@@ -51,40 +61,23 @@ def apply_assessment_report_security_headers(response: HttpResponse) -> None:
     response["X-Content-Type-Options"] = "nosniff"
 
 
-def assessment_staff_page_required(view_func):
-    def wrapped(request: HttpRequest, *args, **kwargs):
-        if not request.user.is_staff:
-            return HttpResponse("Forbidden", status=403)
-        return view_func(request, *args, **kwargs)
-
-    return wrapped
-
-
-def assessment_staff_api_required(view_func):
-    def wrapped(request: HttpRequest, *args, **kwargs):
-        if not request.user.is_staff:
-            return JsonResponse({"detail": "Only staff users can manage assessments."}, status=403)
-        return view_func(request, *args, **kwargs)
-
-    return api_login_required(wrapped)
-
-
 def assessment_audit_actor(request: HttpRequest) -> tuple[str, str]:
-    username = request.user.get_username().strip() if request.user.is_authenticated else ""
-    if not username:
-        raise AssessmentValidationError("Authenticated assessment actions require a username.")
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    return username, display_name
+    return current_audit_actor(
+        request,
+        error_cls=AssessmentValidationError,
+        message="Authenticated assessment actions require a username.",
+    )
 
 
 @login_required(login_url="portal-login")
-@assessment_staff_page_required
+@staff_page_required
 @ensure_csrf_cookie
 def assessments_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/assessments.html")
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["GET", "POST"])
 def assessments_collection(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
@@ -104,7 +97,8 @@ def assessments_collection(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"profile": profile})
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["GET", "DELETE"])
 def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResponse:
     if request.method == "DELETE":
@@ -140,7 +134,8 @@ def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResp
     return JsonResponse(detail)
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["POST"])
 def assessment_profile_certificate(request: HttpRequest, profile_id: str) -> JsonResponse:
     try:
@@ -150,7 +145,8 @@ def assessment_profile_certificate(request: HttpRequest, profile_id: str) -> Jso
     return JsonResponse(payload, status=201)
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_GET
 def assessment_profile_certificate_download(request: HttpRequest, profile_id: str) -> HttpResponse:
     try:
@@ -180,7 +176,8 @@ def assessment_profile_certificate_download(request: HttpRequest, profile_id: st
     return response
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["POST"])
 def assessment_profile_runs(request: HttpRequest, profile_id: str) -> JsonResponse:
     actor_username = request.user.get_username().strip() if request.user.is_authenticated else ""
@@ -191,7 +188,8 @@ def assessment_profile_runs(request: HttpRequest, profile_id: str) -> JsonRespon
     return JsonResponse({"run": run}, status=201)
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_GET
 def assessment_run_detail(request: HttpRequest, run_id: str) -> JsonResponse:
     try:
@@ -201,7 +199,8 @@ def assessment_run_detail(request: HttpRequest, run_id: str) -> JsonResponse:
     return JsonResponse(payload)
 
 
-@assessment_staff_api_required
+@api_login_required
+@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_GET
 def assessment_run_logs(request: HttpRequest, run_id: str) -> JsonResponse:
     after_value = request.GET.get("after", "0")
@@ -218,7 +217,7 @@ def assessment_run_logs(request: HttpRequest, run_id: str) -> JsonResponse:
 
 
 @login_required(login_url="portal-login")
-@assessment_staff_page_required
+@staff_page_required
 @xframe_options_sameorigin
 @require_GET
 def assessment_run_report(request: HttpRequest, run_id: str) -> HttpResponse:
@@ -233,7 +232,7 @@ def assessment_run_report(request: HttpRequest, run_id: str) -> HttpResponse:
 
 
 @login_required(login_url="portal-login")
-@assessment_staff_page_required
+@staff_page_required
 @require_GET
 def assessment_run_artifact(request: HttpRequest, run_id: str, relative_path: str) -> HttpResponse:
     try:

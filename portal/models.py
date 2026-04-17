@@ -31,22 +31,9 @@ class UploadedPolicy(models.Model):
         return self.document_id
 
     def to_portal_dict(self) -> dict[str, object]:
-        return {
-            "id": self.document_id,
-            "title": self.title,
-            "type": self.document_type,
-            "approver": self.approver,
-            "approvedBy": self.approved_by,
-            "approvedAt": self.approved_at.isoformat() if self.approved_at else "",
-            "reviewFrequency": self.review_frequency,
-            "path": self.path,
-            "folder": self.folder,
-            "purpose": self.purpose,
-            "contentHtml": self.content_html,
-            "isUploaded": True,
-            "originalFilename": self.original_filename,
-            "uploadedAt": self.uploaded_at.isoformat(),
-        }
+        from .contracts import serialize_uploaded_policy
+
+        return serialize_uploaded_policy(self)
 
 
 class VendorResponse(models.Model):
@@ -69,18 +56,9 @@ class VendorResponse(models.Model):
         return self.vendor_name
 
     def to_portal_dict(self) -> dict[str, object]:
-        return {
-            "id": self.external_id,
-            "vendorName": self.vendor_name,
-            "fileName": self.file_name,
-            "extension": self.extension,
-            "mimeType": self.mime_type,
-            "fileSize": self.file_size,
-            "importedAt": self.imported_at.isoformat(),
-            "previewText": self.preview_text,
-            "summary": self.summary,
-            "status": self.status,
-        }
+        from .contracts import serialize_vendor_response
+
+        return serialize_vendor_response(self)
 
 
 class RiskRecord(models.Model):
@@ -109,21 +87,9 @@ class RiskRecord(models.Model):
         super().save(*args, **kwargs)
 
     def to_portal_dict(self) -> dict[str, object]:
-        score = int(self.probability or 0) * int(self.impact or 0)
-        initial_risk_level = score if 1 <= score <= 25 else self.initial_risk_level
-        return {
-            "id": self.external_id,
-            "risk": self.risk,
-            "probability": self.probability,
-            "impact": self.impact,
-            "initialRiskLevel": initial_risk_level,
-            "date": self.date.isoformat(),
-            "owner": self.owner,
-            "createdBy": self.created_by,
-            "closedDate": self.closed_date.isoformat() if self.closed_date else "",
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": self.updated_at.isoformat(),
-        }
+        from .contracts import serialize_risk_record
+
+        return serialize_risk_record(self)
 
 
 class ReviewChecklistItem(models.Model):
@@ -143,15 +109,9 @@ class ReviewChecklistItem(models.Model):
         return self.external_id
 
     def to_portal_dict(self) -> dict[str, str]:
-        return {
-            "id": self.external_id,
-            "category": self.category,
-            "item": self.item,
-            "frequency": self.frequency,
-            "startDate": self.start_date.isoformat() if self.start_date else "",
-            "owner": self.owner,
-            "createdAt": self.created_at.isoformat(),
-        }
+        from .contracts import serialize_review_checklist_item
+
+        return serialize_review_checklist_item(self)
 
 
 class ReviewChecklistRecommendation(models.Model):
@@ -171,14 +131,9 @@ class ReviewChecklistRecommendation(models.Model):
         return self.external_id
 
     def to_portal_dict(self) -> dict[str, str]:
-        return {
-            "id": self.external_id,
-            "category": self.category,
-            "item": self.item,
-            "frequency": self.frequency,
-            "startDate": self.start_date.isoformat() if self.start_date else "",
-            "owner": self.owner,
-        }
+        from .contracts import serialize_review_checklist_recommendation
+
+        return serialize_review_checklist_recommendation(self)
 
 
 class PortalState(models.Model):
@@ -232,17 +187,9 @@ class ZeroTrustTenantProfile(models.Model):
         return self.display_name or self.tenant_id
 
     def to_portal_dict(self) -> dict[str, object]:
-        return {
-            "id": self.external_id,
-            "displayName": self.display_name,
-            "tenantId": self.tenant_id,
-            "clientId": self.client_id,
-            "certificateThumbprint": self.certificate_thumbprint,
-            "isActive": self.is_active,
-            "lastRunAt": self.last_run_at.isoformat() if self.last_run_at else "",
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": self.updated_at.isoformat(),
-        }
+        from .contracts import serialize_zero_trust_tenant_profile
+
+        return serialize_zero_trust_tenant_profile(self)
 
 
 class ZeroTrustCertificate(models.Model):
@@ -282,19 +229,9 @@ class ZeroTrustCertificate(models.Model):
         return self.thumbprint
 
     def to_portal_dict(self) -> dict[str, object]:
-        return {
-            "id": self.external_id,
-            "profileId": self.profile.external_id,
-            "thumbprint": self.thumbprint,
-            "subject": self.subject,
-            "serialNumber": self.serial_number,
-            "notBefore": self.not_before.isoformat(),
-            "notAfter": self.not_after.isoformat(),
-            "keyAlgorithm": self.key_algorithm,
-            "keySize": self.key_size,
-            "isCurrent": self.is_current,
-            "createdAt": self.created_at.isoformat(),
-        }
+        from .contracts import serialize_zero_trust_certificate
+
+        return serialize_zero_trust_certificate(self)
 
 
 class ZeroTrustAssessmentRun(models.Model):
@@ -354,34 +291,9 @@ class ZeroTrustAssessmentRun(models.Model):
         return bool(self.entrypoint_relative_path)
 
     def to_portal_dict(self) -> dict[str, object]:
-        return {
-            "id": self.external_id,
-            "profileId": self.profile.external_id,
-            "certificateId": self.certificate.external_id if self.certificate_id else "",
-            "status": self.status,
-            "statusLabel": self.get_status_display(),
-            "statusMessage": self.status_message,
-            "warningSummary": self.warning_summary,
-            "errorSummary": self.error_summary,
-            "workerId": self.worker_id,
-            "attemptCount": self.attempt_count,
-            "exitCode": self.exit_code,
-            "claimedAt": self.claimed_at.isoformat() if self.claimed_at else "",
-            "leaseExpiresAt": self.lease_expires_at.isoformat() if self.lease_expires_at else "",
-            "lastHeartbeatAt": self.last_heartbeat_at.isoformat() if self.last_heartbeat_at else "",
-            "startedAt": self.started_at.isoformat() if self.started_at else "",
-            "completedAt": self.completed_at.isoformat() if self.completed_at else "",
-            "ingestedAt": self.ingested_at.isoformat() if self.ingested_at else "",
-            "entrypointRelativePath": self.entrypoint_relative_path,
-            "moduleVersion": self.module_version,
-            "powershellVersion": self.powershell_version,
-            "inputSnapshot": self.input_snapshot,
-            "summary": self.summary_json,
-            "requestedBy": self.requested_by,
-            "hasReport": self.has_report,
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": self.updated_at.isoformat(),
-        }
+        from .contracts import serialize_zero_trust_run
+
+        return serialize_zero_trust_run(self)
 
 
 class ZeroTrustAssessmentRunLog(models.Model):
@@ -412,13 +324,9 @@ class ZeroTrustAssessmentRunLog(models.Model):
         return f"{self.run.external_id}:{self.sequence}"
 
     def to_portal_dict(self) -> dict[str, object]:
-        return {
-            "sequence": self.sequence,
-            "level": self.level,
-            "stream": self.stream,
-            "message": self.message,
-            "createdAt": self.created_at.isoformat(),
-        }
+        from .contracts import serialize_zero_trust_run_log
+
+        return serialize_zero_trust_run_log(self)
 
 
 class ZeroTrustAssessmentArtifact(models.Model):

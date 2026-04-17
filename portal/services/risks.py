@@ -2,20 +2,17 @@ from __future__ import annotations
 
 from django.db import transaction
 
+from ..contracts import serialize_risk_record
 from ..models import RiskRecord
-from .common import (
-    RISK_RECORD_MODEL_FIELDS,
-    ValidationError,
-    normalize_risk_record,
-    normalize_string,
-)
+from .common import ValidationError, normalize_string
 from .risk_csv import parse_risk_csv_text
+from .risk_validation import RISK_RECORD_MODEL_FIELDS, normalize_risk_record
 
 RISK_RECORD_UPDATE_FIELDS = RISK_RECORD_MODEL_FIELDS + ("created_by",)
 
 
 def list_risk_register() -> list[dict[str, object]]:
-    return [item.to_portal_dict() for item in RiskRecord.objects.all()]
+    return [serialize_risk_record(item) for item in RiskRecord.objects.all()]
 
 
 def risk_record_model_values(record: dict[str, object]) -> dict[str, object]:
@@ -85,7 +82,7 @@ def create_risk_record(payload: object) -> dict[str, object]:
         external_id=record["external_id"],
         **risk_record_model_values(record),
     )
-    return created.to_portal_dict()
+    return serialize_risk_record(created)
 
 
 def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
@@ -104,7 +101,7 @@ def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
     if payload_id and payload_id != normalized_external_id:
         raise ValidationError("Risk id does not match request path.")
 
-    merged_payload = existing.to_portal_dict()
+    merged_payload = serialize_risk_record(existing)
     merged_payload.update(payload)
     merged_payload["id"] = normalized_external_id
     normalized_record = _normalize_risk_record_with_creator(merged_payload)
@@ -113,7 +110,7 @@ def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
     for field_name in RISK_RECORD_UPDATE_FIELDS:
         setattr(existing, field_name, next_values[field_name])
     existing.save(update_fields=list(RISK_RECORD_UPDATE_FIELDS))
-    return existing.to_portal_dict()
+    return serialize_risk_record(existing)
 
 
 def delete_risk_record(external_id: str) -> dict[str, object]:
@@ -126,7 +123,7 @@ def delete_risk_record(external_id: str) -> dict[str, object]:
     except RiskRecord.DoesNotExist as error:
         raise ValidationError("Risk record was not found.") from error
 
-    deleted = record.to_portal_dict()
+    deleted = serialize_risk_record(record)
     record.delete()
     return deleted
 

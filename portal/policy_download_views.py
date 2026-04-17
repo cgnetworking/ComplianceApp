@@ -10,7 +10,7 @@ from .services.policy_downloads import (
     build_attachment_content_disposition,
     build_policy_document_download,
 )
-from .views import api_login_required, current_audit_actor, policy_reader_api_access
+from .view_helpers import api_login_required, current_audit_actor, policy_reader_api_access
 
 
 def policy_download_actor(request: HttpRequest) -> tuple[str, str]:

@@ -10,7 +10,7 @@ from .services.vendor_downloads import (
     build_attachment_disposition,
     build_single_vendor_response_download,
 )
-from .views import api_login_required, current_audit_actor, policy_reader_api_access
+from .view_helpers import api_login_required, current_audit_actor, policy_reader_api_access
 
 
 def vendor_download_error_response(error: ValidationError) -> JsonResponse:

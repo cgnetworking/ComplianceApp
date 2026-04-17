@@ -367,6 +367,93 @@ function normalizeAssignableUsers(items) {
     .sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true, sensitivity: "base" }));
 }
 
+function normalizeRiskFactor(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 5 ? parsed : 0;
+}
+
+function normalizeRiskScore(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 25 ? parsed : 0;
+}
+
+function normalizeDateInputValue(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  return formatDateInputValue(parsed);
+}
+
+function formatDateInputValue(date) {
+  const normalizedDate = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(normalizedDate.getTime())) {
+    return "";
+  }
+  const year = normalizedDate.getFullYear();
+  const month = String(normalizedDate.getMonth() + 1).padStart(2, "0");
+  const day = String(normalizedDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function todayDateValue() {
+  return formatDateInputValue(new Date());
+}
+
+function formatDate(value) {
+  const normalizedValue = normalizeDateInputValue(value);
+  if (!normalizedValue) {
+    return "-";
+  }
+  return formatDateWithOrdinal(normalizedValue);
+}
+
+function normalizeRiskRecord(item) {
+  if (!item || typeof item !== "object") {
+    throw new Error("Risk entry payload was invalid.");
+  }
+
+  const riskText = typeof item.risk === "string" ? item.risk.trim() : "";
+  const probability = normalizeRiskFactor(item.probability);
+  const impact = normalizeRiskFactor(item.impact);
+  const initialRiskLevel = probability * impact;
+  const raisedDate = normalizeDateInputValue(item.date);
+  const riskId = typeof item.id === "string" ? item.id.trim() : "";
+  const owner = typeof item.owner === "string" ? item.owner.trim() : "";
+  const createdBy = typeof item.createdBy === "string" ? item.createdBy.trim() : "";
+  const createdAt = typeof item.createdAt === "string" ? item.createdAt : "";
+  const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : "";
+  const statedInitialRiskLevel = normalizeRiskScore(item.initialRiskLevel);
+  if (!riskId || !riskText || !probability || !impact || !raisedDate || !owner || !createdBy || !createdAt || !updatedAt) {
+    throw new Error("Risk entry payload was invalid.");
+  }
+  if (statedInitialRiskLevel && statedInitialRiskLevel !== initialRiskLevel) {
+    throw new Error("Risk entry initialRiskLevel did not match probability x impact.");
+  }
+
+  return {
+    id: riskId,
+    risk: riskText,
+    probability,
+    impact,
+    initialRiskLevel,
+    date: raisedDate,
+    owner,
+    createdBy,
+    closedDate: normalizeDateInputValue(item.closedDate),
+    createdAt,
+    updatedAt,
+  };
+}
+
 function normalizeDataPayload(payload) {
   if (!payload || typeof payload !== "object") {
     throw new Error("Mapping payload must be an object.");

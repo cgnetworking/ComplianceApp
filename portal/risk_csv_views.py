@@ -8,7 +8,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 from .services.bootstrap import append_portal_audit_entry
 from .services.risk_csv import serialize_risk_records_to_csv
 from .services.risks import ValidationError, list_risk_register, replace_risk_register
-from .views import api_login_required, current_audit_actor, parse_json_body_or_400, policy_reader_api_access
+from .view_helpers import api_login_required, current_audit_actor, parse_json_body_or_400, policy_reader_api_access
 
 
 def risk_csv_actor(request: HttpRequest) -> tuple[str, str]:

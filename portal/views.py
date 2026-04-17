@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import ipaddress
-import json
 import math
 import time
-from functools import wraps
 
 from django.conf import settings
 from django.contrib.auth import login as auth_login
@@ -18,35 +16,48 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 
-from .services import (
-    ValidationError,
-    approve_uploaded_policy,
-    create_risk_record,
+from .services.bootstrap import (
+    append_portal_audit_entry,
     create_review_checklist_item,
+    delete_review_checklist_item,
+    get_bootstrap_payload,
+    review_state_payload_for_viewer,
+    update_review_state,
+)
+from .services.common import ValidationError, normalize_control_state, normalize_mapping_payload, set_state_payload, user_is_policy_reader
+from .services.mapping import replace_mapping_payload
+from .services.policies import (
+    approve_uploaded_policy,
     create_uploaded_policies,
     create_vendor_responses,
-    delete_risk_record,
-    delete_review_checklist_item,
     delete_uploaded_policy,
     delete_vendor_response,
-    get_bootstrap_payload,
     get_policy_document,
-    list_risk_register,
     list_vendor_responses,
-    normalize_control_state,
-    normalize_mapping_payload,
-    replace_mapping_payload,
-    replace_risk_register,
-    set_state_payload,
-    update_risk_record,
     update_uploaded_policy_approver,
-    update_review_state,
-    user_is_policy_reader,
+)
+from .services.risks import (
+    create_risk_record,
+    delete_risk_record,
+    list_risk_register,
+    replace_risk_register,
+    update_risk_record,
+)
+from .services.uploads import (
     validate_mapping_upload_file,
     validate_policy_upload_files,
     validate_vendor_upload_files,
 )
-from .services.bootstrap import append_portal_audit_entry, review_state_payload_for_viewer
+from .view_helpers import (
+    api_login_required,
+    current_audit_actor,
+    parse_json_body_or_400,
+    policy_reader_api_access,
+    policy_reader_forbidden_response,
+    render_portal_page,
+    staff_api_forbidden_response,
+    staff_page_required,
+)
 
 
 def safe_next_url(request: HttpRequest) -> str:
@@ -70,86 +81,6 @@ def sso_is_configured() -> bool:
             and settings.SOCIAL_AUTH_OIDC_SECRET
         )
     return bool(settings.SOCIAL_AUTH_SSO_BACKEND_NAME)
-
-
-def api_login_required(view_func):
-    @wraps(view_func)
-    def wrapped(request: HttpRequest, *args, **kwargs):
-        if not request.user.is_authenticated:
-            return JsonResponse(
-                {
-                    "detail": "Authentication required.",
-                    "loginUrl": settings.LOGIN_URL,
-                },
-                status=401,
-            )
-        return view_func(request, *args, **kwargs)
-
-    return wrapped
-
-
-def policy_reader_forbidden_response() -> JsonResponse:
-    return JsonResponse(
-        {
-            "detail": "Policy Reader role can only access read-only policy state.",
-        },
-        status=403,
-    )
-
-
-def policy_reader_api_access(*, allow_policy_reader: bool):
-    def decorator(view_func):
-        @wraps(view_func)
-        def wrapped(request: HttpRequest, *args, **kwargs):
-            if user_is_policy_reader(request.user) and not allow_policy_reader:
-                return policy_reader_forbidden_response()
-            return view_func(request, *args, **kwargs)
-
-        return wrapped
-
-    return decorator
-
-
-def staff_page_required(view_func):
-    @wraps(view_func)
-    def wrapped(request: HttpRequest, *args, **kwargs):
-        if not request.user.is_staff:
-            return HttpResponse("Forbidden", status=403)
-        return view_func(request, *args, **kwargs)
-
-    return wrapped
-
-
-def staff_api_forbidden_response(detail: str = "Only staff users can access this resource.") -> JsonResponse:
-    return JsonResponse({"detail": detail}, status=403)
-
-
-def staff_api_access(view_func):
-    @wraps(view_func)
-    def wrapped(request: HttpRequest, *args, **kwargs):
-        if not request.user.is_staff:
-            return staff_api_forbidden_response()
-        return view_func(request, *args, **kwargs)
-
-    return wrapped
-
-
-def current_user_context(request: HttpRequest) -> dict[str, object]:
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    is_policy_reader = user_is_policy_reader(request.user)
-    return {
-        "username": username,
-        "isStaff": bool(request.user.is_staff),
-        "isPolicyReader": is_policy_reader,
-    }
-
-
-def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
-    username = request.user.get_username().strip() if request.user.is_authenticated else ""
-    if not username:
-        raise ValidationError("Authenticated portal actions require a username.")
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    return username, display_name
 
 
 def normalized_ip_address(value: object) -> str:
@@ -276,26 +207,6 @@ def named_item_preview(items: list[object], *, limit: int = 3) -> str:
     return preview
 
 
-def render_portal_page(
-    request: HttpRequest,
-    template_name: str,
-    *,
-    allow_policy_reader: bool = False,
-) -> HttpResponse:
-    if user_is_policy_reader(request.user) and not allow_policy_reader:
-        return redirect("portal-policies")
-
-    return render(
-        request,
-        template_name,
-        {
-            "api_base_url": "/api",
-            "login_url": settings.LOGIN_URL,
-            "current_user": current_user_context(request),
-        },
-    )
-
-
 @ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
 def login_page(request: HttpRequest) -> HttpResponse:
@@ -404,19 +315,6 @@ def risks_page(request: HttpRequest) -> HttpResponse:
 @ensure_csrf_cookie
 def vendors_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/vendors.html")
-
-def parse_json_body(request: HttpRequest) -> object:
-    try:
-        return json.loads(request.body.decode("utf-8") or "null")
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ValidationError("Invalid JSON body.") from error
-
-
-def parse_json_body_or_400(request: HttpRequest) -> tuple[object | None, JsonResponse | None]:
-    try:
-        return parse_json_body(request), None
-    except ValidationError as error:
-        return None, JsonResponse({"detail": str(error)}, status=400)
 
 
 @api_login_required
