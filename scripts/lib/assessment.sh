@@ -51,19 +51,32 @@ assessment::install_pinned_modules() {
 
   module_bootstrap_script="$(mktemp)"
   cat > "$module_bootstrap_script" <<'EOF'
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$PinnedPsFrameworkVersion,
+  [Parameter(Mandatory = $true)]
+  [string]$PinnedPsFrameworkSha256,
+  [Parameter(Mandatory = $true)]
+  [string]$PinnedAssessmentModuleVersion,
+  [Parameter(Mandatory = $true)]
+  [string]$PinnedAssessmentModuleSha256
+)
+
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# Avoid PSFRAMEWORK_* environment variable names here. PSFramework imports its
+# own settings during module load, and colliding names can break the import.
 $packages = @(
   @{
     Name = 'PSFramework'
-    Version = $env:PSFRAMEWORK_MODULE_VERSION
-    ExpectedSha256 = $env:PSFRAMEWORK_MODULE_SHA256
+    Version = $PinnedPsFrameworkVersion
+    ExpectedSha256 = $PinnedPsFrameworkSha256
   },
   @{
     Name = 'ZeroTrustAssessment'
-    Version = $env:ASSESSMENT_MODULE_VERSION
-    ExpectedSha256 = $env:ASSESSMENT_MODULE_SHA256
+    Version = $PinnedAssessmentModuleVersion
+    ExpectedSha256 = $PinnedAssessmentModuleSha256
   }
 )
 
@@ -126,12 +139,12 @@ finally {
 EOF
   chmod 0644 "$module_bootstrap_script"
   common::log "Installing pinned PowerShell assessment modules for $runtime_user"
-  if ! common::run_as_root env \
-    PSFRAMEWORK_MODULE_VERSION="$DEFAULT_PSFRAMEWORK_MODULE_VERSION" \
-    PSFRAMEWORK_MODULE_SHA256="$DEFAULT_PSFRAMEWORK_MODULE_SHA256" \
-    ASSESSMENT_MODULE_VERSION="$assessment_module_version" \
-    ASSESSMENT_MODULE_SHA256="$assessment_module_sha256" \
-    runuser -u "$runtime_user" -- pwsh -NoLogo -NoProfile -NonInteractive -File "$module_bootstrap_script"
+  if ! common::run_as_root runuser -u "$runtime_user" -- \
+    pwsh -NoLogo -NoProfile -NonInteractive -File "$module_bootstrap_script" \
+    -PinnedPsFrameworkVersion "$DEFAULT_PSFRAMEWORK_MODULE_VERSION" \
+    -PinnedPsFrameworkSha256 "$DEFAULT_PSFRAMEWORK_MODULE_SHA256" \
+    -PinnedAssessmentModuleVersion "$assessment_module_version" \
+    -PinnedAssessmentModuleSha256 "$assessment_module_sha256"
   then
     rm -f "$module_bootstrap_script"
     echo "Unable to install the pinned PowerShell assessment modules for $runtime_user." >&2
