@@ -169,9 +169,8 @@
 
     const formData = new FormData(event.currentTarget);
     const riskText = String(formData.get("risk") || "").trim();
-    const legacyRiskLevel = normalizeRiskFactor(formData.get("initial-risk-level"));
-    const probability = normalizeRiskFactor(readFirstFormValue(formData, probabilityFieldNames)) || legacyRiskLevel;
-    const impact = normalizeRiskFactor(readFirstFormValue(formData, impactFieldNames)) || legacyRiskLevel;
+    const probability = normalizeRiskFactor(readFirstFormValue(formData, probabilityFieldNames));
+    const impact = normalizeRiskFactor(readFirstFormValue(formData, impactFieldNames));
     const initialRiskLevel = probability * impact;
     const raisedDate = normalizeDateInputValue(formData.get("risk-date"));
     const riskOwner = String(formData.get("risk-owner") || "").trim();
@@ -201,9 +200,9 @@
       initialRiskLevel,
       date: raisedDate,
       owner: riskOwner,
-      createdBy: isEditing ? (existingRisk.createdBy || "") : currentRiskActorUsername(),
+      createdBy: isEditing ? existingRisk.createdBy : currentRiskActorUsername(),
       closedDate,
-      createdAt: isEditing ? existingRisk.createdAt || now : now,
+      createdAt: isEditing ? existingRisk.createdAt : now,
       updatedAt: now,
     };
 
@@ -237,7 +236,7 @@
       return;
     }
 
-    state.selectedRiskId = persistedRisk && persistedRisk.id ? persistedRisk.id : riskId;
+    state.selectedRiskId = persistedRisk.id;
     state.isAddingRisk = false;
     syncUrl();
     renderRisksPage();
@@ -361,7 +360,7 @@
       return;
     }
 
-    const owners = collectAssignableOwnerOptions(selectedOwner ? [selectedOwner] : []);
+    const owners = collectAssignableOwnerOptions();
     if (!owners.length) {
       els.riskOwnerInput.innerHTML = '<option value="">No assignable users available</option>';
       els.riskOwnerInput.value = "";
@@ -383,7 +382,7 @@
     const preferredOwner = selectedOwner || (state.riskAssignee !== "All" ? state.riskAssignee : owners[0].value);
     els.riskOwnerInput.value = valueOrFallback(els.riskOwnerInput, preferredOwner);
   }
-  function collectAssignableOwnerOptions(extraOwners = []) {
+  function collectAssignableOwnerOptions() {
     const options = [];
     const seen = new Set();
     const addOption = (value, label) => {
@@ -394,7 +393,7 @@
       seen.add(normalizedValue);
       options.push({
         value: normalizedValue,
-        label: normalizeRiskOwnerLabel(label, normalizedValue),
+        label: normalizeRiskOwnerLabel(label),
       });
     };
 
@@ -404,41 +403,11 @@
       }
       addOption(user.username, formatAssignableUserLabel(user));
     });
-    extraOwners.forEach((owner) => {
-      const normalizedOwner = typeof owner === "string" ? owner.trim() : "";
-      if (!normalizedOwner) {
-        return;
-      }
-      const label = isKnownAssignableUser(normalizedOwner)
-        ? formatRiskOwnerLabel(normalizedOwner)
-        : `${normalizedOwner} (legacy owner)`;
-      addOption(normalizedOwner, label);
-    });
 
     return options.sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }));
   }
   function collectRiskFilterOwnerOptions() {
-    const options = collectAssignableOwnerOptions();
-    const seen = new Set(options.map((option) => option.value));
-    state.riskRegister.forEach((risk) => {
-      if (!risk || typeof risk !== "object") {
-        return;
-      }
-      const owner = typeof risk.owner === "string" ? risk.owner.trim() : "";
-      if (!owner || seen.has(owner)) {
-        return;
-      }
-      seen.add(owner);
-      options.push({ value: owner, label: formatRiskOwnerLabel(owner) });
-    });
-    return options.sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }));
-  }
-  function isKnownAssignableUser(owner) {
-    const normalizedOwner = typeof owner === "string" ? owner.trim() : "";
-    if (!normalizedOwner) {
-      return false;
-    }
-    return state.assignableUsers.some((user) => user && user.username === normalizedOwner);
+    return collectAssignableOwnerOptions();
   }
   function formatAssignableUserLabel(user) {
     const username = typeof user.username === "string" ? user.username.trim() : "";
@@ -462,14 +431,11 @@
     if (!normalizedCreator) {
       return "-";
     }
-    return formatRiskOwnerLabel(normalizedCreator) || normalizedCreator;
+    return formatRiskOwnerLabel(normalizedCreator);
   }
-  function normalizeRiskOwnerLabel(label, fallbackValue) {
+  function normalizeRiskOwnerLabel(label) {
     if (typeof label === "string" && label.trim()) {
       return label.trim();
-    }
-    if (typeof fallbackValue === "string" && fallbackValue.trim()) {
-      return fallbackValue.trim();
     }
     return "";
   }
@@ -559,63 +525,33 @@
   async function saveRiskRecord(riskRecord, mode) {
     const normalizedMode = mode === "create" ? "create" : "update";
     const normalizedRisk = normalizeRiskRecord(riskRecord);
-    if (!normalizedRisk) {
-      throw new Error("Risk entry payload was invalid.");
-    }
+    const payload = normalizedMode === "create"
+      ? await apiRequest("/risks/", {
+          method: "POST",
+          body: JSON.stringify({ risk: normalizedRisk }),
+        })
+      : await apiRequest(`/risks/${encodeURIComponent(normalizedRisk.id)}/`, {
+          method: "PUT",
+          body: JSON.stringify({ risk: normalizedRisk }),
+        });
 
-    try {
-      const payload = normalizedMode === "create"
-        ? await apiRequest("/risks/", {
-            method: "POST",
-            body: JSON.stringify({ risk: normalizedRisk }),
-          })
-        : await apiRequest(`/risks/${encodeURIComponent(normalizedRisk.id)}/`, {
-            method: "PUT",
-            body: JSON.stringify({ risk: normalizedRisk }),
-          });
-
-      const persistedRisk = applyRiskSavePayload(payload, normalizedRisk.id);
-      if (!persistedRisk) {
-        throw new Error("Risk save response was invalid.");
-      }
-      return persistedRisk;
-    } catch (error) {
-      if (!isLegacyRiskSaveFallbackError(error)) {
-        throw error;
-      }
-      await saveRiskRegister();
-      return state.riskRegister.find((risk) => risk.id === normalizedRisk.id) || null;
+    const persistedRisk = applyRiskSavePayload(payload);
+    if (!persistedRisk) {
+      throw new Error("Risk save response was invalid.");
     }
+    return persistedRisk;
   }
-  function isLegacyRiskSaveFallbackError(error) {
-    const detail = error instanceof Error && error.message
-      ? error.message
-      : "";
-    return detail.includes("(404)") || detail.includes("(405)");
-  }
-  function applyRiskSavePayload(payload, fallbackRiskId) {
+  function applyRiskSavePayload(payload) {
     if (!payload || typeof payload !== "object") {
       return null;
     }
-
-    if (Array.isArray(payload.riskRegister)) {
-      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
-      if (!state.riskRegister.length) {
-        return null;
-      }
-      return state.riskRegister.find((risk) => risk.id === fallbackRiskId) || state.riskRegister[0];
-    }
-
     const persistedRisk = normalizeRiskRecord(payload.risk);
-    if (!persistedRisk) {
-      return null;
-    }
 
     const existingIndex = state.riskRegister.findIndex((risk) => risk.id === persistedRisk.id);
     if (existingIndex >= 0) {
       state.riskRegister[existingIndex] = persistedRisk;
     } else {
-      state.riskRegister = [persistedRisk].concat(state.riskRegister.filter((risk) => risk.id !== fallbackRiskId));
+      state.riskRegister = [persistedRisk].concat(state.riskRegister);
     }
     return persistedRisk;
   }
@@ -626,7 +562,7 @@
     });
 
     if (payload && Array.isArray(payload.riskRegister)) {
-      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+      state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item));
     }
   }
   async function deleteRiskRecordFromApi(riskId) {
@@ -683,34 +619,39 @@
   }
   function normalizeRiskRecord(item) {
     if (!item || typeof item !== "object") {
-      return null;
+      throw new Error("Risk entry payload was invalid.");
     }
 
     const riskText = typeof item.risk === "string" ? item.risk.trim() : "";
-    const legacyRiskScore = normalizeRiskScore(item.initialRiskLevel);
-    const { probability, impact } = normalizeRiskFactors(item.probability, item.impact, legacyRiskScore);
+    const probability = normalizeRiskFactor(item.probability);
+    const impact = normalizeRiskFactor(item.impact);
     const initialRiskLevel = probability * impact;
     const raisedDate = normalizeDateInputValue(item.date);
-    if (!riskText || !probability || !impact || !raisedDate) {
-      return null;
+    const riskId = typeof item.id === "string" ? item.id.trim() : "";
+    const owner = typeof item.owner === "string" ? item.owner.trim() : "";
+    const createdBy = typeof item.createdBy === "string" ? item.createdBy.trim() : "";
+    const createdAt = typeof item.createdAt === "string" ? item.createdAt : "";
+    const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : "";
+    const statedInitialRiskLevel = normalizeRiskScore(item.initialRiskLevel);
+    if (!riskId || !riskText || !probability || !impact || !raisedDate || !owner || !createdBy || !createdAt || !updatedAt) {
+      throw new Error("Risk entry payload was invalid.");
+    }
+    if (statedInitialRiskLevel && statedInitialRiskLevel !== initialRiskLevel) {
+      throw new Error("Risk entry initialRiskLevel did not match probability x impact.");
     }
 
     return {
-      id: typeof item.id === "string" && item.id ? item.id : createRiskId(),
+      id: riskId,
       risk: riskText,
       probability,
       impact,
       initialRiskLevel,
       date: raisedDate,
-      owner: typeof item.owner === "string" ? item.owner.trim() : "",
-      createdBy: typeof item.createdBy === "string"
-        ? item.createdBy.trim()
-        : typeof item.created_by === "string"
-          ? item.created_by.trim()
-          : "",
+      owner,
+      createdBy,
       closedDate: normalizeDateInputValue(item.closedDate),
-      createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
-      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "",
+      createdAt,
+      updatedAt,
     };
   }
   function createRiskId() {
@@ -720,14 +661,10 @@
     return "shared portal register";
   }
   function currentRiskActorUsername() {
-    if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
-      return "";
+    if (!window.ISMS_PORTAL_CONFIG || !window.ISMS_PORTAL_CONFIG.currentUser) {
+      throw new Error("Current portal user is not configured.");
     }
-    const currentUser = window.ISMS_PORTAL_CONFIG.currentUser;
-    if (!currentUser || typeof currentUser !== "object") {
-      return "";
-    }
-    return typeof currentUser.username === "string" ? currentUser.username.trim() : "";
+    return String(window.ISMS_PORTAL_CONFIG.currentUser.username).trim();
   }
   function bindRiskCsvActions() {
     const exportTrigger = document.getElementById("risk-export-trigger");
@@ -789,7 +726,7 @@
             throw new Error("Risk CSV import response was invalid.");
           }
 
-          state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
+          state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item));
           state.isAddingRisk = false;
           syncSelectionToVisibleRisks();
           syncUrl();
@@ -873,91 +810,6 @@
   function normalizeRiskScore(value) {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed >= 1 && parsed <= 25 ? parsed : 0;
-  }
-  function normalizeRiskFactors(probabilityValue, impactValue, legacyScoreValue) {
-    let probability = normalizeRiskFactor(probabilityValue);
-    let impact = normalizeRiskFactor(impactValue);
-    const legacyScore = normalizeRiskScore(legacyScoreValue);
-
-    if (probability && impact) {
-      return { probability, impact };
-    }
-    if (!legacyScore) {
-      return { probability, impact };
-    }
-
-    const fallback = riskFactorsFromLegacyScore(legacyScore);
-    if (probability && !impact) {
-      impact = inferMissingRiskFactor(probability, legacyScore, fallback.impact);
-    } else if (impact && !probability) {
-      probability = inferMissingRiskFactor(impact, legacyScore, fallback.probability);
-    } else {
-      probability = probability || fallback.probability;
-      impact = impact || fallback.impact;
-    }
-    return { probability, impact };
-  }
-  function inferMissingRiskFactor(knownFactor, score, fallbackFactor) {
-    if (knownFactor && score && score % knownFactor === 0) {
-      const derived = score / knownFactor;
-      if (Number.isInteger(derived) && derived >= 1 && derived <= 5) {
-        return derived;
-      }
-    }
-    return normalizeRiskFactor(fallbackFactor);
-  }
-  function riskFactorsFromLegacyScore(score) {
-    if (score <= 5) {
-      return { probability: score, impact: score };
-    }
-    return closestRiskFactorPair(score);
-  }
-  function closestRiskFactorPair(score) {
-    const target = Math.min(Math.max(score, 1), 25);
-    let best = null;
-
-    for (let probability = 1; probability <= 5; probability += 1) {
-      for (let impact = 1; impact <= 5; impact += 1) {
-        const product = probability * impact;
-        if (product < target) {
-          continue;
-        }
-        const candidate = {
-          delta: product - target,
-          spread: Math.abs(probability - impact),
-          score: product,
-          maxFactor: Math.max(probability, impact),
-          probability,
-          impact,
-        };
-        if (!best || compareRiskFactorCandidates(candidate, best) < 0) {
-          best = candidate;
-        }
-      }
-    }
-
-    if (!best) {
-      return { probability: 5, impact: 5 };
-    }
-    return { probability: best.probability, impact: best.impact };
-  }
-  function compareRiskFactorCandidates(left, right) {
-    if (left.delta !== right.delta) {
-      return left.delta - right.delta;
-    }
-    if (left.spread !== right.spread) {
-      return left.spread - right.spread;
-    }
-    if (left.score !== right.score) {
-      return right.score - left.score;
-    }
-    if (left.maxFactor !== right.maxFactor) {
-      return right.maxFactor - left.maxFactor;
-    }
-    if (left.probability !== right.probability) {
-      return left.probability - right.probability;
-    }
-    return left.impact - right.impact;
   }
   function riskBadgeLevel(probability, impact) {
     const bandKey = riskBandKey(probability, impact);

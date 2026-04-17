@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import re
 from urllib.parse import quote
 
@@ -26,28 +25,26 @@ MIME_TYPE_BY_EXTENSION = {
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
-def sanitize_filename_component(value: object, fallback: str) -> str:
+def sanitize_filename_component(value: object) -> str:
     normalized = normalize_string(value)
     safe_value = SAFE_FILENAME_CHARS_RE.sub("-", normalized).strip("-._")
     safe_value = re.sub(r"-{2,}", "-", safe_value)
     if safe_value:
         return safe_value
-    return fallback
+    raise ValidationError("Vendor download file name component is required.")
 
 
-def normalize_download_extension(value: object, fallback: str = "txt") -> str:
+def normalize_download_extension(value: object) -> str:
     normalized = normalize_string(value).lower().lstrip(".")
     if SAFE_EXTENSION_RE.fullmatch(normalized or ""):
         return normalized
-
-    normalized_fallback = normalize_string(fallback).lower().lstrip(".")
-    return normalized_fallback if SAFE_EXTENSION_RE.fullmatch(normalized_fallback or "") else "txt"
+    raise ValidationError("Vendor download file extension is invalid.")
 
 
 def build_attachment_disposition(file_name: str) -> str:
-    safe_name = sanitize_filename_component(file_name, "vendor-response.txt")
+    safe_name = sanitize_filename_component(file_name)
     if "." not in safe_name:
-        safe_name = f"{safe_name}.txt"
+        raise ValidationError("Vendor download file name must include an extension.")
     return f'attachment; filename="{safe_name}"; filename*=UTF-8\'\'{quote(file_name, safe="")}'
 
 
@@ -63,10 +60,10 @@ def get_vendor_response_for_download(response_id: object) -> VendorResponse:
 
 
 def build_vendor_response_file_name(response: VendorResponse, *, extension: str | None = None) -> str:
-    vendor_component = sanitize_filename_component(response.vendor_name, "vendor")
+    vendor_component = sanitize_filename_component(response.vendor_name)
     timestamp_component = response.imported_at.strftime("%Y%m%d-%H%M%S")
-    response_component = sanitize_filename_component(response.external_id, "response")
-    output_extension = normalize_download_extension(extension or response.extension or "txt")
+    response_component = sanitize_filename_component(response.external_id)
+    output_extension = normalize_download_extension(extension or response.extension)
     return f"{vendor_component}-{timestamp_component}-{response_component}.{output_extension}"
 
 
@@ -90,26 +87,13 @@ def build_single_vendor_response_download(response_id: object) -> tuple[str, byt
     response = get_vendor_response_for_download(response_id)
     raw_text = (response.raw_text or "").replace("\x00", "")
 
-    if raw_text:
-        extension = normalize_download_extension(response.extension or "txt")
-        file_name = build_vendor_response_file_name(response, extension=extension)
-        mime_type = normalize_download_mime_type(response.mime_type, extension)
-        return file_name, raw_text.encode("utf-8"), mime_type
+    if not raw_text:
+        raise ValidationError("Vendor response raw text is unavailable for download.")
 
-    metadata_file_name = build_vendor_response_file_name(response, extension="json")
-    payload = {
-        "id": response.external_id,
-        "vendorName": response.vendor_name,
-        "fileName": response.file_name,
-        "extension": response.extension,
-        "mimeType": response.mime_type,
-        "fileSize": int(response.file_size or 0),
-        "importedAt": response.imported_at.isoformat(),
-        "summary": response.summary,
-        "status": response.status,
-        "rawTextAvailable": False,
-    }
-    return metadata_file_name, json.dumps(payload, indent=2, ensure_ascii=True).encode("utf-8"), MIME_TYPE_BY_EXTENSION["json"]
+    extension = normalize_download_extension(response.extension)
+    file_name = build_vendor_response_file_name(response, extension=extension)
+    mime_type = normalize_download_mime_type(response.mime_type, extension)
+    return file_name, raw_text.encode("utf-8"), mime_type
 
 
 def build_all_vendor_responses_download() -> tuple[str, bytes, str]:

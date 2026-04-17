@@ -879,25 +879,30 @@
   }
   function valueOrFallback(select, value) {
     const exists = Array.from(select.options).some((option) => option.value === value);
-    return exists ? value : select.options[0].value;
+    if (!exists) {
+      throw new Error(`Select option '${value}' is unavailable.`);
+    }
+    return value;
   }
   function uniqueValues(items, key) {
     return Array.from(new Set(items.map((item) => item[key]))).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
   }
   function parseMonth(rawValue) {
-    const fallbackMonth = today.getMonth();
     if (page !== "reviews") {
-      return fallbackMonth;
+      return today.getMonth();
     }
     if (rawValue === null || rawValue === undefined) {
-      return fallbackMonth;
+      return today.getMonth();
     }
     const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : String(rawValue).trim();
     if (!normalizedValue) {
-      return fallbackMonth;
+      return today.getMonth();
     }
     const parsed = Number(normalizedValue);
-    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 11 ? parsed : fallbackMonth;
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 11) {
+      throw new Error("Review month query parameter is invalid.");
+    }
+    return parsed;
   }
   function groupBy(items, key) {
     return items.reduce((groups, item) => {

@@ -10,9 +10,9 @@
 </head>
 <body
   data-page="{% block body_page %}{% endblock %}"
-  data-api-base-url="{{ api_base_url|default:'/api' }}"
-  data-login-url="{{ login_url|default:'/login/' }}"
-  data-current-username="{{ current_user.username|default:'' }}"
+  data-api-base-url="{{ api_base_url }}"
+  data-login-url="{{ login_url }}"
+  data-current-username="{{ current_user.username }}"
   data-current-is-staff="{{ current_user.isStaff|yesno:'true,false' }}"
   data-current-is-policy-reader="{{ current_user.isPolicyReader|yesno:'true,false' }}"
 >

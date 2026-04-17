@@ -10,7 +10,7 @@ from .services.vendor_downloads import (
     build_attachment_disposition,
     build_single_vendor_response_download,
 )
-from .views import api_login_required, policy_reader_api_access
+from .views import api_login_required, current_audit_actor, policy_reader_api_access
 
 
 def vendor_download_error_response(error: ValidationError) -> JsonResponse:
@@ -28,11 +28,7 @@ def build_vendor_download_response(file_name: str, content: bytes, content_type:
 
 
 def vendor_download_actor(request: HttpRequest) -> tuple[str, str]:
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    normalized_username = username or "system"
-    normalized_display_name = display_name or username or "System"
-    return normalized_username, normalized_display_name
+    return current_audit_actor(request)
 
 
 @api_login_required

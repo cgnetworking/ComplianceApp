@@ -65,9 +65,9 @@ def safe_next_url(request: HttpRequest) -> str:
 def sso_is_configured() -> bool:
     if settings.SOCIAL_AUTH_SSO_BACKEND_NAME == "oidc":
         return bool(
-            getattr(settings, "SOCIAL_AUTH_OIDC_OIDC_ENDPOINT", "")
-            and getattr(settings, "SOCIAL_AUTH_OIDC_KEY", "")
-            and getattr(settings, "SOCIAL_AUTH_OIDC_SECRET", "")
+            settings.SOCIAL_AUTH_OIDC_OIDC_ENDPOINT
+            and settings.SOCIAL_AUTH_OIDC_KEY
+            and settings.SOCIAL_AUTH_OIDC_SECRET
         )
     return bool(settings.SOCIAL_AUTH_SSO_BACKEND_NAME)
 
@@ -145,11 +145,11 @@ def current_user_context(request: HttpRequest) -> dict[str, object]:
 
 
 def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
-    username = request.user.get_username() if request.user.is_authenticated else ""
+    username = request.user.get_username().strip() if request.user.is_authenticated else ""
+    if not username:
+        raise ValidationError("Authenticated portal actions require a username.")
     display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    normalized_username = username or "system"
-    normalized_display_name = display_name or username or "System"
-    return normalized_username, normalized_display_name
+    return username, display_name
 
 
 def normalized_ip_address(value: object) -> str:
@@ -166,14 +166,16 @@ def request_client_ip(request: HttpRequest) -> str:
     remote_addr = normalized_ip_address(request.META.get("REMOTE_ADDR"))
     trusted_proxy_ips = {
         normalized_ip_address(value)
-        for value in getattr(settings, "TRUSTED_PROXY_IPS", [])
+        for value in settings.TRUSTED_PROXY_IPS
         if normalized_ip_address(value)
     }
     if remote_addr and remote_addr in trusted_proxy_ips:
         real_ip = normalized_ip_address(request.META.get("HTTP_X_REAL_IP"))
         if real_ip:
             return real_ip
-    return remote_addr or "unknown"
+    if not remote_addr:
+        raise ValidationError("Request client IP address is unavailable.")
+    return remote_addr
 
 
 def normalized_login_username(raw_username: object) -> str:
@@ -208,9 +210,9 @@ def clear_login_throttle(*, username: str, client_ip: str) -> None:
 
 
 def register_failed_login_attempt(*, username: str, client_ip: str) -> tuple[int, int]:
-    max_attempts = int(getattr(settings, "LOGIN_THROTTLE_MAX_ATTEMPTS", 5))
-    window_seconds = int(getattr(settings, "LOGIN_THROTTLE_WINDOW_SECONDS", 900))
-    lockout_seconds = int(getattr(settings, "LOGIN_THROTTLE_LOCKOUT_SECONDS", 900))
+    max_attempts = int(settings.LOGIN_THROTTLE_MAX_ATTEMPTS)
+    window_seconds = int(settings.LOGIN_THROTTLE_WINDOW_SECONDS)
+    lockout_seconds = int(settings.LOGIN_THROTTLE_LOCKOUT_SECONDS)
     attempts_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="attempts")
     lockout_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout")
 
@@ -547,14 +549,13 @@ def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResp
 @policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def policy_document_approval(request: HttpRequest, document_id: str) -> JsonResponse:
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    username, display_name = current_audit_actor(request)
 
     try:
         updated_document, review_state = approve_uploaded_policy(
             document_id,
             actor_username=username,
-            actor_display_name=display_name or username or "System",
+            actor_display_name=display_name,
         )
     except ValidationError as error:
         detail = str(error)
@@ -703,14 +704,18 @@ def risk_register(request: HttpRequest) -> JsonResponse:
         return error_response
 
     if request.method == "POST":
-        payload = body.get("risk") if isinstance(body, dict) and "risk" in body else body
+        if not isinstance(body, dict) or "risk" not in body:
+            return JsonResponse({"detail": "Risk payload is required."}, status=400)
+        payload = body.get("risk")
         try:
             created_risk = create_risk_record(payload)
         except ValidationError as error:
             return JsonResponse({"detail": str(error)}, status=400)
         return JsonResponse({"risk": created_risk}, status=201)
 
-    items = body.get("riskRegister") if isinstance(body, dict) and "riskRegister" in body else body
+    if not isinstance(body, dict) or "riskRegister" not in body:
+        return JsonResponse({"detail": "riskRegister payload is required."}, status=400)
+    items = body.get("riskRegister")
     try:
         risk_register_payload = replace_risk_register(items)
     except ValidationError as error:
@@ -777,7 +782,9 @@ def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
     if error_response is not None:
         return error_response
 
-    payload = body.get("risk") if isinstance(body, dict) and "risk" in body else body
+    if not isinstance(body, dict) or "risk" not in body:
+        return JsonResponse({"detail": "Risk payload is required."}, status=400)
+    payload = body.get("risk")
     try:
         updated_risk = update_risk_record(risk_id, payload)
     except ValidationError as error:
@@ -795,7 +802,9 @@ def checklist_items(request: HttpRequest) -> JsonResponse:
     if error_response is not None:
         return error_response
 
-    payload = body.get("checklistItem") if isinstance(body, dict) and "checklistItem" in body else body
+    if not isinstance(body, dict) or "checklistItem" not in body:
+        return JsonResponse({"detail": "Checklist item payload is required."}, status=400)
+    payload = body.get("checklistItem")
 
     try:
         checklist_item = create_review_checklist_item(payload)
@@ -846,13 +855,14 @@ def review_state(request: HttpRequest) -> JsonResponse:
     if error_response is not None:
         return error_response
 
-    payload = body.get("reviewState") if isinstance(body, dict) and "reviewState" in body else body
-    username = request.user.get_username() if request.user.is_authenticated else "system"
-    display_name = request.user.get_full_name() if request.user.is_authenticated else ""
+    if not isinstance(body, dict) or "reviewState" not in body:
+        return JsonResponse({"detail": "reviewState payload is required."}, status=400)
+    payload = body.get("reviewState")
+    username, display_name = current_audit_actor(request)
     normalized = update_review_state(
         payload,
-        actor_username=username or "system",
-        actor_display_name=display_name.strip() or username or "System",
+        actor_username=username,
+        actor_display_name=display_name,
     )
     return JsonResponse({"reviewState": review_state_payload_for_viewer(normalized, viewer=request.user)})
 
@@ -865,7 +875,9 @@ def control_state(request: HttpRequest) -> JsonResponse:
     if error_response is not None:
         return error_response
 
-    payload = body.get("controlState") if isinstance(body, dict) and "controlState" in body else body
+    if not isinstance(body, dict) or "controlState" not in body:
+        return JsonResponse({"detail": "controlState payload is required."}, status=400)
+    payload = body.get("controlState")
     normalized = normalize_control_state(payload)
     set_state_payload("control_state", normalized)
     return JsonResponse({"controlState": normalized})
@@ -879,7 +891,9 @@ def mapping_state(request: HttpRequest) -> JsonResponse:
     if error_response is not None:
         return error_response
 
-    payload = body.get("mapping") if isinstance(body, dict) and "mapping" in body else body
+    if not isinstance(body, dict) or "mapping" not in body:
+        return JsonResponse({"detail": "mapping payload is required."}, status=400)
+    payload = body.get("mapping")
     normalized = normalize_mapping_payload(payload)
     set_state_payload("mapping_state", normalized)
     return JsonResponse({"mapping": normalized})

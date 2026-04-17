@@ -26,38 +26,51 @@ function emptySummary() {
   };
 }
 
+function createEmptyMappingPayload() {
+  return {
+    generatedAt: new Date().toISOString(),
+    sourceSnapshot: {},
+    summary: emptySummary(),
+    controls: [],
+    documents: [],
+    activities: [],
+    checklist: [],
+    policyCoverage: [],
+  };
+}
+
 function normalizeUploadedPolicyItem(item) {
   if (!item || typeof item !== "object") {
     return null;
   }
   const id = typeof item.id === "string" ? item.id.trim() : "";
   const title = typeof item.title === "string" ? item.title.trim() : "";
+  const type = typeof item.type === "string" ? item.type.trim() : "";
+  const approver = typeof item.approver === "string" ? item.approver.trim() : "";
+  const reviewFrequency = typeof item.reviewFrequency === "string" ? item.reviewFrequency.trim() : "";
+  const path = typeof item.path === "string" ? item.path.trim() : "";
+  const folder = typeof item.folder === "string" ? item.folder.trim() : "";
   const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
-  if (!id || !title) {
+  if (!id || !title || !type || !approver || !reviewFrequency || !path || !folder) {
     return null;
   }
-  const contentAvailable = typeof item.contentAvailable === "boolean"
-    ? item.contentAvailable
-    : Boolean(contentHtml.trim());
-  const contentLoaded = typeof item.contentLoaded === "boolean"
-    ? item.contentLoaded
-    : Boolean(contentHtml.trim());
+  if (typeof item.contentAvailable !== "boolean" || typeof item.contentLoaded !== "boolean") {
+    return null;
+  }
   return {
     id,
     title,
-    type: typeof item.type === "string" && item.type.trim() ? item.type.trim() : "Uploaded policy",
-    approver: typeof item.approver === "string" && item.approver.trim() ? item.approver.trim() : "Pending review",
+    type,
+    approver,
     approvedAt: typeof item.approvedAt === "string" ? item.approvedAt : "",
     approvedBy: typeof item.approvedBy === "string" ? item.approvedBy : "",
-    reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
-      ? item.reviewFrequency.trim()
-      : "Not scheduled",
-    path: typeof item.path === "string" && item.path.trim() ? item.path.trim() : "Uploaded file",
-    folder: typeof item.folder === "string" && item.folder.trim() ? item.folder.trim() : "Uploaded",
+    reviewFrequency,
+    path,
+    folder,
     purpose: typeof item.purpose === "string" ? item.purpose : "",
     contentHtml,
-    contentAvailable,
-    contentLoaded,
+    contentAvailable: item.contentAvailable,
+    contentLoaded: item.contentLoaded,
     isUploaded: true,
     originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
     uploadedAt: typeof item.uploadedAt === "string" ? item.uploadedAt : "",
@@ -69,32 +82,24 @@ function normalizeMappingDocumentItem(item) {
     return null;
   }
   const id = typeof item.id === "string" ? item.id.trim() : "";
-  const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : id;
+  const title = typeof item.title === "string" ? item.title.trim() : "";
   if (!id || !title) {
     return null;
   }
   const contentHtml = typeof item.contentHtml === "string" ? item.contentHtml : "";
-  const contentAvailable = typeof item.contentAvailable === "boolean"
-    ? item.contentAvailable
-    : Boolean(contentHtml.trim());
-  const contentLoaded = typeof item.contentLoaded === "boolean"
-    ? item.contentLoaded
-    : Boolean(contentHtml.trim());
   return {
     id,
     title,
     type: typeof item.type === "string" ? item.type : "",
     owner: typeof item.owner === "string" ? item.owner : "",
     approver: typeof item.approver === "string" ? item.approver : "",
-    reviewFrequency: typeof item.reviewFrequency === "string" && item.reviewFrequency.trim()
-      ? item.reviewFrequency.trim()
-      : "Not scheduled",
+    reviewFrequency: typeof item.reviewFrequency === "string" ? item.reviewFrequency : "",
     path: typeof item.path === "string" ? item.path : "",
     folder: typeof item.folder === "string" ? item.folder : "",
     purpose: typeof item.purpose === "string" ? item.purpose : "",
     contentHtml,
-    contentAvailable,
-    contentLoaded,
+    contentAvailable: typeof item.contentAvailable === "boolean" ? item.contentAvailable : false,
+    contentLoaded: typeof item.contentLoaded === "boolean" ? item.contentLoaded : false,
     isUploaded: Boolean(item.isUploaded),
     originalFilename: typeof item.originalFilename === "string" ? item.originalFilename : "",
   };
@@ -106,10 +111,10 @@ function buildReviewStateMonthKey(itemId, monthIndex) {
     return "";
   }
   const parsedMonth = Number(monthIndex);
-  const normalizedMonth = Number.isInteger(parsedMonth) && parsedMonth >= 0 && parsedMonth <= 11
-    ? parsedMonth
-    : today.getMonth();
-  return `m${normalizedMonth}::${normalizedItemId}`;
+  if (!Number.isInteger(parsedMonth) || parsedMonth < 0 || parsedMonth > 11) {
+    throw new Error("Review state month index is invalid.");
+  }
+  return `m${parsedMonth}::${normalizedItemId}`;
 }
 
 function isMonthScopedReviewStateKey(value) {
@@ -126,18 +131,10 @@ function normalizeReviewStateMapByMonth(value) {
     if (!key) {
       return;
     }
-    const isChecked = Boolean(rawValue);
-    if (isMonthScopedReviewStateKey(key)) {
-      normalized[key] = isChecked;
-      return;
+    if (!isMonthScopedReviewStateKey(key)) {
+      throw new Error(`Review state key '${key}' is not month scoped.`);
     }
-    if (!isChecked) {
-      return;
-    }
-    const monthScopedKey = buildReviewStateMonthKey(key, today.getMonth());
-    if (monthScopedKey) {
-      normalized[monthScopedKey] = true;
-    }
+    normalized[key] = Boolean(rawValue);
   });
   return normalized;
 }
@@ -151,17 +148,16 @@ function normalizeReviewStateTimestampMap(value) {
   Object.entries(value).forEach(([rawKey, rawValue]) => {
     const key = String(rawKey || "").trim();
     const parsed = new Date(rawValue);
-    if (!key || Number.isNaN(parsed.getTime())) {
+    if (!key) {
       return;
     }
-    if (isMonthScopedReviewStateKey(key)) {
-      normalized[key] = parsed.toISOString();
-      return;
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`Review state timestamp for '${key}' is invalid.`);
     }
-    const monthScopedKey = buildReviewStateMonthKey(key, today.getMonth());
-    if (monthScopedKey) {
-      normalized[monthScopedKey] = parsed.toISOString();
+    if (!isMonthScopedReviewStateKey(key)) {
+      throw new Error(`Review state timestamp key '${key}' is not month scoped.`);
     }
+    normalized[key] = parsed.toISOString();
   });
   return normalized;
 }
@@ -176,19 +172,29 @@ function normalizeReviewAuditLogEntries(value) {
       if (!entry || typeof entry !== "object") {
         return null;
       }
+      if (
+        typeof entry.id !== "string"
+        || typeof entry.action !== "string"
+        || typeof entry.entityType !== "string"
+        || typeof entry.summary !== "string"
+        || typeof entry.occurredAt !== "string"
+        || !entry.actor
+        || typeof entry.actor !== "object"
+        || typeof entry.actor.username !== "string"
+      ) {
+        throw new Error("Review state audit log entry shape is invalid.");
+      }
       return {
-        id: typeof entry.id === "string" ? entry.id : "",
-        action: typeof entry.action === "string" && entry.action.trim() ? entry.action.trim() : "state_changed",
-        entityType: typeof entry.entityType === "string" && entry.entityType.trim() ? entry.entityType.trim() : "record",
+        id: entry.id.trim(),
+        action: entry.action.trim(),
+        entityType: entry.entityType.trim(),
         entityId: typeof entry.entityId === "string" ? entry.entityId.trim() : "",
-        summary: typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.",
-        occurredAt: typeof entry.occurredAt === "string" ? entry.occurredAt : "",
-        actor: entry.actor && typeof entry.actor === "object"
-          ? {
-              username: typeof entry.actor.username === "string" ? entry.actor.username.trim() : "",
-              displayName: typeof entry.actor.displayName === "string" ? entry.actor.displayName.trim() : "",
-            }
-          : {},
+        summary: entry.summary.trim(),
+        occurredAt: entry.occurredAt,
+        actor: {
+          username: entry.actor.username.trim(),
+          displayName: typeof entry.actor.displayName === "string" ? entry.actor.displayName.trim() : "",
+        },
         metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
       };
     })
@@ -204,7 +210,7 @@ function normalizeReviewStateValue(value) {
     activities: normalizeReviewStateMapByMonth(value.activities),
     checklist: normalizeReviewStateMapByMonth(value.checklist),
     completedAt: normalizeReviewStateTimestampMap(value.completedAt),
-    auditLog: normalizeReviewAuditLogEntries(value.auditLog || value.events),
+    auditLog: normalizeReviewAuditLogEntries(value.auditLog),
   };
 }
 
@@ -312,17 +318,23 @@ function normalizeChecklistItems(items) {
       }
       const id = typeof item.id === "string" ? item.id.trim() : "";
       const checklistItem = typeof item.item === "string" ? item.item.trim() : "";
+      const category = typeof item.category === "string" ? item.category.trim() : "";
+      const frequency = typeof item.frequency === "string" ? item.frequency.trim() : "";
+      const owner = typeof item.owner === "string" ? item.owner.trim() : "";
       if (!id || !checklistItem || seenIds.has(id)) {
+        return null;
+      }
+      if (!category || !frequency || !owner) {
         return null;
       }
       seenIds.add(id);
       return {
         id,
-        category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Custom",
+        category,
         item: checklistItem,
-        frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
+        frequency,
         startDate: normalizeChecklistStartDate(item.startDate),
-        owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
+        owner,
         createdAt: normalizeChecklistCreatedAt(item.createdAt),
       };
     })
@@ -341,63 +353,37 @@ function normalizeAssignableUsers(items) {
         return null;
       }
       const username = typeof item.username === "string" ? item.username.trim() : "";
+      const displayName = typeof item.displayName === "string" ? item.displayName.trim() : "";
       if (!username || seen.has(username)) {
         return null;
       }
+      if (!displayName) {
+        return null;
+      }
       seen.add(username);
-      const displayName = typeof item.displayName === "string" && item.displayName.trim()
-        ? item.displayName.trim()
-        : username;
       return { username, displayName };
     })
     .filter(Boolean)
     .sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true, sensitivity: "base" }));
 }
 
-function deriveAssignableUsers() {
-  const seen = new Set();
-  return state.riskRegister
-    .map((risk) => (risk && typeof risk.owner === "string" ? risk.owner.trim() : ""))
-    .filter((owner) => {
-      if (!owner || seen.has(owner)) {
-        return false;
-      }
-      seen.add(owner);
-      return true;
-    })
-    .map((owner) => ({ username: owner, displayName: owner }));
-}
-
 function normalizeDataPayload(payload) {
   if (!payload || typeof payload !== "object") {
-    return;
+    throw new Error("Mapping payload must be an object.");
   }
-
-  payload.generatedAt = typeof payload.generatedAt === "string" && payload.generatedAt.trim()
-    ? payload.generatedAt
-    : new Date().toISOString();
-  payload.sourceSnapshot = payload.sourceSnapshot && typeof payload.sourceSnapshot === "object"
-    ? payload.sourceSnapshot
-    : {};
-
-  const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
-  payload.summary = {
-    ...emptySummary(),
-    ...summary,
-    domainCounts: summary.domainCounts && typeof summary.domainCounts === "object" ? summary.domainCounts : {},
-    documentReviewFrequencies: summary.documentReviewFrequencies && typeof summary.documentReviewFrequencies === "object"
-      ? summary.documentReviewFrequencies
-      : {},
-    checklistFrequencies: summary.checklistFrequencies && typeof summary.checklistFrequencies === "object"
-      ? summary.checklistFrequencies
-      : {},
-  };
-
-  payload.controls = Array.isArray(payload.controls) ? payload.controls : [];
-  payload.documents = Array.isArray(payload.documents) ? payload.documents : [];
-  payload.activities = Array.isArray(payload.activities) ? payload.activities : [];
-  payload.checklist = Array.isArray(payload.checklist) ? payload.checklist : [];
-  payload.policyCoverage = Array.isArray(payload.policyCoverage) ? payload.policyCoverage : [];
+  if (typeof payload.generatedAt !== "string" || !payload.generatedAt.trim()) {
+    throw new Error("Mapping payload generatedAt is required.");
+  }
+  if (!payload.sourceSnapshot || typeof payload.sourceSnapshot !== "object") {
+    throw new Error("Mapping payload sourceSnapshot is required.");
+  }
+  if (!payload.summary || typeof payload.summary !== "object") {
+    throw new Error("Mapping payload summary is required.");
+  }
+  if (!Array.isArray(payload.controls) || !Array.isArray(payload.documents) || !Array.isArray(payload.activities)
+    || !Array.isArray(payload.checklist) || !Array.isArray(payload.policyCoverage)) {
+    throw new Error("Mapping payload arrays are required.");
+  }
 }
 
 function applyMappingPayload(payload) {
@@ -452,12 +438,8 @@ function refreshDocumentsIndex() {
 }
 
 async function loadRemoteState() {
-  try {
-    const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
-    applyRemoteState(payload);
-  } catch (error) {
-    console.error("Failed to load portal state from the API.", error);
-  }
+  const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
+  applyRemoteState(payload);
 }
 
 function applyRemoteState(payload) {
@@ -466,10 +448,7 @@ function applyRemoteState(payload) {
   }
 
   if (payload.mapping && typeof payload.mapping === "object") {
-    const remoteControls = Array.isArray(payload.mapping.controls) ? payload.mapping.controls : [];
-    if (remoteControls.length) {
-      applyMappingPayload(payload.mapping);
-    }
+    applyMappingPayload(payload.mapping);
   }
   if (Array.isArray(payload.uploadedDocuments)) {
     uploadedDocuments = payload.uploadedDocuments.map((item) => normalizeUploadedPolicyItem(item)).filter(Boolean);
@@ -482,10 +461,7 @@ function applyRemoteState(payload) {
     state.riskRegister = payload.riskRegister.map((item) => normalizeRiskRecord(item)).filter(Boolean);
   }
   if (Array.isArray(payload.assignableUsers) && typeof normalizeAssignableUsers === "function") {
-    const assignableUsers = normalizeAssignableUsers(payload.assignableUsers);
-    if (assignableUsers.length) {
-      state.assignableUsers = assignableUsers;
-    }
+    state.assignableUsers = normalizeAssignableUsers(payload.assignableUsers);
   }
   if (Array.isArray(payload.checklistItems)) {
     state.checklistItems = normalizeChecklistItems(payload.checklistItems);
@@ -556,14 +532,14 @@ async function runAsyncOperation(setStatus, messages, operation) {
     }
     return result;
   } catch (error) {
-    const fallbackErrorMessage = messages && typeof messages.error === "function"
+    const configuredErrorMessage = messages && typeof messages.error === "function"
       ? messages.error(error)
       : messages && Object.prototype.hasOwnProperty.call(messages, "error")
         ? messages.error
         : "";
     const detail = error instanceof Error && error.message
       ? error.message
-      : fallbackErrorMessage || "Operation failed.";
+      : configuredErrorMessage || "Operation failed.";
     if (typeof setStatus === "function") {
       setStatus(detail, "error");
     }

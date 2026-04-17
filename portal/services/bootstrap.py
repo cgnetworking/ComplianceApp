@@ -116,12 +116,14 @@ def build_portal_audit_entry(
     metadata: dict[str, object] | None = None,
     occurred_at: datetime | None = None,
 ) -> dict[str, object]:
-    normalized_action = normalize_string(action, "state_changed").replace(" ", "_").lower()
-    normalized_entity_type = normalize_string(entity_type, "record").replace(" ", "_").lower()
+    normalized_action = normalize_string(action).replace(" ", "_").lower()
+    normalized_entity_type = normalize_string(entity_type).replace(" ", "_").lower()
     normalized_entity_id = normalize_string(entity_id)
-    normalized_summary = normalize_string(summary, "State updated.")
-    normalized_actor_username = normalize_string(actor_username, "system")
-    normalized_actor_display_name = normalize_string(actor_display_name, normalized_actor_username)
+    normalized_summary = normalize_string(summary)
+    normalized_actor_username = normalize_string(actor_username)
+    normalized_actor_display_name = normalize_string(actor_display_name)
+    if not normalized_action or not normalized_entity_type or not normalized_summary or not normalized_actor_username:
+        raise ValidationError("Audit entries require action, entityType, summary, and actor_username.")
     timestamp = occurred_at or timezone.now()
     if timezone.is_naive(timestamp):
         timestamp = timezone.make_aware(timestamp, timezone=dt_timezone.utc)
@@ -206,10 +208,12 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
     if not item_text:
         raise ValidationError("Checklist item text is required.")
 
-    category = normalize_string(payload.get("category"), "Custom")
-    frequency = normalize_string(payload.get("frequency"), "Annual")
+    category = normalize_string(payload.get("category"))
+    frequency = normalize_string(payload.get("frequency"))
     start_date = parse_optional_iso_date(payload.get("startDate"))
-    owner = normalize_string(payload.get("owner"), "Shared portal")
+    owner = normalize_string(payload.get("owner"))
+    if not category or not frequency or not owner:
+        raise ValidationError("Checklist items require category, frequency, and owner.")
 
     for _ in range(5):
         external_id = f"checklist-{uuid.uuid4().hex[:12]}"

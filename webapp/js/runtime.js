@@ -1,5 +1,4 @@
-  const data = {};
-  normalizeDataPayload(data);
+  const data = createEmptyMappingPayload();
 
   const monthNames = [
     "January",
@@ -188,20 +187,11 @@
   }
 
   async function loadAssignableUsers() {
-    const existingAssignableUsers = Array.isArray(state.assignableUsers) ? state.assignableUsers : [];
-    state.assignableUsers = existingAssignableUsers.length ? existingAssignableUsers : deriveAssignableUsers();
-    if (existingAssignableUsers.length) {
+    if (page !== "risks") {
       return;
     }
-
-    try {
-      const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
-      const assignableUsers = normalizeAssignableUsers(payload && payload.assignableUsers);
-      if (assignableUsers.length) {
-        state.assignableUsers = assignableUsers;
-      }
-    } catch (error) {
-      // Keep owners derived from the current risk register if the API cannot provide them.
+    if (!Array.isArray(state.assignableUsers) || !state.assignableUsers.length) {
+      throw new Error("Assignable users were not loaded from the state API.");
     }
   }
 

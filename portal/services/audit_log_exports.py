@@ -3,11 +3,11 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
 
 from django.utils import timezone
 
-from .common import ValidationError, get_state_payload, normalize_review_state, parse_iso_datetime
+from .common import get_state_payload, normalize_review_state, parse_iso_datetime
 
 
 AUDIT_LOG_EXPORT_HEADERS = (
@@ -21,7 +21,6 @@ AUDIT_LOG_EXPORT_HEADERS = (
     "actor_display_name",
     "metadata_json",
 )
-_EPOCH_UTC = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
@@ -33,10 +32,7 @@ def _escape_csv_formula(value: object) -> str:
 
 
 def _parse_occurred_at(value: object) -> datetime:
-    try:
-        return parse_iso_datetime(value, fallback=_EPOCH_UTC)
-    except ValidationError:
-        return _EPOCH_UTC
+    return parse_iso_datetime(value)
 
 
 def _normalize_audit_log_row(value: object) -> dict[str, object] | None:

@@ -140,7 +140,7 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
 
         raw_text = decode_upload(
             uploaded_file,
-            max_bytes=int(getattr(settings, "POLICY_UPLOAD_MAX_FILE_BYTES", 2097152)),
+            max_bytes=int(settings.POLICY_UPLOAD_MAX_FILE_BYTES),
         )
         content_html = sanitize_uploaded_html(raw_text) if extension in {"html", "htm"} else markdown_to_html(raw_text)
         policy = UploadedPolicy.objects.create(
@@ -248,7 +248,7 @@ def approve_uploaded_policy(
             build_policy_approval_audit_entry(
                 policy,
                 actor_username=normalized_actor_username,
-                actor_display_name=normalize_string(actor_display_name, normalized_actor_username),
+                actor_display_name=normalize_string(actor_display_name),
                 occurred_at=approval_time,
             )
         ]
@@ -264,7 +264,7 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
         raw_text = (
             decode_upload(
                 uploaded_file,
-                max_bytes=int(getattr(settings, "VENDOR_UPLOAD_MAX_FILE_BYTES", 10485760)),
+                max_bytes=int(settings.VENDOR_UPLOAD_MAX_FILE_BYTES),
             ).replace("\x00", "").strip()
             if is_text_like_file(uploaded_file, extension)
             else ""

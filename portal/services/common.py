@@ -193,19 +193,21 @@ def default_mapping_payload() -> dict[str, object]:
     }
 
 
-def coerce_non_negative_int(value: object, default: int = 0) -> int:
+def coerce_non_negative_int(value: object) -> int:
     try:
         normalized = int(value)
     except (TypeError, ValueError):
-        return default
-    return normalized if normalized >= 0 else default
+        raise ValidationError("Expected a non-negative integer value.") from None
+    if normalized < 0:
+        raise ValidationError("Expected a non-negative integer value.")
+    return normalized
 
 
-def normalize_string(value: object, fallback: str = "") -> str:
+def normalize_string(value: object) -> str:
     if value is None:
-        return fallback
+        return ""
     normalized = str(value).strip()
-    return normalized if normalized else fallback
+    return normalized
 
 
 def normalize_iso_date_string(value: object) -> str:
@@ -214,8 +216,8 @@ def normalize_iso_date_string(value: object) -> str:
         return ""
     try:
         return date.fromisoformat(normalized).isoformat()
-    except ValueError:
-        return ""
+    except ValueError as error:
+        raise ValidationError("Invalid ISO date value.") from error
 
 
 def normalize_string_list(value: object) -> list[str]:
@@ -225,22 +227,27 @@ def normalize_string_list(value: object) -> list[str]:
 
 
 def normalize_mapping_timestamp(value: object) -> str:
-    if isinstance(value, str):
-        raw_value = value.strip().replace("Z", "+00:00")
-        if raw_value:
-            try:
-                parsed = datetime.fromisoformat(raw_value)
-                if timezone.is_naive(parsed):
-                    parsed = timezone.make_aware(parsed, dt_timezone.utc)
-                return parsed.isoformat()
-            except ValueError:
-                pass
-    return timezone.now().isoformat()
+    if value is None:
+        return timezone.now().isoformat()
+    if not isinstance(value, str):
+        raise ValidationError("Mapping generatedAt must be a timestamp string.")
+    raw_value = value.strip().replace("Z", "+00:00")
+    if not raw_value:
+        raise ValidationError("Mapping generatedAt is required.")
+    try:
+        parsed = datetime.fromisoformat(raw_value)
+    except ValueError as error:
+        raise ValidationError("Mapping generatedAt must be a valid timestamp.") from error
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, dt_timezone.utc)
+    return parsed.isoformat()
 
 
 def normalize_mapping_source_snapshot(value: object) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if value is None:
         value = {}
+    elif not isinstance(value, dict):
+        raise ValidationError("Mapping sourceSnapshot must be an object.")
     return {
         "controlRegister": normalize_string(value.get("controlRegister")),
         "reviewSchedule": normalize_string(value.get("reviewSchedule")),
@@ -248,35 +255,25 @@ def normalize_mapping_source_snapshot(value: object) -> dict[str, object]:
     }
 
 
-def infer_control_domain(control_id: str, domain: str) -> str:
-    if domain:
-        return domain
-
-    match = re.match(r"^\s*(?:A\.)?\s*(\d+)\b", control_id, flags=re.IGNORECASE)
-    if not match:
-        return ""
-    return ANNEX_A_CONTROL_DOMAIN_BY_FAMILY.get(match.group(1), "")
-
-
 def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
-        return []
+        raise ValidationError("Mapping controls must be a list.")
 
     controls: list[dict[str, object]] = []
     for item in value:
         if not isinstance(item, dict):
-            continue
+            raise ValidationError("Each mapping control must be an object.")
 
         control_id = normalize_string(item.get("id"))
         if not control_id:
-            continue
+            raise ValidationError("Each mapping control requires an id.")
 
         document_ids = normalize_string_list(item.get("documentIds"))
-        policy_document_ids = normalize_string_list(item.get("policyDocumentIds")) or document_ids
+        policy_document_ids = normalize_string_list(item.get("policyDocumentIds"))
         preferred_document_id = normalize_string(item.get("preferredDocumentId"))
-        if not preferred_document_id and policy_document_ids:
-            preferred_document_id = policy_document_ids[0]
-        domain = infer_control_domain(control_id, normalize_string(item.get("domain")))
+        if preferred_document_id and preferred_document_id not in policy_document_ids:
+            raise ValidationError("Mapping preferredDocumentId must be included in policyDocumentIds.")
+        domain = normalize_string(item.get("domain"))
 
         controls.append(
             {
@@ -285,7 +282,7 @@ def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
                 "domain": domain,
                 "applicability": normalize_string(item.get("applicability")),
                 "owner": normalize_string(item.get("owner")),
-                "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Annual"),
+                "reviewFrequency": normalize_string(item.get("reviewFrequency")),
                 "documentIds": document_ids,
                 "policyDocumentIds": policy_document_ids,
                 "preferredDocumentId": preferred_document_id,
@@ -296,18 +293,20 @@ def normalize_mapping_controls(value: object) -> list[dict[str, object]]:
 
 def normalize_mapping_documents(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
-        return []
+        raise ValidationError("Mapping documents must be a list.")
 
     documents: list[dict[str, object]] = []
     for item in value:
         if not isinstance(item, dict):
-            continue
+            raise ValidationError("Each mapping document must be an object.")
 
         document_id = normalize_string(item.get("id"))
         if not document_id:
-            continue
+            raise ValidationError("Each mapping document requires an id.")
 
-        title = normalize_string(item.get("title")) or document_id
+        title = normalize_string(item.get("title"))
+        if not title:
+            raise ValidationError(f"Mapping document {document_id} requires a title.")
         documents.append(
             {
                 "id": document_id,
@@ -315,7 +314,7 @@ def normalize_mapping_documents(value: object) -> list[dict[str, object]]:
                 "type": normalize_string(item.get("type")),
                 "owner": normalize_string(item.get("owner")),
                 "approver": normalize_string(item.get("approver")),
-                "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Not scheduled"),
+                "reviewFrequency": normalize_string(item.get("reviewFrequency")),
                 "path": normalize_string(item.get("path")),
                 "folder": normalize_string(item.get("folder")),
                 "purpose": normalize_string(item.get("purpose")),
@@ -329,16 +328,16 @@ def normalize_mapping_documents(value: object) -> list[dict[str, object]]:
 
 def normalize_mapping_activities(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
-        return []
+        raise ValidationError("Mapping activities must be a list.")
 
     activities: list[dict[str, object]] = []
     for item in value:
         if not isinstance(item, dict):
-            continue
+            raise ValidationError("Each mapping activity must be an object.")
 
         activity_id = normalize_string(item.get("id"))
         if not activity_id:
-            continue
+            raise ValidationError("Each mapping activity requires an id.")
 
         activities.append(
             {
@@ -356,16 +355,16 @@ def normalize_mapping_activities(value: object) -> list[dict[str, object]]:
 
 def normalize_mapping_checklist(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
-        return []
+        raise ValidationError("Mapping checklist must be a list.")
 
     checklist_items: list[dict[str, object]] = []
     for item in value:
         if not isinstance(item, dict):
-            continue
+            raise ValidationError("Each mapping checklist item must be an object.")
 
         checklist_id = normalize_string(item.get("id"))
         if not checklist_id:
-            continue
+            raise ValidationError("Each mapping checklist item requires an id.")
 
         checklist_items.append(
             {
@@ -382,24 +381,28 @@ def normalize_mapping_checklist(value: object) -> list[dict[str, object]]:
 
 def normalize_mapping_policy_coverage(value: object, documents: list[dict[str, object]]) -> list[dict[str, object]]:
     if not isinstance(value, list):
-        return []
+        raise ValidationError("Mapping policyCoverage must be a list.")
 
     titles = {item["id"]: item["title"] for item in documents if isinstance(item.get("id"), str)}
     coverage: list[dict[str, object]] = []
     for item in value:
         if not isinstance(item, dict):
-            continue
+            raise ValidationError("Each mapping policy coverage entry must be an object.")
 
         document_id = normalize_string(item.get("id"))
         if not document_id:
-            continue
+            raise ValidationError("Each mapping policy coverage entry requires an id.")
+
+        title = normalize_string(item.get("title"))
+        if not title:
+            raise ValidationError(f"Policy coverage entry {document_id} requires a title.")
 
         coverage.append(
             {
                 "id": document_id,
-                "title": normalize_string(item.get("title")) or titles.get(document_id, document_id),
+                "title": title,
                 "controlCount": coerce_non_negative_int(item.get("controlCount")),
-                "reviewFrequency": normalize_string(item.get("reviewFrequency"), "Not scheduled"),
+                "reviewFrequency": normalize_string(item.get("reviewFrequency")),
             }
         )
     return coverage
@@ -490,13 +493,15 @@ def normalize_mapping_payload(payload: object) -> dict[str, object]:
     elif not isinstance(payload, dict):
         payload = {}
 
-    controls = normalize_mapping_controls(payload.get("controls"))
-    documents = normalize_mapping_documents(payload.get("documents"))
-    activities = normalize_mapping_activities(payload.get("activities"))
-    checklist_items = normalize_mapping_checklist(payload.get("checklist"))
-    policy_coverage = normalize_mapping_policy_coverage(payload.get("policyCoverage"), documents)
-    if not policy_coverage:
+    controls = normalize_mapping_controls(payload.get("controls", []))
+    documents = normalize_mapping_documents(payload.get("documents", []))
+    activities = normalize_mapping_activities(payload.get("activities", []))
+    checklist_items = normalize_mapping_checklist(payload.get("checklist", []))
+    policy_coverage_source = payload.get("policyCoverage")
+    if policy_coverage_source is None:
         policy_coverage = build_mapping_policy_coverage(controls, documents)
+    else:
+        policy_coverage = normalize_mapping_policy_coverage(policy_coverage_source, documents)
 
     normalized_payload = default_mapping_payload()
     normalized_payload.update(
@@ -725,9 +730,9 @@ def parse_optional_iso_date(value: object) -> date | None:
     return parse_iso_date(value)
 
 
-def parse_iso_datetime(value: object, fallback: datetime) -> datetime:
+def parse_iso_datetime(value: object) -> datetime:
     if not value:
-        return fallback
+        raise ValidationError("Timestamp is required.")
     raw_value = str(value).replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(raw_value)
@@ -747,13 +752,10 @@ def normalize_review_state_timestamp_map(value: object) -> dict[str, str]:
         key = str(raw_key).strip()
         if not key:
             continue
-        raw_timestamp = str(raw_value or "").strip()
+        raw_timestamp = normalize_string(raw_value)
         if not raw_timestamp:
             continue
-        try:
-            normalized[key] = parse_iso_datetime(raw_timestamp, fallback=timezone.now()).isoformat()
-        except ValidationError:
-            continue
+        normalized[key] = parse_iso_datetime(raw_timestamp).isoformat()
     return normalized
 
 
@@ -777,26 +779,21 @@ def normalize_review_state_audit_entry(value: object) -> dict[str, object] | Non
     if not isinstance(value, dict):
         return None
 
-    action = normalize_string(value.get("action"), "state_changed")
-    entity_type = normalize_string(value.get("entityType"), "record")
+    audit_id = normalize_string(value.get("id"))
+    action = normalize_string(value.get("action"))
+    entity_type = normalize_string(value.get("entityType"))
     entity_id = normalize_string(value.get("entityId"))
-    summary = normalize_string(value.get("summary"), "State updated.")
-
-    occurred_at_raw = value.get("occurredAt")
-    try:
-        occurred_at = parse_iso_datetime(occurred_at_raw, fallback=timezone.now()).isoformat()
-    except ValidationError:
-        occurred_at = timezone.now().isoformat()
+    summary = normalize_string(value.get("summary"))
+    occurred_at = parse_iso_datetime(value.get("occurredAt")).isoformat()
 
     actor = value.get("actor") if isinstance(value.get("actor"), dict) else {}
-    username = normalize_string(actor.get("username"), "system")
-    display_name = normalize_string(actor.get("displayName"), username)
-
-    fallback_seed = f"{action}|{entity_type}|{entity_id}|{occurred_at}"
-    fallback_id = f"audit-{uuid.uuid5(uuid.NAMESPACE_URL, fallback_seed).hex[:12]}"
+    username = normalize_string(actor.get("username"))
+    display_name = normalize_string(actor.get("displayName"))
+    if not audit_id or not action or not entity_type or not summary or not username:
+        raise ValidationError("Audit log entries require id, action, entityType, summary, and actor.username.")
 
     return {
-        "id": normalize_string(value.get("id"), fallback_id),
+        "id": audit_id,
         "action": action,
         "entityType": entity_type,
         "entityId": entity_id,
@@ -870,8 +867,7 @@ def normalize_review_state(payload: object) -> dict[str, object]:
     activities = normalize_review_state_boolean_map(payload.get("activities"))
     checklist = normalize_review_state_boolean_map(payload.get("checklist"))
     completed_at = normalize_review_state_timestamp_map(payload.get("completedAt"))
-    audit_log_source = payload.get("auditLog") if isinstance(payload.get("auditLog"), list) else payload.get("events")
-    audit_log = normalize_review_state_audit_log(audit_log_source)
+    audit_log = normalize_review_state_audit_log(payload.get("auditLog"))
 
     return {
         "activities": activities,
@@ -889,11 +885,10 @@ def normalize_control_state(payload: object) -> dict[str, object]:
     for key, value in payload.items():
         if not isinstance(key, str) or not isinstance(value, dict):
             continue
-        excluded = bool(value.get("excluded"))
-        reason = str(value.get("reason") or "")
-        raw_applicability = str(value.get("applicability") or "").strip()
+        reason = normalize_string(value.get("reason"))
+        raw_applicability = normalize_string(value.get("applicability"))
         applicability = raw_applicability if raw_applicability in ALLOWED_CONTROL_APPLICABILITY else ""
-        review_frequency = str(value.get("reviewFrequency") or "").strip()
+        review_frequency = normalize_string(value.get("reviewFrequency"))
         owner = normalize_string(value.get("owner"))
         has_policy_document_override = isinstance(value.get("policyDocumentIds"), list)
         policy_document_ids: list[str] = []
@@ -908,9 +903,11 @@ def normalize_control_state(payload: object) -> dict[str, object]:
         preferred_document_id = str(value.get("preferredDocumentId") or "").strip()
         if preferred_document_id and has_policy_document_override and preferred_document_id not in policy_document_ids:
             preferred_document_id = ""
+        if reason and applicability != "Excluded":
+            raise ValidationError("Control exclusion reason requires applicability 'Excluded'.")
 
-        if excluded or reason or applicability or review_frequency or owner or has_policy_document_override or preferred_document_id:
-            entry: dict[str, object] = {"excluded": excluded, "reason": reason}
+        if reason or applicability or review_frequency or owner or has_policy_document_override or preferred_document_id:
+            entry: dict[str, object] = {"reason": reason}
             if applicability:
                 entry["applicability"] = applicability
             if review_frequency:
@@ -941,63 +938,6 @@ def normalize_risk_score(value: object) -> int:
     return score if 1 <= score <= 25 else 0
 
 
-def risk_factors_from_legacy_score(score: int) -> tuple[int, int]:
-    if not score:
-        return 0, 0
-    if score <= 5:
-        return score, score
-    return closest_risk_factor_pair(score)
-
-
-def closest_risk_factor_pair(score: int) -> tuple[int, int]:
-    target = min(max(score, 1), 25)
-    candidates: list[tuple[int, int, int, int, int, int]] = []
-    for probability in range(1, 6):
-        for impact in range(1, 6):
-            product = probability * impact
-            if product < target:
-                continue
-            candidates.append(
-                (
-                    product - target,
-                    abs(probability - impact),
-                    -product,
-                    -max(probability, impact),
-                    probability,
-                    impact,
-                )
-            )
-    if not candidates:
-        return 5, 5
-    best = min(candidates)
-    return best[4], best[5]
-
-
-def infer_missing_risk_factor(known_factor: int, score: int, fallback: int) -> int:
-    if known_factor and score and score % known_factor == 0:
-        derived = score // known_factor
-        if 1 <= derived <= 5:
-            return derived
-    return fallback if 1 <= fallback <= 5 else 0
-
-
-def resolve_risk_factors(probability: int, impact: int, legacy_score: int) -> tuple[int, int]:
-    if probability and impact:
-        return probability, impact
-    if not legacy_score:
-        return probability, impact
-
-    fallback_probability, fallback_impact = risk_factors_from_legacy_score(legacy_score)
-    if probability and not impact:
-        impact = infer_missing_risk_factor(probability, legacy_score, fallback_impact)
-    elif impact and not probability:
-        probability = infer_missing_risk_factor(impact, legacy_score, fallback_probability)
-    else:
-        probability = fallback_probability if not probability else probability
-        impact = fallback_impact if not impact else impact
-    return probability, impact
-
-
 def normalize_risk_record(item: object) -> dict[str, object]:
     if not isinstance(item, dict):
         raise ValidationError("Each risk record must be an object.")
@@ -1007,16 +947,19 @@ def normalize_risk_record(item: object) -> dict[str, object]:
     owner = str(item.get("owner") or "").strip()
     probability = normalize_risk_factor(item.get("probability"))
     impact = normalize_risk_factor(item.get("impact"))
-    legacy_score = normalize_risk_score(item.get("initialRiskLevel"))
-    probability, impact = resolve_risk_factors(probability, impact, legacy_score)
+    stated_initial_risk_level = normalize_risk_score(item.get("initialRiskLevel"))
     initial_risk_level = probability * impact
     raised_date = parse_iso_date(item.get("date"))
     closed_date = parse_optional_iso_date(item.get("closedDate"))
-    created_at = parse_iso_datetime(item.get("createdAt"), fallback=timezone.now())
-    updated_at = parse_iso_datetime(item.get("updatedAt"), fallback=timezone.now())
+    created_at = parse_iso_datetime(item.get("createdAt"))
+    updated_at = parse_iso_datetime(item.get("updatedAt"))
 
-    if not external_id or not risk_text or not owner or not probability or not impact or not raised_date:
-        raise ValidationError("Each risk requires an id, description, owner, probability, impact, and date.")
+    if not external_id or not risk_text or not owner or not probability or not impact:
+        raise ValidationError(
+            "Each risk requires an id, description, owner, probability, impact, createdAt, updatedAt, and date."
+        )
+    if stated_initial_risk_level and stated_initial_risk_level != initial_risk_level:
+        raise ValidationError("Risk initialRiskLevel must equal probability multiplied by impact.")
     if closed_date and closed_date < raised_date:
         raise ValidationError("Risk closed date cannot be earlier than the raised date.")
 
@@ -1072,7 +1015,7 @@ def read_upload_bytes(uploaded_file: UploadedFile, *, max_bytes: int | None = No
     uploaded_file.seek(0)
     try:
         for chunk in uploaded_file.chunks():
-            chunk_bytes = chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8", errors="replace")
+            chunk_bytes = chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8")
             bytes_read += len(chunk_bytes)
             if max_bytes is not None and max_bytes > 0 and bytes_read > max_bytes:
                 raise ValidationError(
@@ -1098,16 +1041,16 @@ def validate_uploaded_file_type_and_eicar_signature(
     payload = read_upload_bytes(uploaded_file, max_bytes=max_bytes)
     if expect_text and b"\x00" in payload:
         raise ValidationError(f"{uploaded_file.name} appears to be binary data, but a text file was expected.")
-    if bool(getattr(settings, "UPLOAD_EICAR_SIGNATURE_CHECK_ENABLED", True)) and EICAR_SIGNATURE in payload.upper():
+    if bool(settings.UPLOAD_EICAR_SIGNATURE_CHECK_ENABLED) and EICAR_SIGNATURE in payload.upper():
         raise ValidationError(f"{uploaded_file.name} matched the blocked EICAR test signature.")
 
 
 def validate_policy_upload_files(files: list[UploadedFile]) -> None:
-    max_files = int(getattr(settings, "POLICY_UPLOAD_MAX_FILES", 20))
+    max_files = int(settings.POLICY_UPLOAD_MAX_FILES)
     if len(files) > max_files:
         raise ValidationError(f"Upload up to {max_files} policy file(s) at a time.")
 
-    max_bytes = int(getattr(settings, "POLICY_UPLOAD_MAX_FILE_BYTES", 2097152))
+    max_bytes = int(settings.POLICY_UPLOAD_MAX_FILE_BYTES)
     for uploaded_file in files:
         extension = file_extension(uploaded_file.name)
         if extension not in SUPPORTED_POLICY_EXTENSIONS:
@@ -1121,17 +1064,17 @@ def validate_mapping_upload_file(file_obj: UploadedFile) -> None:
         raise ValidationError("Upload a JSON or CSV mapping file (.json, .csv).")
     validate_uploaded_file_type_and_eicar_signature(
         file_obj,
-        max_bytes=int(getattr(settings, "MAPPING_UPLOAD_MAX_FILE_BYTES", 5242880)),
+        max_bytes=int(settings.MAPPING_UPLOAD_MAX_FILE_BYTES),
         expect_text=True,
     )
 
 
 def validate_vendor_upload_files(files: list[UploadedFile]) -> None:
-    max_files = int(getattr(settings, "VENDOR_UPLOAD_MAX_FILES", 25))
+    max_files = int(settings.VENDOR_UPLOAD_MAX_FILES)
     if len(files) > max_files:
         raise ValidationError(f"Upload up to {max_files} vendor response file(s) at a time.")
 
-    max_bytes = int(getattr(settings, "VENDOR_UPLOAD_MAX_FILE_BYTES", 10485760))
+    max_bytes = int(settings.VENDOR_UPLOAD_MAX_FILE_BYTES)
     allowed_extensions = ", ".join(sorted(SUPPORTED_VENDOR_EXTENSIONS))
     for uploaded_file in files:
         extension = file_extension(uploaded_file.name)
@@ -1150,8 +1093,8 @@ def decode_upload(uploaded_file: UploadedFile, *, max_bytes: int | None = None) 
     payload = read_upload_bytes(uploaded_file, max_bytes=max_bytes)
     try:
         return payload.decode("utf-8")
-    except UnicodeDecodeError:
-        return payload.decode("utf-8", errors="replace")
+    except UnicodeDecodeError as error:
+        raise ValidationError(f"{uploaded_file.name} must be valid UTF-8 text.") from error
 
 
 def inline_markup(text: str) -> str:
@@ -1331,7 +1274,7 @@ def infer_vendor_name(file_name: str, raw_text: str, extension: str) -> str:
     cleaned = re.sub(r"\b20\d{2}[-_ ]?\d{2}[-_ ]?\d{2}\b", " ", cleaned)
     cleaned = re.sub(r"\b\d{8}\b", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", cleaned)).strip()
-    return cleaned or derive_display_name(file_name) or "Unknown vendor"
+    return cleaned
 
 
 def find_vendor_name_in_json(raw_text: str) -> str:
@@ -1411,7 +1354,3 @@ def find_vendor_name_in_csv(raw_text: str) -> str:
         return rows[0][1].strip()
 
     return ""
-
-
-def derive_display_name(file_name: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", re.sub(r"\.[^.]+$", "", file_name))).strip()

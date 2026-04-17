@@ -70,11 +70,11 @@ def assessment_staff_api_required(view_func):
 
 
 def assessment_audit_actor(request: HttpRequest) -> tuple[str, str]:
-    username = request.user.get_username() if request.user.is_authenticated else ""
+    username = request.user.get_username().strip() if request.user.is_authenticated else ""
+    if not username:
+        raise AssessmentValidationError("Authenticated assessment actions require a username.")
     display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    normalized_username = username or "system"
-    normalized_display_name = display_name or username or "System"
-    return normalized_username, normalized_display_name
+    return username, display_name
 
 
 @login_required(login_url="portal-login")
@@ -94,7 +94,9 @@ def assessments_collection(request: HttpRequest) -> JsonResponse:
     if error_response is not None:
         return error_response
 
-    payload = body.get("profile") if isinstance(body, dict) and "profile" in body else body
+    if not isinstance(body, dict) or "profile" not in body:
+        return JsonResponse({"detail": "Profile payload is required."}, status=400)
+    payload = body.get("profile")
     try:
         profile = save_zero_trust_profile(payload)
     except AssessmentValidationError as error:
@@ -115,16 +117,11 @@ def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResp
 
         actor_username, actor_display_name = assessment_audit_actor(request)
         deleted_profile_id = str(deleted_profile.get("id") or "")
-        deleted_profile_name = (
-            str(deleted_profile.get("displayName") or "").strip()
-            or str(deleted_profile.get("tenantId") or "").strip()
-            or deleted_profile_id
-        )
         append_portal_audit_entry(
             action="delete_assessment_profile",
             entity_type="assessment_profile",
             entity_id=deleted_profile_id,
-            summary=f"Deleted assessment profile {deleted_profile_name}.",
+            summary=f"Deleted assessment profile {deleted_profile_id}.",
             actor_username=actor_username,
             actor_display_name=actor_display_name,
             metadata={
@@ -186,7 +183,7 @@ def assessment_profile_certificate_download(request: HttpRequest, profile_id: st
 @assessment_staff_api_required
 @require_http_methods(["POST"])
 def assessment_profile_runs(request: HttpRequest, profile_id: str) -> JsonResponse:
-    actor_username = request.user.get_username() if request.user.is_authenticated else ""
+    actor_username = request.user.get_username().strip() if request.user.is_authenticated else ""
     try:
         run = create_zero_trust_run(profile_id, actor_username=actor_username)
     except AssessmentValidationError as error:

@@ -21,7 +21,7 @@ def replace_mapping_payload(file: UploadedFile) -> dict[str, object]:
         raise ValidationError("Upload a JSON or CSV mapping file (.json, .csv).")
 
     parsed_payload = parse_mapping_text(
-        decode_upload(file, max_bytes=int(getattr(settings, "MAPPING_UPLOAD_MAX_FILE_BYTES", 5242880))),
+        decode_upload(file, max_bytes=int(settings.MAPPING_UPLOAD_MAX_FILE_BYTES)),
         extension,
     )
     normalized_payload = normalize_mapping_payload(parsed_payload)

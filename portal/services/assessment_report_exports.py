@@ -20,12 +20,14 @@ def normalize_export_string(value: object) -> str:
     return str(value).strip()
 
 
-def safe_filename_component(value: object, fallback: str) -> str:
+def safe_filename_component(value: object) -> str:
     normalized = normalize_export_string(value)
     if not normalized:
-        return fallback
+        raise AssessmentValidationError("Assessment export file name component is required.")
     sanitized = SAFE_FILENAME_RE.sub("-", normalized).strip("-.")
-    return sanitized or fallback
+    if not sanitized:
+        raise AssessmentValidationError("Assessment export file name component is invalid.")
+    return sanitized
 
 
 def safe_zip_relative_path(value: object) -> str:
@@ -92,8 +94,8 @@ def archive_manifest_bytes(payload: dict[str, object]) -> bytes:
 
 
 def run_archive_folder(run: ZeroTrustAssessmentRun, *, index: int | None = None) -> str:
-    tenant_token = safe_filename_component(run.profile.display_name or run.profile.tenant_id, "tenant")
-    run_token = safe_filename_component(run.external_id, "run")
+    tenant_token = safe_filename_component(run.profile.external_id)
+    run_token = safe_filename_component(run.external_id)
     if index is None:
         return f"{tenant_token}-{run_token}"
     return f"{index:03d}-{tenant_token}-{run_token}"
@@ -103,7 +105,7 @@ def run_manifest(run: ZeroTrustAssessmentRun, artifacts: list[ZeroTrustAssessmen
     return {
         "runId": run.external_id,
         "profileId": run.profile.external_id,
-        "profileDisplayName": run.profile.display_name or run.profile.tenant_id,
+        "profileDisplayName": run.profile.display_name,
         "tenantId": run.profile.tenant_id,
         "status": run.status,
         "statusMessage": run.status_message,
@@ -138,7 +140,7 @@ def write_run_artifacts(
 def create_assessment_run_report_export(run_id: str) -> tuple[str, bytes]:
     run = get_zero_trust_run(run_id)
     folder_name = run_archive_folder(run)
-    file_name = f"assessment-report-{safe_filename_component(run.external_id, 'run')}.zip"
+    file_name = f"assessment-report-{safe_filename_component(run.external_id)}.zip"
 
     used_paths: set[str] = set()
     output = BytesIO()
