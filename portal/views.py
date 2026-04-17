@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import time
@@ -45,7 +46,7 @@ from .services import (
     validate_policy_upload_files,
     validate_vendor_upload_files,
 )
-from .services.bootstrap import append_portal_audit_entry
+from .services.bootstrap import append_portal_audit_entry, review_state_payload_for_viewer
 
 
 def safe_next_url(request: HttpRequest) -> str:
@@ -109,6 +110,30 @@ def policy_reader_api_access(*, allow_policy_reader: bool):
     return decorator
 
 
+def staff_page_required(view_func):
+    @wraps(view_func)
+    def wrapped(request: HttpRequest, *args, **kwargs):
+        if not request.user.is_staff:
+            return HttpResponse("Forbidden", status=403)
+        return view_func(request, *args, **kwargs)
+
+    return wrapped
+
+
+def staff_api_forbidden_response(detail: str = "Only staff users can access this resource.") -> JsonResponse:
+    return JsonResponse({"detail": detail}, status=403)
+
+
+def staff_api_access(view_func):
+    @wraps(view_func)
+    def wrapped(request: HttpRequest, *args, **kwargs):
+        if not request.user.is_staff:
+            return staff_api_forbidden_response()
+        return view_func(request, *args, **kwargs)
+
+    return wrapped
+
+
 def current_user_context(request: HttpRequest) -> dict[str, object]:
     username = request.user.get_username() if request.user.is_authenticated else ""
     is_policy_reader = user_is_policy_reader(request.user)
@@ -127,11 +152,28 @@ def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
     return normalized_username, normalized_display_name
 
 
+def normalized_ip_address(value: object) -> str:
+    normalized = str(value or "").split(",", 1)[0].strip()
+    if not normalized:
+        return ""
+    try:
+        return ipaddress.ip_address(normalized).compressed
+    except ValueError:
+        return ""
+
+
 def request_client_ip(request: HttpRequest) -> str:
-    forwarded_for = str(request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
-    if forwarded_for:
-        return forwarded_for
-    return str(request.META.get("REMOTE_ADDR") or "").strip() or "unknown"
+    remote_addr = normalized_ip_address(request.META.get("REMOTE_ADDR"))
+    trusted_proxy_ips = {
+        normalized_ip_address(value)
+        for value in getattr(settings, "TRUSTED_PROXY_IPS", [])
+        if normalized_ip_address(value)
+    }
+    if remote_addr and remote_addr in trusted_proxy_ips:
+        real_ip = normalized_ip_address(request.META.get("HTTP_X_REAL_IP"))
+        if real_ip:
+            return real_ip
+    return remote_addr or "unknown"
 
 
 def normalized_login_username(raw_username: object) -> str:
@@ -338,6 +380,7 @@ def review_tasks_page(request: HttpRequest) -> HttpResponse:
 
 
 @login_required(login_url="portal-login")
+@staff_page_required
 @ensure_csrf_cookie
 def audit_log_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/audit_log.html")
@@ -380,8 +423,11 @@ def parse_json_body_or_400(request: HttpRequest) -> tuple[object | None, JsonRes
 @require_GET
 def bootstrap_state(request: HttpRequest) -> JsonResponse:
     page = str(request.GET.get("page") or "").strip().lower()
+    if page == "audit-log" and not request.user.is_staff:
+        return staff_api_forbidden_response("Only staff users can access the audit log.")
     return JsonResponse(
         get_bootstrap_payload(
+            viewer=request.user,
             policy_reader=user_is_policy_reader(request.user),
             page=page,
         )
@@ -517,7 +563,12 @@ def policy_document_approval(request: HttpRequest, document_id: str) -> JsonResp
             status_code = 403
         return JsonResponse({"detail": detail}, status=status_code)
 
-    return JsonResponse({"document": updated_document, "reviewState": review_state})
+    return JsonResponse(
+        {
+            "document": updated_document,
+            "reviewState": review_state_payload_for_viewer(review_state, viewer=request.user),
+        }
+    )
 
 
 @api_login_required
@@ -803,7 +854,7 @@ def review_state(request: HttpRequest) -> JsonResponse:
         actor_username=username or "system",
         actor_display_name=display_name.strip() or username or "System",
     )
-    return JsonResponse({"reviewState": normalized})
+    return JsonResponse({"reviewState": review_state_payload_for_viewer(normalized, viewer=request.user)})
 
 
 @api_login_required

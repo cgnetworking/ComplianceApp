@@ -91,3 +91,33 @@ class AuditLogExportTests(TestCase):
         self.assertEqual(file_name, "audit_log_export_20260416_140506.csv")
         parsed_rows = list(csv.reader(io.StringIO(csv_text)))
         self.assertEqual(parsed_rows[0], list(AUDIT_LOG_EXPORT_HEADERS))
+
+    def test_build_review_state_audit_log_csv_escapes_formula_like_cells(self) -> None:
+        PortalState.objects.create(
+            key="review_state",
+            payload={
+                "auditLog": [
+                    {
+                        "id": "=cmd",
+                        "action": "+run",
+                        "entityType": "@user",
+                        "entityId": "-identifier",
+                        "summary": "=2+2",
+                        "occurredAt": "2026-04-15T09:30:00+00:00",
+                        "actor": {"username": "=alice", "displayName": "+Alice"},
+                        "metadata": {"source": "reviews"},
+                    }
+                ]
+            },
+        )
+
+        csv_text = build_review_state_audit_log_csv()
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+
+        self.assertEqual(rows[0]["id"], "'=cmd")
+        self.assertEqual(rows[0]["action"], "'+run")
+        self.assertEqual(rows[0]["entity_type"], "'@user")
+        self.assertEqual(rows[0]["entity_id"], "'-identifier")
+        self.assertEqual(rows[0]["summary"], "'=2+2")
+        self.assertEqual(rows[0]["actor_username"], "'=alice")
+        self.assertEqual(rows[0]["actor_display_name"], "'+Alice")

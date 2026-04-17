@@ -23,6 +23,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from .services.common import upload_size_label
 from .models import (
     ZeroTrustAssessmentArtifact,
     ZeroTrustAssessmentRun,
@@ -712,6 +713,7 @@ def ingest_assessment_artifacts(run: ZeroTrustAssessmentRun, export_root: Path) 
     entrypoint_relative_path = ""
     artifact_rows: list[ZeroTrustAssessmentArtifact] = []
     total_bytes = 0
+    max_artifact_file_bytes = int(getattr(settings, "ASSESSMENT_ARTIFACT_MAX_FILE_BYTES", 26214400))
     for path in sorted(files):
         if path.is_symlink():
             raise AssessmentValidationError("Symbolic links are not allowed in assessment artifacts.")
@@ -719,16 +721,27 @@ def ingest_assessment_artifacts(run: ZeroTrustAssessmentRun, export_root: Path) 
         if not entrypoint_relative_path and Path(relative_path).name in ENTRYPOINT_CANDIDATE_NAMES:
             entrypoint_relative_path = relative_path
 
-        content = path.read_bytes()
+        try:
+            size_bytes = int(path.stat().st_size)
+        except OSError as error:
+            raise AssessmentValidationError(f"Unable to inspect assessment artifact {relative_path}.") from error
+        if max_artifact_file_bytes > 0 and size_bytes > max_artifact_file_bytes:
+            raise AssessmentValidationError(
+                f"Assessment artifact {relative_path} exceeds the {upload_size_label(max_artifact_file_bytes)} per-file limit."
+            )
+        try:
+            content = path.read_bytes()
+        except OSError as error:
+            raise AssessmentValidationError(f"Unable to read assessment artifact {relative_path}.") from error
         sha256 = hashlib.sha256(content).hexdigest()
-        total_bytes += len(content)
+        total_bytes += size_bytes
         artifact_rows.append(
             ZeroTrustAssessmentArtifact(
                 run=run,
                 relative_path=relative_path,
                 artifact_type=infer_artifact_type(relative_path),
                 content_type=guess_content_type(relative_path),
-                size_bytes=len(content),
+                size_bytes=size_bytes,
                 sha256=sha256,
                 is_entrypoint=False,
                 content=content,

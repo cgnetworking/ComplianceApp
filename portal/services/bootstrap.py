@@ -39,20 +39,41 @@ def normalize_bootstrap_page(value: object) -> str:
     return normalized if normalized in BOOTSTRAP_PAGES else ""
 
 
+def serialize_assignable_user(user: object) -> dict[str, str] | None:
+    user_model = get_user_model()
+    username_field = getattr(user_model, "USERNAME_FIELD", "username")
+    username = normalize_string(getattr(user, username_field, ""))
+    if not username:
+        return None
+    first_name = normalize_string(getattr(user, "first_name", ""))
+    last_name = normalize_string(getattr(user, "last_name", ""))
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+    email = normalize_string(getattr(user, "email", ""))
+    return {"username": username, "displayName": full_name or email or username}
+
+
 def list_assignable_users() -> list[dict[str, str]]:
     user_model = get_user_model()
     username_field = getattr(user_model, "USERNAME_FIELD", "username")
     assignable_users: list[dict[str, str]] = []
     for user in user_model.objects.filter(is_active=True).order_by(username_field):
-        username = normalize_string(getattr(user, username_field, ""))
-        if not username:
+        serialized_user = serialize_assignable_user(user)
+        if serialized_user is None:
             continue
-        first_name = normalize_string(getattr(user, "first_name", ""))
-        last_name = normalize_string(getattr(user, "last_name", ""))
-        full_name = " ".join(part for part in [first_name, last_name] if part).strip()
-        email = normalize_string(getattr(user, "email", ""))
-        assignable_users.append({"username": username, "displayName": full_name or email or username})
+        assignable_users.append(serialized_user)
     return assignable_users
+
+
+def list_assignable_users_for_viewer(viewer: object | None, *, page: str = "") -> list[dict[str, str]]:
+    if not getattr(viewer, "is_authenticated", False):
+        return []
+    if bool(getattr(viewer, "is_staff", False)):
+        return list_assignable_users()
+    if page != "risks":
+        return []
+
+    serialized_user = serialize_assignable_user(viewer)
+    return [serialized_user] if serialized_user is not None else []
 
 
 def review_state_payload_template(payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -315,7 +336,20 @@ def update_review_state(
     return normalized
 
 
-def get_bootstrap_payload(*, policy_reader: bool = False, page: str = "") -> dict[str, object]:
+def review_state_payload_for_viewer(review_state: object, *, viewer: object | None) -> dict[str, object]:
+    normalized = normalize_review_state(review_state)
+    if bool(getattr(viewer, "is_staff", False)):
+        return normalized
+
+    return {
+        "activities": normalized.get("activities", {}),
+        "checklist": normalized.get("checklist", {}),
+        "completedAt": normalized.get("completedAt", {}),
+        "auditLog": [],
+    }
+
+
+def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool = False, page: str = "") -> dict[str, object]:
     normalized_page = normalize_bootstrap_page(page)
     include_all_sections = normalized_page == ""
     include_document_content = include_all_sections
@@ -329,11 +363,16 @@ def get_bootstrap_payload(*, policy_reader: bool = False, page: str = "") -> dic
     if policy_reader:
         return payload
 
-    payload["assignableUsers"] = list_assignable_users()
+    assignable_users = list_assignable_users_for_viewer(viewer, page=normalized_page)
+    if assignable_users:
+        payload["assignableUsers"] = assignable_users
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_REVIEW_STATE:
         payload["checklistItems"] = list_review_checklist_items()
         payload["recommendedChecklistItems"] = list_review_checklist_recommendations()
-        payload["reviewState"] = normalize_review_state(get_state_payload("review_state", {}))
+        payload["reviewState"] = review_state_payload_for_viewer(
+            get_state_payload("review_state", {}),
+            viewer=viewer,
+        )
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
         payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
     if include_all_sections:
@@ -355,6 +394,7 @@ __all__ = [
     "delete_review_checklist_item",
     "done_review_state_keys",
     "update_review_state",
+    "review_state_payload_for_viewer",
     "get_bootstrap_payload",
     "ValidationError",
 ]

@@ -5,10 +5,11 @@ from django.views.decorators.http import require_GET
 
 from .services.bootstrap import append_portal_audit_entry
 from .services.audit_log_exports import build_review_state_audit_log_export
-from .views import api_login_required, policy_reader_api_access
+from .views import api_login_required, policy_reader_api_access, staff_api_access
 
 
 @api_login_required
+@staff_api_access
 @policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def audit_log_export_csv(request: HttpRequest) -> HttpResponse:

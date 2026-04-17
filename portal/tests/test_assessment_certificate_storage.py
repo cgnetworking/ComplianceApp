@@ -13,6 +13,7 @@ from portal.assessment_services import (
     assessment_script_contents,
     delete_zero_trust_profile,
     generate_zero_trust_certificate,
+    ingest_assessment_artifacts,
 )
 from portal.models import ZeroTrustAssessmentRun, ZeroTrustCertificate, ZeroTrustTenantProfile
 
@@ -180,4 +181,29 @@ class AssessmentCertificateStorageTests(TestCase):
         self.assertEqual(
             str(raised.exception),
             "Assessment PFX password credential 'assessment-pfx-password' is not available to this service.",
+        )
+
+    @override_settings(ASSESSMENT_ARTIFACT_MAX_FILE_BYTES=8)
+    def test_ingest_assessment_artifacts_rejects_files_over_per_file_limit(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-large-artifact",
+            display_name="Large Artifact Tenant",
+            tenant_id="tenant-large-artifact",
+            client_id="client-large-artifact",
+        )
+        run = ZeroTrustAssessmentRun.objects.create(
+            external_id="zt-run-large-artifact",
+            profile=profile,
+        )
+
+        with TemporaryDirectory() as export_root:
+            export_path = Path(export_root)
+            (export_path / "ZeroTrustAssessmentReport.html").write_bytes(b"123456789")
+
+            with self.assertRaises(AssessmentValidationError) as raised:
+                ingest_assessment_artifacts(run, export_path)
+
+        self.assertEqual(
+            str(raised.exception),
+            "Assessment artifact ZeroTrustAssessmentReport.html exceeds the 8 byte(s) per-file limit.",
         )

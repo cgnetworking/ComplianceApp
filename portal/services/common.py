@@ -1085,7 +1085,7 @@ def read_upload_bytes(uploaded_file: UploadedFile, *, max_bytes: int | None = No
     return b"".join(chunks)
 
 
-def scan_uploaded_file(
+def validate_uploaded_file_type_and_eicar_signature(
     uploaded_file: UploadedFile,
     *,
     max_bytes: int,
@@ -1098,8 +1098,8 @@ def scan_uploaded_file(
     payload = read_upload_bytes(uploaded_file, max_bytes=max_bytes)
     if expect_text and b"\x00" in payload:
         raise ValidationError(f"{uploaded_file.name} appears to be binary data, but a text file was expected.")
-    if bool(getattr(settings, "UPLOAD_SCANNING_ENABLED", True)) and EICAR_SIGNATURE in payload.upper():
-        raise ValidationError(f"{uploaded_file.name} failed upload scanning.")
+    if bool(getattr(settings, "UPLOAD_EICAR_SIGNATURE_CHECK_ENABLED", True)) and EICAR_SIGNATURE in payload.upper():
+        raise ValidationError(f"{uploaded_file.name} matched the blocked EICAR test signature.")
 
 
 def validate_policy_upload_files(files: list[UploadedFile]) -> None:
@@ -1112,14 +1112,14 @@ def validate_policy_upload_files(files: list[UploadedFile]) -> None:
         extension = file_extension(uploaded_file.name)
         if extension not in SUPPORTED_POLICY_EXTENSIONS:
             continue
-        scan_uploaded_file(uploaded_file, max_bytes=max_bytes, expect_text=True)
+        validate_uploaded_file_type_and_eicar_signature(uploaded_file, max_bytes=max_bytes, expect_text=True)
 
 
 def validate_mapping_upload_file(file_obj: UploadedFile) -> None:
     extension = file_extension(file_obj.name)
     if extension not in SUPPORTED_MAPPING_EXTENSIONS:
         raise ValidationError("Upload a JSON or CSV mapping file (.json, .csv).")
-    scan_uploaded_file(
+    validate_uploaded_file_type_and_eicar_signature(
         file_obj,
         max_bytes=int(getattr(settings, "MAPPING_UPLOAD_MAX_FILE_BYTES", 5242880)),
         expect_text=True,
@@ -1139,7 +1139,11 @@ def validate_vendor_upload_files(files: list[UploadedFile]) -> None:
             raise ValidationError(
                 f"{uploaded_file.name} is not a supported vendor upload type. Allowed extensions: {allowed_extensions}."
             )
-        scan_uploaded_file(uploaded_file, max_bytes=max_bytes, expect_text=extension in TEXT_VENDOR_EXTENSIONS)
+        validate_uploaded_file_type_and_eicar_signature(
+            uploaded_file,
+            max_bytes=max_bytes,
+            expect_text=extension in TEXT_VENDOR_EXTENSIONS,
+        )
 
 
 def decode_upload(uploaded_file: UploadedFile, *, max_bytes: int | None = None) -> str:
