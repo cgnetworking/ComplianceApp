@@ -1,7 +1,4 @@
-  function auditLogEntries() {
-    const reviewState = state.reviewState && typeof state.reviewState === "object" ? state.reviewState : {};
-    const entries = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
-
+  function normalizeAuditLogEntries(entries) {
     return entries
       .filter((entry) => entry && typeof entry === "object")
       .map((entry) => ({
@@ -21,11 +18,28 @@
       });
   }
 
+  function auditLogEntries() {
+    const reviewState = state.reviewState && typeof state.reviewState === "object" ? state.reviewState : {};
+    const entries = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
+    return normalizeAuditLogEntries(entries);
+  }
+
   function auditActionLabel(entry) {
     return String(entry.action || "state_changed")
       .split("_")
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
+  }
+  function auditDetailLabel(entry) {
+    const action = typeof entry.action === "string" ? entry.action.trim() : "";
+    const metadata = entry && typeof entry.metadata === "object" ? entry.metadata : {};
+    if (action === "delete_risk_record") {
+      const riskText = typeof metadata.risk === "string" ? metadata.risk.trim() : "";
+      if (riskText) {
+        return `Deleted risk '${riskText}'.`;
+      }
+    }
+    return typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.";
   }
 
   function auditChecklistLookup() {
@@ -110,7 +124,7 @@
       entry.entityType,
       entry.entityId,
       auditRecordLabel(entry, checklistById),
-      entry.summary,
+      auditDetailLabel(entry),
       entry.occurredAt,
       auditActorLabel(entry),
       JSON.stringify(entry.metadata || {}),
@@ -118,9 +132,189 @@
     return haystack.includes(query);
   }
 
+  function setAuditExportStatus(message, tone) {
+    const statusElement = document.getElementById("audit-log-export-status");
+    if (!statusElement) {
+      return;
+    }
+    if (typeof setUploadStatus === "function") {
+      setUploadStatus(statusElement, message, tone || "");
+      return;
+    }
+    statusElement.textContent = message;
+  }
+
+  function auditMetadataCsvValue(metadata) {
+    if (!metadata || typeof metadata !== "object") {
+      return "{}";
+    }
+    try {
+      return JSON.stringify(metadata);
+    } catch (error) {
+      return "{}";
+    }
+  }
+
+  function auditCsvEscape(value) {
+    const normalizedValue = value === null || value === undefined ? "" : String(value);
+    if (!/[",\r\n]/.test(normalizedValue)) {
+      return normalizedValue;
+    }
+    return `"${normalizedValue.replaceAll('"', '""')}"`;
+  }
+
+  function buildAuditLogCsv(entries, checklistById = null) {
+    const headers = [
+      "id",
+      "action",
+      "action_label",
+      "entity_type",
+      "entity_id",
+      "record",
+      "summary",
+      "actor_display_name",
+      "actor_username",
+      "occurred_at",
+      "occurred_at_display",
+      "metadata_json",
+    ];
+    const rows = entries.map((entry) => {
+      const actor = entry.actor && typeof entry.actor === "object" ? entry.actor : {};
+      const actorUsername = typeof actor.username === "string" ? actor.username.trim() : "";
+      return [
+        entry.id,
+        entry.action,
+        auditActionLabel(entry),
+        entry.entityType,
+        entry.entityId,
+        auditRecordLabel(entry, checklistById),
+        auditDetailLabel(entry),
+        auditActorLabel(entry),
+        actorUsername,
+        entry.occurredAt,
+        formatDateTime(entry.occurredAt),
+        auditMetadataCsvValue(entry.metadata),
+      ];
+    });
+
+    return [headers]
+      .concat(rows)
+      .map((row) => row.map((value) => auditCsvEscape(value)).join(","))
+      .join("\r\n");
+  }
+
+  function auditExportFileName(now = new Date()) {
+    const parsed = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const year = String(parsed.getFullYear()).padStart(4, "0");
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    const hour = String(parsed.getHours()).padStart(2, "0");
+    const minute = String(parsed.getMinutes()).padStart(2, "0");
+    const second = String(parsed.getSeconds()).padStart(2, "0");
+    return `audit_log_export_${year}${month}${day}_${hour}${minute}${second}.csv`;
+  }
+
+  function triggerAuditLogCsvDownload(csvText, fileName) {
+    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+  function parseAuditExportFilename(dispositionHeader, fallbackName) {
+    if (typeof dispositionHeader !== "string" || !dispositionHeader.trim()) {
+      return fallbackName;
+    }
+    const utf8Match = dispositionHeader.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match && utf8Match[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1]);
+      } catch (error) {
+        // Ignore malformed filenames and use fallback handling below.
+      }
+    }
+    const plainMatch = dispositionHeader.match(/filename=\"?([^\";]+)\"?/i);
+    if (plainMatch && plainMatch[1]) {
+      return plainMatch[1];
+    }
+    return fallbackName;
+  }
+
+  async function loadAuditEntriesForExport() {
+    try {
+      const payload = await apiRequest("/state/?page=audit-log");
+      const reviewState = payload && typeof payload.reviewState === "object" ? payload.reviewState : {};
+      const auditLog = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
+      return normalizeAuditLogEntries(auditLog);
+    } catch (error) {
+      return auditLogEntries();
+    }
+  }
+
+  function bindAuditLogExportTrigger() {
+    const exportTrigger = document.getElementById("audit-log-export-trigger");
+    if (!exportTrigger || exportTrigger.dataset.auditExportBound === "true") {
+      return;
+    }
+
+    exportTrigger.dataset.auditExportBound = "true";
+    exportTrigger.addEventListener("click", async () => {
+      const originalLabel = exportTrigger.textContent;
+      exportTrigger.disabled = true;
+      exportTrigger.textContent = "Exporting...";
+      setAuditExportStatus("Building CSV export from the review state audit log...", "info");
+
+      try {
+        const response = await fetch(`${resolveApiBaseUrl()}/audit-log/export.csv`, {
+          method: "GET",
+          headers: { Accept: "text/csv" },
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          let detail = `Unable to export the audit log (${response.status}).`;
+          try {
+            const errorPayload = await response.json();
+            if (errorPayload && typeof errorPayload.detail === "string" && errorPayload.detail.trim()) {
+              detail = errorPayload.detail;
+            }
+          } catch (error) {
+            // Ignore non-JSON errors and keep fallback detail.
+          }
+          throw new Error(detail);
+        }
+
+        const csvBlob = await response.blob();
+        const fileName = parseAuditExportFilename(
+          response.headers.get("Content-Disposition"),
+          auditExportFileName(),
+        );
+        const downloadUrl = URL.createObjectURL(csvBlob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = fileName;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+        setAuditExportStatus("Audit log CSV exported.", "success");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unable to export the audit log.";
+        setAuditExportStatus(detail, "error");
+      } finally {
+        exportTrigger.disabled = false;
+        exportTrigger.textContent = originalLabel;
+      }
+    });
+  }
+
   function renderAuditLogPage() {
     const summaryElement = document.getElementById("audit-log-summary");
     const listElement = document.getElementById("audit-log-list");
+    bindAuditLogExportTrigger();
     if (!listElement) {
       return;
     }
@@ -163,7 +357,7 @@
               <span class="status-pill is-active">${escapeHtml(formatDateTime(entry.occurredAt))}</span>
             </div>
             <p class="activity-evidence">User: ${escapeHtml(auditActorLabel(entry))}</p>
-            <p class="activity-evidence">Details: ${escapeHtml(entry.summary)}</p>
+            <p class="activity-evidence">Details: ${escapeHtml(auditDetailLabel(entry))}</p>
           </article>
         `).join("")}
       </div>

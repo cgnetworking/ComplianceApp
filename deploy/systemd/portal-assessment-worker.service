@@ -1,0 +1,17 @@
+[Unit]
+Description=<service-name> Zero Trust assessment worker
+After=network.target
+
+[Service]
+Type=simple
+User=<runtime-user>
+Group=<runtime-group>
+WorkingDirectory=<runtime-app-dir>
+EnvironmentFile=<managed-env-file>
+LoadCredential=assessment-pfx-password:<credential-source-file>
+ExecStart=<runtime-venv-dir>/bin/python manage.py run_assessment_worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

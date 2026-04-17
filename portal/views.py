@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import time
 from functools import wraps
 
 from django.conf import settings
@@ -8,6 +10,7 @@ from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -17,24 +20,32 @@ from django.views.decorators.http import require_GET, require_http_methods
 from .services import (
     ValidationError,
     approve_uploaded_policy,
+    create_risk_record,
     create_review_checklist_item,
     create_uploaded_policies,
     create_vendor_responses,
+    delete_risk_record,
     delete_review_checklist_item,
     delete_uploaded_policy,
+    delete_vendor_response,
     get_bootstrap_payload,
-    get_mapping_payload,
-    list_review_checklist_items,
-    list_review_checklist_recommendations,
+    get_policy_document,
+    list_risk_register,
+    list_vendor_responses,
     normalize_control_state,
     normalize_mapping_payload,
     replace_mapping_payload,
     replace_risk_register,
     set_state_payload,
+    update_risk_record,
     update_uploaded_policy_approver,
     update_review_state,
     user_is_policy_reader,
+    validate_mapping_upload_file,
+    validate_policy_upload_files,
+    validate_vendor_upload_files,
 )
+from .services.bootstrap import append_portal_audit_entry
 
 
 def safe_next_url(request: HttpRequest) -> str:
@@ -108,6 +119,119 @@ def current_user_context(request: HttpRequest) -> dict[str, object]:
     }
 
 
+def current_audit_actor(request: HttpRequest) -> tuple[str, str]:
+    username = request.user.get_username() if request.user.is_authenticated else ""
+    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    normalized_username = username or "system"
+    normalized_display_name = display_name or username or "System"
+    return normalized_username, normalized_display_name
+
+
+def request_client_ip(request: HttpRequest) -> str:
+    forwarded_for = str(request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+    if forwarded_for:
+        return forwarded_for
+    return str(request.META.get("REMOTE_ADDR") or "").strip() or "unknown"
+
+
+def normalized_login_username(raw_username: object) -> str:
+    return str(raw_username or "").strip().lower()
+
+
+def login_throttle_cache_key(*, username: str, client_ip: str, kind: str) -> str:
+    safe_username = normalized_login_username(username) or "anonymous"
+    safe_ip = client_ip or "unknown"
+    return f"portal:auth:{kind}:{safe_username}:{safe_ip}"
+
+
+def login_lockout_remaining_seconds(*, username: str, client_ip: str) -> int:
+    lockout_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout")
+    lockout_until = cache.get(lockout_key)
+    if not isinstance(lockout_until, (int, float)):
+        return 0
+    remaining_seconds = int(lockout_until - time.time())
+    if remaining_seconds <= 0:
+        cache.delete(lockout_key)
+        return 0
+    return remaining_seconds
+
+
+def clear_login_throttle(*, username: str, client_ip: str) -> None:
+    cache.delete_many(
+        [
+            login_throttle_cache_key(username=username, client_ip=client_ip, kind="attempts"),
+            login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout"),
+        ]
+    )
+
+
+def register_failed_login_attempt(*, username: str, client_ip: str) -> tuple[int, int]:
+    max_attempts = int(getattr(settings, "LOGIN_THROTTLE_MAX_ATTEMPTS", 5))
+    window_seconds = int(getattr(settings, "LOGIN_THROTTLE_WINDOW_SECONDS", 900))
+    lockout_seconds = int(getattr(settings, "LOGIN_THROTTLE_LOCKOUT_SECONDS", 900))
+    attempts_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="attempts")
+    lockout_key = login_throttle_cache_key(username=username, client_ip=client_ip, kind="lockout")
+
+    attempts = int(cache.get(attempts_key, 0)) + 1
+    cache.set(attempts_key, attempts, timeout=window_seconds)
+    if attempts >= max_attempts:
+        lockout_until = time.time() + lockout_seconds
+        cache.set(lockout_key, lockout_until, timeout=lockout_seconds)
+        cache.delete(attempts_key)
+        return attempts, lockout_seconds
+    return attempts, 0
+
+
+def audit_failed_login_attempt(
+    request: HttpRequest,
+    *,
+    username: str,
+    reason: str,
+    attempt_count: int,
+    lockout_remaining_seconds: int,
+) -> None:
+    client_ip = request_client_ip(request)
+    normalized_username = normalized_login_username(username)
+    actor_username = normalized_username or "anonymous"
+    if reason == "lockout":
+        summary = f"Blocked password login for {normalized_username or 'anonymous'} during lockout."
+    else:
+        summary = f"Failed password login for {normalized_username or 'anonymous'}."
+
+    append_portal_audit_entry(
+        action="failed_login",
+        entity_type="authentication",
+        entity_id=normalized_username or client_ip,
+        summary=summary,
+        actor_username=actor_username,
+        actor_display_name=normalized_username or "Anonymous",
+        metadata={
+            "source": "auth",
+            "authMode": "password",
+            "reason": reason,
+            "usernameAttempted": normalized_username,
+            "clientIp": client_ip,
+            "attemptCount": attempt_count,
+            "lockoutRemainingSeconds": max(lockout_remaining_seconds, 0),
+        },
+    )
+
+
+def named_item_preview(items: list[object], *, limit: int = 3) -> str:
+    names: list[str] = []
+    for item in items:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        names.append(name)
+    if not names:
+        return ""
+    preview = ", ".join(names[:limit])
+    if len(names) > limit:
+        preview = f"{preview}, +{len(names) - limit} more"
+    return preview
+
+
 def render_portal_page(
     request: HttpRequest,
     template_name: str,
@@ -139,9 +263,35 @@ def login_page(request: HttpRequest) -> HttpResponse:
     form.fields["username"].widget.attrs.update({"autocomplete": "username"})
     form.fields["password"].widget.attrs.update({"autocomplete": "current-password"})
     if request.method == "POST" and request.POST.get("auth_mode") == "password":
-        if form.is_valid():
+        username_attempt = str(request.POST.get("username") or "")
+        client_ip = request_client_ip(request)
+        lockout_remaining = login_lockout_remaining_seconds(username=username_attempt, client_ip=client_ip)
+        if lockout_remaining > 0:
+            retry_minutes = max(1, math.ceil(lockout_remaining / 60))
+            form.add_error(None, f"Too many failed sign-in attempts. Try again in {retry_minutes} minute(s).")
+            audit_failed_login_attempt(
+                request,
+                username=username_attempt,
+                reason="lockout",
+                attempt_count=0,
+                lockout_remaining_seconds=lockout_remaining,
+            )
+        elif form.is_valid():
+            clear_login_throttle(username=username_attempt, client_ip=client_ip)
             auth_login(request, form.get_user())
             return redirect(next_url)
+        else:
+            attempt_count, lockout_seconds = register_failed_login_attempt(username=username_attempt, client_ip=client_ip)
+            if lockout_seconds > 0:
+                retry_minutes = max(1, math.ceil(lockout_seconds / 60))
+                form.add_error(None, f"Too many failed sign-in attempts. Try again in {retry_minutes} minute(s).")
+            audit_failed_login_attempt(
+                request,
+                username=username_attempt,
+                reason="invalid_credentials",
+                attempt_count=attempt_count,
+                lockout_remaining_seconds=lockout_seconds,
+            )
 
     return render(
         request,
@@ -173,12 +323,6 @@ def home_page(request: HttpRequest) -> HttpResponse:
 @ensure_csrf_cookie
 def controls_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/controls.html")
-
-
-@login_required(login_url="portal-login")
-@ensure_csrf_cookie
-def reports_page(request: HttpRequest) -> HttpResponse:
-    return render_portal_page(request, "portal/reports.html")
 
 
 @login_required(login_url="portal-login")
@@ -223,12 +367,25 @@ def parse_json_body(request: HttpRequest) -> object:
         raise ValidationError("Invalid JSON body.") from error
 
 
+def parse_json_body_or_400(request: HttpRequest) -> tuple[object | None, JsonResponse | None]:
+    try:
+        return parse_json_body(request), None
+    except ValidationError as error:
+        return None, JsonResponse({"detail": str(error)}, status=400)
+
+
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=True)
 @ensure_csrf_cookie
 @require_GET
 def bootstrap_state(request: HttpRequest) -> JsonResponse:
-    return JsonResponse(get_bootstrap_payload(policy_reader=user_is_policy_reader(request.user)))
+    page = str(request.GET.get("page") or "").strip().lower()
+    return JsonResponse(
+        get_bootstrap_payload(
+            policy_reader=user_is_policy_reader(request.user),
+            page=page,
+        )
+    )
 
 
 @api_login_required
@@ -240,21 +397,79 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": "Select at least one policy file to upload."}, status=400)
 
     try:
+        validate_policy_upload_files(files)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    try:
         documents, messages = create_uploaded_policies(files)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    imported_file_names = [str(getattr(file, "name", "") or "").strip() for file in files]
+    imported_file_preview = named_item_preview(imported_file_names)
+    append_portal_audit_entry(
+        action="import_policy_documents",
+        entity_type="policy",
+        entity_id=f"{len(documents)}",
+        summary=(
+            f"Imported policy file{'s' if len(imported_file_names) != 1 else ''}: {imported_file_preview}."
+            if imported_file_preview
+            else f"Imported {len(documents)} policy document{'s' if len(documents) != 1 else ''}."
+        ),
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "importType": "policy_upload",
+            "documentCount": len(documents),
+            "documentIds": [str(item.get("id") or "") for item in documents if isinstance(item, dict)],
+            "fileNames": imported_file_names,
+            "messages": messages,
+        },
+    )
 
     return JsonResponse({"documents": documents, "messages": messages})
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["DELETE"])
+@policy_reader_api_access(allow_policy_reader=True)
+@require_http_methods(["GET", "DELETE"])
 def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
+    if request.method == "GET":
+        try:
+            document = get_policy_document(document_id)
+        except ValidationError as error:
+            detail = str(error)
+            status_code = 404 if detail == "Policy document was not found." else 400
+            return JsonResponse({"detail": detail}, status=status_code)
+        return JsonResponse({"document": document})
+
+    if user_is_policy_reader(request.user):
+        return policy_reader_forbidden_response()
+
     try:
         deleted_document = delete_uploaded_policy(document_id)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=404)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    deleted_document_id = str(deleted_document.get("id") or "")
+    deleted_document_title = str(deleted_document.get("title") or deleted_document_id)
+    append_portal_audit_entry(
+        action="delete_policy_document",
+        entity_type="policy",
+        entity_id=deleted_document_id,
+        summary=f"Deleted policy {deleted_document_title}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "policyId": deleted_document_id,
+            "policyTitle": deleted_document_title,
+        },
+    )
 
     return JsonResponse({"deletedDocument": deleted_document})
 
@@ -266,10 +481,9 @@ def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResp
     if not request.user.is_staff:
         return JsonResponse({"detail": "Only admins can assign policy approvers."}, status=403)
 
-    try:
-        body = parse_json_body(request)
-    except ValidationError as error:
-        return JsonResponse({"detail": str(error)}, status=400)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
 
     if not isinstance(body, dict) or "approver" not in body:
         return JsonResponse({"detail": "Approver is required."}, status=400)
@@ -319,52 +533,217 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": "Select a mapping file to upload."}, status=400)
 
     try:
+        validate_mapping_upload_file(file_obj)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
+    try:
         mapping_payload = replace_mapping_payload(file_obj)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    controls = mapping_payload.get("controls") if isinstance(mapping_payload.get("controls"), list) else []
+    documents = mapping_payload.get("documents") if isinstance(mapping_payload.get("documents"), list) else []
+    mapping_file_name = str(getattr(file_obj, "name", "") or "").strip()
+    append_portal_audit_entry(
+        action="import_mapping",
+        entity_type="mapping",
+        entity_id=mapping_file_name or "mapping-upload",
+        summary=f"Imported mapping file {mapping_file_name or 'mapping file'}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "policies",
+            "importType": "mapping_upload",
+            "fileName": mapping_file_name,
+            "controlCount": len(controls),
+            "documentCount": len(documents),
+        },
+    )
 
     return JsonResponse({"mapping": mapping_payload})
 
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def upload_vendors(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        return JsonResponse({"responses": list_vendor_responses()})
+
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"detail": "Select at least one vendor response file to import."}, status=400)
 
+    try:
+        validate_vendor_upload_files(files)
+    except ValidationError as error:
+        return JsonResponse({"detail": str(error)}, status=400)
+
     responses = create_vendor_responses(files)
+    actor_username, actor_display_name = current_audit_actor(request)
+    imported_file_names = [str(getattr(file, "name", "") or "").strip() for file in files]
+    imported_file_preview = named_item_preview(imported_file_names)
+    append_portal_audit_entry(
+        action="import_vendor_responses",
+        entity_type="vendor_response",
+        entity_id=f"{len(responses)}",
+        summary=(
+            f"Imported vendor response file{'s' if len(imported_file_names) != 1 else ''}: {imported_file_preview}."
+            if imported_file_preview
+            else f"Imported {len(responses)} vendor response file{'s' if len(responses) != 1 else ''}."
+        ),
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "vendors",
+            "importType": "vendor_response_upload",
+            "responseCount": len(responses),
+            "responseIds": [str(item.get("id") or "") for item in responses if isinstance(item, dict)],
+            "fileNames": imported_file_names,
+        },
+    )
     return JsonResponse({"responses": responses})
 
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["DELETE"])
+def vendor_response(request: HttpRequest, response_id: str) -> JsonResponse:
+    try:
+        deleted_response = delete_vendor_response(response_id)
+    except ValidationError as error:
+        detail = str(error)
+        status_code = 404 if detail == "Vendor response was not found." else 400
+        return JsonResponse({"detail": detail}, status=status_code)
+
+    actor_username, actor_display_name = current_audit_actor(request)
+    deleted_response_id = str(deleted_response.get("id") or "")
+    vendor_name = str(deleted_response.get("vendorName") or "").strip()
+    response_file_name = str(deleted_response.get("fileName") or "").strip()
+    deleted_response_label = response_file_name or vendor_name or deleted_response_id
+    append_portal_audit_entry(
+        action="delete_vendor_response",
+        entity_type="vendor_response",
+        entity_id=deleted_response_id,
+        summary=f"Deleted vendor response {deleted_response_label}.",
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "vendors",
+            "vendorName": vendor_name,
+            "fileName": response_file_name,
+            "responseId": deleted_response_id,
+        },
+    )
+    return JsonResponse({"deletedResponse": deleted_response})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["GET", "POST", "PUT"])
 def risk_register(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        payload = get_bootstrap_payload()
-        return JsonResponse({"riskRegister": payload["riskRegister"]})
+        return JsonResponse({"riskRegister": list_risk_register()})
 
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
+    if request.method == "POST":
+        payload = body.get("risk") if isinstance(body, dict) and "risk" in body else body
+        try:
+            created_risk = create_risk_record(payload)
+        except ValidationError as error:
+            return JsonResponse({"detail": str(error)}, status=400)
+        return JsonResponse({"risk": created_risk}, status=201)
+
     items = body.get("riskRegister") if isinstance(body, dict) and "riskRegister" in body else body
-
     try:
         risk_register_payload = replace_risk_register(items)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
+
+    if isinstance(items, str):
+        actor_username, actor_display_name = current_audit_actor(request)
+        risk_name_preview = named_item_preview(
+            [str(item.get("risk") or "").strip() for item in risk_register_payload if isinstance(item, dict)]
+        )
+        append_portal_audit_entry(
+            action="import_risk_csv",
+            entity_type="risk_register",
+            entity_id=f"{len(risk_register_payload)}",
+            summary=(
+                f"Imported risk entries: {risk_name_preview}."
+                if risk_name_preview
+                else f"Imported risk CSV with {len(risk_register_payload)} risk record{'s' if len(risk_register_payload) != 1 else ''}."
+            ),
+            actor_username=actor_username,
+            actor_display_name=actor_display_name,
+            metadata={
+                "source": "risks",
+                "importType": "risk_csv",
+                "recordCount": len(risk_register_payload),
+            },
+        )
 
     return JsonResponse({"riskRegister": risk_register_payload})
 
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "POST"])
-def checklist_items(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        return JsonResponse({"checklistItems": list_review_checklist_items()})
+@require_http_methods(["PATCH", "PUT", "DELETE"])
+def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
+    if request.method == "DELETE":
+        try:
+            deleted_risk = delete_risk_record(risk_id)
+        except ValidationError as error:
+            detail = str(error)
+            status_code = 404 if detail == "Risk record was not found." else 400
+            return JsonResponse({"detail": detail}, status=status_code)
+        actor_username, actor_display_name = current_audit_actor(request)
+        deleted_risk_id = str(deleted_risk.get("id") or "")
+        deleted_risk_name = str(deleted_risk.get("risk") or "").strip()
+        if not deleted_risk_name:
+            deleted_risk_name = deleted_risk_id
+        append_portal_audit_entry(
+            action="delete_risk_record",
+            entity_type="risk",
+            entity_id=deleted_risk_id,
+            summary=f"Deleted risk '{deleted_risk_name}'.",
+            actor_username=actor_username,
+            actor_display_name=actor_display_name,
+            metadata={
+                "source": "risks",
+                "riskId": deleted_risk_id,
+                "risk": str(deleted_risk.get("risk") or ""),
+            },
+        )
+        return JsonResponse({"deletedRisk": deleted_risk})
 
-    body = parse_json_body(request)
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
+    payload = body.get("risk") if isinstance(body, dict) and "risk" in body else body
+    try:
+        updated_risk = update_risk_record(risk_id, payload)
+    except ValidationError as error:
+        detail = str(error)
+        status_code = 404 if detail == "Risk record was not found." else 400
+        return JsonResponse({"detail": detail}, status=status_code)
+    return JsonResponse({"risk": updated_risk})
+
+
+@api_login_required
+@policy_reader_api_access(allow_policy_reader=False)
+@require_http_methods(["POST"])
+def checklist_items(request: HttpRequest) -> JsonResponse:
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
+
     payload = body.get("checklistItem") if isinstance(body, dict) and "checklistItem" in body else body
 
     try:
@@ -384,25 +763,38 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=404)
 
+    actor_username, actor_display_name = current_audit_actor(request)
+    deleted_item_id = str(deleted_checklist_item.get("id") or "")
+    deleted_item_name = str(deleted_checklist_item.get("item") or "").strip()
+    append_portal_audit_entry(
+        action="delete_checklist_item",
+        entity_type="checklist_item",
+        entity_id=deleted_item_id,
+        summary=(
+            f"Deleted checklist item '{deleted_item_name}'."
+            if deleted_item_name
+            else f"Deleted checklist item {deleted_item_id}."
+        ),
+        actor_username=actor_username,
+        actor_display_name=actor_display_name,
+        metadata={
+            "source": "review-tasks",
+            "checklistItemId": deleted_item_id,
+            "item": str(deleted_checklist_item.get("item") or ""),
+        },
+    )
+
     return JsonResponse({"deletedChecklistItem": deleted_checklist_item})
 
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_GET
-def checklist_recommendations(request: HttpRequest) -> JsonResponse:
-    return JsonResponse({"recommendedChecklistItems": list_review_checklist_recommendations()})
-
-
-@api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def review_state(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        payload = get_bootstrap_payload()
-        return JsonResponse({"reviewState": payload["reviewState"]})
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
 
-    body = parse_json_body(request)
     payload = body.get("reviewState") if isinstance(body, dict) and "reviewState" in body else body
     username = request.user.get_username() if request.user.is_authenticated else "system"
     display_name = request.user.get_full_name() if request.user.is_authenticated else ""
@@ -416,13 +808,12 @@ def review_state(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def control_state(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        payload = get_bootstrap_payload()
-        return JsonResponse({"controlState": payload["controlState"]})
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
 
-    body = parse_json_body(request)
     payload = body.get("controlState") if isinstance(body, dict) and "controlState" in body else body
     normalized = normalize_control_state(payload)
     set_state_payload("control_state", normalized)
@@ -431,12 +822,12 @@ def control_state(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 @policy_reader_api_access(allow_policy_reader=False)
-@require_http_methods(["GET", "PUT"])
+@require_http_methods(["PUT"])
 def mapping_state(request: HttpRequest) -> JsonResponse:
-    if request.method == "GET":
-        return JsonResponse({"mapping": get_mapping_payload()})
+    body, error_response = parse_json_body_or_400(request)
+    if error_response is not None:
+        return error_response
 
-    body = parse_json_body(request)
     payload = body.get("mapping") if isinstance(body, dict) and "mapping" in body else body
     normalized = normalize_mapping_payload(payload)
     set_state_payload("mapping_state", normalized)

@@ -1,0 +1,45 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}ISMS Command Center{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'styles.css' %}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body
+  data-page="{% block body_page %}{% endblock %}"
+  data-api-base-url="{{ api_base_url|default:'/api' }}"
+  data-login-url="{{ login_url|default:'/login/' }}"
+  data-current-username="{{ current_user.username|default:'' }}"
+  data-current-is-staff="{{ current_user.isStaff|yesno:'true,false' }}"
+  data-current-is-policy-reader="{{ current_user.isPolicyReader|yesno:'true,false' }}"
+>
+  <div class="app-shell">
+    {% block sidebar %}{% endblock %}
+
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="workspace-switcher">
+          <div class="workspace-icon">A</div>
+          <div>
+            <p class="workspace-label">Workspace</p>
+            <strong>Acme Co / ISO Program</strong>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          {% include "portal/_auth_controls.html" %}
+        </div>
+      </header>
+
+      <main class="content">
+        {% block content %}{% endblock %}
+      </main>
+    </section>
+  </div>
+  {% block scripts %}
+    {% include "portal/_app_scripts.html" %}
+  {% endblock %}
+</body>
+</html>

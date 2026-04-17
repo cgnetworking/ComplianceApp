@@ -1,31 +1,5 @@
   function reviewTaskItems() {
-    if (!Array.isArray(state.checklistItems)) {
-      return [];
-    }
-
-    const seenIds = new Set();
-    return state.checklistItems
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const id = typeof item.id === "string" ? item.id.trim() : "";
-        const checklistItem = typeof item.item === "string" ? item.item.trim() : "";
-        if (!id || !checklistItem || seenIds.has(id)) {
-          return null;
-        }
-        seenIds.add(id);
-        return {
-          id,
-          category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Custom",
-          item: checklistItem,
-          frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
-          startDate: typeof normalizeChecklistStartDate === "function" ? normalizeChecklistStartDate(item.startDate) : "",
-          owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
-          createdAt: typeof normalizeChecklistCreatedAt === "function" ? normalizeChecklistCreatedAt(item.createdAt) : "",
-        };
-      })
-      .filter(Boolean);
+    return normalizeChecklistItems(state.checklistItems);
   }
   function reviewTaskScheduleLabel(item) {
     if (typeof checklistFrequencyWithAnchorLabel === "function") {
@@ -102,10 +76,6 @@
     if (!normalizedId) {
       return;
     }
-    if (!isApiPersistence()) {
-      setUploadStatus(els.reviewTasksStatus, "Task removal requires API/database mode.", "error");
-      return;
-    }
 
     const task = reviewTaskItems().find((item) => item.id === normalizedId);
     const label = task ? task.item : normalizedId;
@@ -113,21 +83,45 @@
       return;
     }
 
-    setUploadStatus(els.reviewTasksStatus, "Removing checklist item...", "info");
     try {
-      await apiRequest(`/checklist/${encodeURIComponent(normalizedId)}/`, {
-        method: "DELETE",
-      });
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.reviewTasksStatus, message, tone);
+        },
+        {
+          pending: "Removing checklist item...",
+          success: "Checklist item removed from the shared database.",
+          error: "Checklist item could not be removed.",
+        },
+        async () => {
+          await apiRequest(`/checklist/${encodeURIComponent(normalizedId)}/`, {
+            method: "DELETE",
+          });
 
-      state.checklistItems = reviewTaskItems().filter((item) => item.id !== normalizedId);
-      clearReviewTaskState(normalizedId);
-      saveReviewState();
-      renderReviewTasksPage();
-      setUploadStatus(els.reviewTasksStatus, "Checklist item removed from the shared database.", "success");
+          const previousReviewState = normalizeReviewStateValue(state.reviewState);
+          state.checklistItems = reviewTaskItems().filter((item) => item.id !== normalizedId);
+          clearReviewTaskState(normalizedId);
+          try {
+            await saveReviewState();
+            if (typeof setReviewPersistenceStatus === "function") {
+              setReviewPersistenceStatus("Review tracking saved.", "success");
+            }
+          } catch (error) {
+            state.reviewState = previousReviewState;
+            const detail = error instanceof Error && error.message
+              ? error.message
+              : "Review tracking state could not be updated.";
+            if (typeof setReviewPersistenceStatus === "function") {
+              setReviewPersistenceStatus(detail, "error");
+            }
+            renderReviewTasksPage();
+            throw new Error(`Checklist item was removed, but review tracking did not sync: ${detail}`);
+          }
+
+          renderReviewTasksPage();
+        }
+      );
     } catch (error) {
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Checklist item could not be removed.";
-      setUploadStatus(els.reviewTasksStatus, detail, "error");
+      // The shared helper already set the error status.
     }
   }

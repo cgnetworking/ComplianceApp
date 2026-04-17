@@ -15,8 +15,6 @@
     "November",
     "December",
   ];
-  const shortMonths = monthNames.map((month) => month.slice(0, 3));
-  const cadenceLabels = ["Annual", "Quarterly", "Monthly", "Event", "Change"];
   const defaultChecklistCategories = [
     "ISMS Governance",
     "Risk",
@@ -49,17 +47,9 @@
     PR: 2,
     UPL: 3,
   };
-  const apiBaseUrl = resolveApiBaseUrl();
-  const loginUrl = resolveLoginUrl();
-  const storageKey = "isms-policy-portal-review-state-v1";
-  const controlStateKey = "isms-policy-portal-control-state-v1";
-  const uploadedPolicyKey = "isms-policy-portal-uploaded-policies-v1";
-  const vendorSurveyKey = "isms-policy-portal-vendor-surveys-v1";
-  const riskRegisterKey = "isms-policy-portal-risk-register-v1";
-  let persistenceMode = "local";
   const controlsById = new Map();
-  let uploadedDocuments = loadUploadedPolicies();
-  let vendorSurveyResponses = loadVendorResponses();
+  let uploadedDocuments = [];
+  let vendorSurveyResponses = [];
   const documentsById = new Map();
   const today = new Date();
   const page = document.body.dataset.page || "home";
@@ -73,8 +63,6 @@
   const state = {
     search: params.get("q") || "",
     domain: params.get("domain") || "All",
-    applicability: params.get("applicability") || "All",
-    frequency: params.get("frequency") || "All",
     riskAssignee: params.get("assignee") || "All",
     riskStatus: params.get("status") || "All",
     riskLevel: params.get("level") || "All",
@@ -84,28 +72,24 @@
     activeDocumentId: params.get("doc"),
     selectedRiskId: params.get("risk") || "",
     selectedVendorResponseId: params.get("vendor"),
-    riskRegister: loadRiskRegister(),
+    vendorResponsesLoaded: false,
+    selectedAssessmentProfileId: params.get("profile") || "",
+    selectedAssessmentRunId: params.get("run") || "",
+    riskRegister: [],
     assignableUsers: [],
     isAddingRisk: false,
     riskFormStatus: { message: "", tone: "" },
-    reviewState: loadReviewState(),
+    reviewState: { activities: {}, checklist: {}, completedAt: {}, auditLog: [] },
     checklistItems: [],
     recommendedChecklistItems: [],
-    controlState: loadControlState(),
+    controlState: {},
   };
 
   const els = {
-    runtimeMode: document.getElementById("runtime-mode"),
-    generatedAt: document.getElementById("generated-at"),
     searchInput: document.getElementById("search-input"),
     domainFilter: document.getElementById("domain-filter"),
-    applicabilityFilter: document.getElementById("applicability-filter"),
-    frequencyFilter: document.getElementById("frequency-filter"),
     clearFilters: document.getElementById("clear-filters"),
     overview: document.getElementById("overview"),
-    frameworkChart: document.getElementById("framework-chart"),
-    timelineChart: document.getElementById("timeline-chart"),
-    reportDomains: document.getElementById("report-domains"),
     controlsBody: document.getElementById("controls-body"),
     controlDetail: document.getElementById("control-detail"),
     selectedControlBanner: document.getElementById("selected-control-banner"),
@@ -123,6 +107,12 @@
     vendorOverview: document.getElementById("vendor-overview"),
     vendorResponses: document.getElementById("vendor-responses"),
     vendorDetail: document.getElementById("vendor-detail"),
+    assessmentStatus: document.getElementById("assessment-status"),
+    assessmentOverview: document.getElementById("assessment-overview"),
+    assessmentProfiles: document.getElementById("assessment-profiles"),
+    assessmentDetail: document.getElementById("assessment-detail"),
+    assessmentReport: document.getElementById("assessment-report"),
+    assessmentNewProfile: document.getElementById("assessment-new-profile"),
     monthTabs: document.getElementById("month-tabs"),
     activities: document.getElementById("activities"),
     checklistSummary: document.getElementById("checklist-summary"),
@@ -157,6 +147,7 @@
     riskOwnerInput: document.getElementById("risk-owner"),
     riskClosedDateInput: document.getElementById("risk-closed-date"),
     riskSubmitButton: document.getElementById("risk-submit-button"),
+    riskDeleteButton: document.getElementById("risk-delete-button"),
     riskFormStatus: document.getElementById("risk-form-status"),
     riskProbabilityInput: document.querySelector(
       '#risk-probability, select[name="risk-probability"], select[name="probability"], select[name="initial-risk-probability"], input[name="risk-probability"]:not([type="radio"]), input[name="probability"]:not([type="radio"]), input[name="initial-risk-probability"]:not([type="radio"])'
@@ -176,11 +167,13 @@
   async function init() {
     await loadRemoteState();
     await loadAssignableUsers();
-    updateRuntimeMode();
-    updatePersistenceCopy();
-    if (els.generatedAt) {
-      els.generatedAt.textContent = formatDateTime(data.generatedAt);
+    if (page === "vendors" && typeof loadVendorResponsesState === "function") {
+      await loadVendorResponsesState();
     }
+    if (page === "assessments" && typeof loadZeroTrustState === "function") {
+      await loadZeroTrustState();
+    }
+    updatePersistenceCopy();
     if (els.searchInput) {
       els.searchInput.value = state.search;
     }
@@ -189,66 +182,27 @@
     initializeSelection();
     bindEvents();
     renderPage();
+    if (typeof applyRowSelectionAccessibility === "function") {
+      applyRowSelectionAccessibility();
+    }
   }
 
   async function loadAssignableUsers() {
     const existingAssignableUsers = Array.isArray(state.assignableUsers) ? state.assignableUsers : [];
-    state.assignableUsers = existingAssignableUsers.length ? existingAssignableUsers : fallbackAssignableUsers();
+    state.assignableUsers = existingAssignableUsers.length ? existingAssignableUsers : deriveAssignableUsers();
     if (existingAssignableUsers.length) {
-      return;
-    }
-    if (window.location.protocol === "file:") {
       return;
     }
 
     try {
-      const payload = await apiRequest("/state/");
+      const payload = await apiRequest(`/state/?page=${encodeURIComponent(page)}`);
       const assignableUsers = normalizeAssignableUsers(payload && payload.assignableUsers);
       if (assignableUsers.length) {
         state.assignableUsers = assignableUsers;
       }
     } catch (error) {
-      // Keep fallback owners from the local risk register when the API is unavailable.
+      // Keep owners derived from the current risk register if the API cannot provide them.
     }
-  }
-
-  function normalizeAssignableUsers(items) {
-    if (!Array.isArray(items)) {
-      return [];
-    }
-
-    const seen = new Set();
-    return items
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const username = typeof item.username === "string" ? item.username.trim() : "";
-        if (!username || seen.has(username)) {
-          return null;
-        }
-        seen.add(username);
-        const displayName = typeof item.displayName === "string" && item.displayName.trim()
-          ? item.displayName.trim()
-          : username;
-        return { username, displayName };
-      })
-      .filter(Boolean)
-      .sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true, sensitivity: "base" }));
-  }
-
-  function fallbackAssignableUsers() {
-    const seen = new Set();
-    return state.riskRegister
-      .map((risk) => (risk && typeof risk.owner === "string" ? risk.owner.trim() : ""))
-      .filter((owner) => {
-        if (!owner || seen.has(owner)) {
-          return false;
-        }
-        seen.add(owner);
-        return true;
-      })
-      .map((owner) => ({ username: owner, displayName: owner }));
   }
 
 void init();

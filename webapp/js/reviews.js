@@ -4,6 +4,40 @@
     renderActivities();
     renderChecklist();
   }
+  function reviewPersistenceStatusValue() {
+    if (!state.reviewPersistenceStatus || typeof state.reviewPersistenceStatus !== "object") {
+      return { message: "", tone: "" };
+    }
+    return {
+      message: typeof state.reviewPersistenceStatus.message === "string" ? state.reviewPersistenceStatus.message : "",
+      tone: typeof state.reviewPersistenceStatus.tone === "string" ? state.reviewPersistenceStatus.tone : "",
+    };
+  }
+  function reviewPersistenceStatusMarkup() {
+    return '<p class="helper-note" data-review-save-status></p>';
+  }
+  function renderReviewPersistenceStatus() {
+    if (!els.activities) {
+      return;
+    }
+    const statusElement = els.activities.querySelector("[data-review-save-status]");
+    if (!statusElement) {
+      return;
+    }
+    const status = reviewPersistenceStatusValue();
+    setUploadStatus(
+      statusElement,
+      status.message || "Review checklist updates sync with the shared portal database.",
+      status.tone || ""
+    );
+  }
+  function setReviewPersistenceStatus(message, tone) {
+    state.reviewPersistenceStatus = {
+      message: message || "",
+      tone: tone || "",
+    };
+    renderReviewPersistenceStatus();
+  }
   function renderReviewOverview() {
     if (!els.overview) {
       return;
@@ -61,7 +95,11 @@
     }
     const activities = monthlyActivities(state.monthIndex);
     if (!activities.length) {
-      els.activities.innerHTML = `<div class="empty-state">No checklist tasks are due for ${escapeHtml(monthNames[state.monthIndex])}.</div>`;
+      els.activities.innerHTML = `
+        <div class="empty-state">No checklist tasks are due for ${escapeHtml(monthNames[state.monthIndex])}.</div>
+        ${reviewPersistenceStatusMarkup()}
+      `;
+      renderReviewPersistenceStatus();
       return;
     }
 
@@ -87,7 +125,9 @@
           `;
         }).join("")}
       </div>
+      ${reviewPersistenceStatusMarkup()}
     `;
+    renderReviewPersistenceStatus();
   }
   function renderChecklist() {
     if (!els.checklist || !els.checklistSummary) {
@@ -126,35 +166,6 @@
   }
   function getRecommendedChecklistItems() {
     return normalizeChecklistItems(state.recommendedChecklistItems);
-  }
-  function normalizeChecklistItems(items) {
-    if (!Array.isArray(items)) {
-      return [];
-    }
-
-    const seenIds = new Set();
-    return items
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const id = typeof item.id === "string" ? item.id.trim() : "";
-        const checklistItem = typeof item.item === "string" ? item.item.trim() : "";
-        if (!id || !checklistItem || seenIds.has(id)) {
-          return null;
-        }
-        seenIds.add(id);
-        return {
-          id,
-          category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : "Custom",
-          item: checklistItem,
-          frequency: typeof item.frequency === "string" && item.frequency.trim() ? item.frequency.trim() : "Annual",
-          startDate: normalizeChecklistStartDate(item.startDate),
-          owner: typeof item.owner === "string" && item.owner.trim() ? item.owner.trim() : "Shared portal",
-          createdAt: normalizeChecklistCreatedAt(item.createdAt),
-        };
-      })
-      .filter(Boolean);
   }
   function checklistSignature(item) {
     return [
@@ -251,27 +262,15 @@
   }
   function openChecklistRecommendationPicker() {
     const picker = checklistRecommendationPicker();
+    const input = els.checklistRecommendationSelect;
     const list = checklistRecommendationList();
-    if (!picker || !list) {
-      return;
-    }
-    list.hidden = false;
-    picker.classList.add("is-open");
-    if (els.checklistRecommendationSelect) {
-      els.checklistRecommendationSelect.setAttribute("aria-expanded", "true");
-    }
+    openSharedSearchablePicker(picker, input, list);
   }
   function closeChecklistRecommendationPicker() {
     const picker = checklistRecommendationPicker();
+    const input = els.checklistRecommendationSelect;
     const list = checklistRecommendationList();
-    if (!picker || !list) {
-      return;
-    }
-    list.hidden = true;
-    picker.classList.remove("is-open");
-    if (els.checklistRecommendationSelect) {
-      els.checklistRecommendationSelect.setAttribute("aria-expanded", "false");
-    }
+    closeSharedSearchablePicker(picker, input, list);
   }
   function applyChecklistRecommendationSelection(recommendation, shouldClose = true) {
     if (!els.checklistRecommendationSelect || !els.checklistRecommendationAdd || !recommendation) {
@@ -293,56 +292,41 @@
     }
 
     const picker = checklistRecommendationPicker();
+    const input = els.checklistRecommendationSelect;
     const list = checklistRecommendationList();
-    if (!picker || !list || els.checklistRecommendationSelect.dataset.recommendationPickerBound) {
+    if (!picker || !input || !list) {
       return;
     }
-
-    els.checklistRecommendationSelect.dataset.recommendationPickerBound = "true";
-
-    els.checklistRecommendationSelect.addEventListener("focus", () => {
-      recommendationPickerState.showAll = true;
-      renderChecklistRecommendationOptions();
-      openChecklistRecommendationPicker();
-    });
-    els.checklistRecommendationSelect.addEventListener("click", () => {
-      recommendationPickerState.showAll = true;
-      renderChecklistRecommendationOptions();
-      openChecklistRecommendationPicker();
-    });
-    els.checklistRecommendationSelect.addEventListener("blur", () => {
-      window.setTimeout(closeChecklistRecommendationPicker, 120);
-    });
-    els.checklistRecommendationSelect.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    bindSharedSearchablePickerEvents({
+      picker,
+      input,
+      list,
+      boundDatasetKey: "recommendationPickerBound",
+      optionSelector: "[data-recommendation-id]",
+      onOpen: () => {
+        recommendationPickerState.showAll = true;
+        renderChecklistRecommendationOptions();
+        openChecklistRecommendationPicker();
+      },
+      onClose: () => {
         closeChecklistRecommendationPicker();
-        return;
-      }
-      if (event.key !== "Enter") {
-        return;
-      }
-      const recommendation = findChecklistRecommendationById(recommendationPickerState.selectedId)
-        || findChecklistRecommendationByInputValue(els.checklistRecommendationSelect.value);
-      if (!recommendation) {
-        return;
-      }
-      applyChecklistRecommendationSelection(recommendation, true);
-      event.preventDefault();
-    });
-
-    list.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    list.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-recommendation-id]");
-      if (!option) {
-        return;
-      }
-      const recommendation = findChecklistRecommendationById(option.dataset.recommendationId);
-      if (!recommendation) {
-        return;
-      }
-      applyChecklistRecommendationSelection(recommendation, true);
+      },
+      onEnter: () => {
+        const recommendation = findChecklistRecommendationById(recommendationPickerState.selectedId)
+          || findChecklistRecommendationByInputValue(input.value);
+        if (!recommendation) {
+          return false;
+        }
+        applyChecklistRecommendationSelection(recommendation, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        const recommendation = findChecklistRecommendationById(option.dataset.recommendationId);
+        if (!recommendation) {
+          return;
+        }
+        applyChecklistRecommendationSelection(recommendation, true);
+      },
     });
   }
   function renderChecklistRecommendationOptions() {
@@ -370,7 +354,15 @@
     if (!hasRecommendations) {
       recommendationPickerState.selectedId = "";
       els.checklistRecommendationAdd.disabled = true;
-      list.innerHTML = '<div class="recommendation-option-empty">No recommended tasks available</div>';
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute: "data-recommendation-id",
+        emptyMessage: "No recommended tasks available",
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => checklistRecommendationLabel(item),
+      });
       closeChecklistRecommendationPicker();
       return;
     }
@@ -383,21 +375,15 @@
       recommendationPickerState.selectedId = "";
     }
 
-    if (!visibleRecommendations.length) {
-      list.innerHTML = '<div class="recommendation-option-empty">No matching recommended tasks</div>';
-    } else {
-      list.innerHTML = visibleRecommendations.map((item) => `
-        <button
-          class="recommendation-option ${item.id === recommendationPickerState.selectedId ? "is-active" : ""}"
-          type="button"
-          data-recommendation-id="${escapeHtml(item.id)}"
-          role="option"
-          aria-selected="${item.id === recommendationPickerState.selectedId ? "true" : "false"}"
-        >
-          ${escapeHtml(checklistRecommendationLabel(item))}
-        </button>
-      `).join("");
-    }
+    renderSharedSearchablePickerOptions({
+      list,
+      options: visibleRecommendations,
+      selectedId: recommendationPickerState.selectedId,
+      optionDataAttribute: "data-recommendation-id",
+      emptyMessage: "No matching recommended tasks",
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => checklistRecommendationLabel(item),
+    });
 
     els.checklistRecommendationAdd.disabled = !recommendationPickerState.selectedId;
   }
@@ -580,15 +566,28 @@
     );
   }
   async function submitChecklistItem(payload, options) {
-    const statusMessage = options && options.statusMessage ? options.statusMessage : "Saving checklist item...";
-    setUploadStatus(els.checklistAddStatus, statusMessage, "info");
     try {
-      await createChecklistItem(payload);
+      await runAsyncOperation(
+        (message, tone) => {
+          setUploadStatus(els.checklistAddStatus, message, tone);
+        },
+        {
+          pending: options && options.statusMessage ? options.statusMessage : "Saving checklist item...",
+          success: (result) => {
+            if (options && options.closeFormOnSuccess) {
+              return null;
+            }
+            return options && options.successMessage ? options.successMessage : "Checklist item saved.";
+          },
+          error: "Checklist item could not be saved to the database.",
+        },
+        async () => {
+          await createChecklistItem(payload);
+        }
+      );
       if (options && options.closeFormOnSuccess) {
         hideChecklistAddForm();
       } else {
-        const successMessage = options && options.successMessage ? options.successMessage : "Checklist item saved.";
-        setUploadStatus(els.checklistAddStatus, successMessage, "success");
         if (els.checklistRecommendationSelect) {
           els.checklistRecommendationSelect.value = "";
         }
@@ -599,18 +598,10 @@
       }
       return true;
     } catch (error) {
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Checklist item could not be saved to the database.";
-      setUploadStatus(els.checklistAddStatus, detail, "error");
       return false;
     }
   }
   async function createChecklistItem(payload) {
-    if (!isApiPersistence()) {
-      throw new Error("Checklist items can only be added in API/database mode.");
-    }
-
     const response = await apiRequest("/checklist/", {
       method: "POST",
       body: JSON.stringify({ checklistItem: payload }),
@@ -620,15 +611,45 @@
       throw new Error("Created checklist item response was invalid.");
     }
 
-    applyCreatedChecklistItem(created);
+    await applyCreatedChecklistItem(created);
     return created;
   }
-  function applyCreatedChecklistItem(created) {
+  async function applyCreatedChecklistItem(created) {
+    const previousReviewState = normalizeReviewStateValue(state.reviewState);
     state.checklistItems = getAllChecklistItems().concat(created);
-    saveReviewState();
+    let reviewSaveError = null;
+    try {
+      await runAsyncOperation(
+        (message, tone) => {
+          setReviewPersistenceStatus(message, tone);
+        },
+        {
+          pending: "Saving review tracking...",
+          success: "Review tracking saved.",
+          error: "Review tracking could not be synced.",
+        },
+        async () => {
+          try {
+            await saveReviewState();
+          } catch (error) {
+            state.reviewState = previousReviewState;
+            throw error;
+          }
+        }
+      );
+    } catch (error) {
+      reviewSaveError = error;
+    }
     renderReviewsPage();
     refreshChecklistAddFormOptions();
     renderChecklistRecommendationOptions();
+
+    if (reviewSaveError) {
+      const detail = reviewSaveError instanceof Error && reviewSaveError.message
+        ? reviewSaveError.message
+        : "Review tracking could not be synced.";
+      throw new Error(`Checklist item was added, but review tracking did not sync: ${detail}`);
+    }
   }
   function monthlyActivities(monthIndex) {
     return getAllChecklistItems()
@@ -701,88 +722,6 @@
   }
   function isChecklistItemDueInMonth(item, monthIndex) {
     return dueMonthsForFrequency(item.frequency, item.startDate).includes(monthIndex);
-  }
-  function dueMonthsForFrequency(frequency, startDate = "") {
-    const value = String(frequency || "").trim().toLowerCase();
-    const dateParts = parseChecklistDateParts(startDate);
-    const anchorMonth = dateParts ? dateParts.monthIndex : null;
-    if (value.includes("monthly")) {
-      return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-    }
-    if (value.includes("quarterly")) {
-      return recurringMonths(anchorMonth === null ? 2 : anchorMonth, 3, 4);
-    }
-    if (value.includes("semi")) {
-      return recurringMonths(anchorMonth === null ? 5 : anchorMonth, 6, 2);
-    }
-    if (value.includes("annual")) {
-      return [anchorMonth === null ? 11 : anchorMonth];
-    }
-    return [];
-  }
-  function normalizeChecklistStartDate(value) {
-    const parts = parseChecklistDateParts(value);
-    return parts ? parts.isoDate : "";
-  }
-  function normalizeChecklistCreatedAt(value) {
-    const raw = typeof value === "string" ? value.trim() : "";
-    if (!raw) {
-      return "";
-    }
-    const parsed = parseDisplayDateValue(raw);
-    return parsed ? raw : "";
-  }
-  function parseChecklistDateParts(value) {
-    const normalized = String(value || "").trim();
-    if (!normalized) {
-      return null;
-    }
-    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) {
-      return null;
-    }
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const parsed = new Date(Date.UTC(year, month - 1, day));
-    if (
-      parsed.getUTCFullYear() !== year
-      || parsed.getUTCMonth() !== month - 1
-      || parsed.getUTCDate() !== day
-    ) {
-      return null;
-    }
-    return {
-      isoDate: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-      year,
-      monthIndex: month - 1,
-      day,
-    };
-  }
-  function recurringMonths(anchorMonth, interval, count) {
-    const seen = new Set();
-    const months = [];
-    for (let index = 0; index < count; index += 1) {
-      const month = (anchorMonth + (interval * index)) % 12;
-      if (seen.has(month)) {
-        continue;
-      }
-      seen.add(month);
-      months.push(month);
-    }
-    return months;
-  }
-  function checklistFrequencyWithAnchorLabel(frequency, startDate, monthIndex = null) {
-    const normalizedFrequency = String(frequency || "").trim() || "Not scheduled";
-    const dateParts = parseChecklistDateParts(startDate);
-    if (!dateParts) {
-      return normalizedFrequency;
-    }
-    if (normalizedFrequency.toLowerCase().includes("monthly")) {
-      return `${normalizedFrequency} (day ${dateParts.day})`;
-    }
-    const displayMonthIndex = Number.isInteger(monthIndex) ? monthIndex : dateParts.monthIndex;
-    return `${normalizedFrequency} (${monthNames[displayMonthIndex]} ${dateParts.day})`;
   }
   const recommendationPickerState = {
     selectedId: "",

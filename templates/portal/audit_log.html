@@ -1,54 +1,39 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Audit Log</title>
-  <link rel="stylesheet" href="{% static 'styles.css' %}">
-</head>
-<body data-page="audit-log">
-  <div class="app-shell">
-      {% include "portal/_sidebar.html" with active_page="audit-log" search_placeholder="Search audit records" %}
+{% extends "portal/base.html" %}
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="workspace-switcher">
-          <div class="workspace-icon">A</div>
-          <div>
-            <p class="workspace-label">Workspace</p>
-            <strong>Acme Co / ISO Program</strong>
-          </div>
+{% block title %}Audit Log{% endblock %}
+{% block body_page %}audit-log{% endblock %}
+
+{% block sidebar %}
+  {% include "portal/_sidebar.html" with active_page="audit-log" search_placeholder="Search audit records" %}
+{% endblock %}
+
+{% block content %}
+  <section class="report-header report-header-split">
+    <div>
+      <p class="section-kicker">Audit</p>
+      <h1>Audit log</h1>
+      <p class="report-copy">
+        Review recorded system actions for this workspace. Each entry includes action, record, user, and timestamp details.
+      </p>
+    </div>
+    <div class="report-actions">
+      <button class="ghost-button" id="audit-log-export-trigger" type="button">Export CSV</button>
+      <p class="helper-note upload-status" id="audit-log-export-status">
+        Export recorded audit entries as a CSV file.
+      </p>
+    </div>
+  </section>
+
+  <section class="page-grid">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="panel-kicker">Activity history</p>
+          <h2>Recorded actions</h2>
         </div>
-        <div class="topbar-actions">
-          {% include "portal/_auth_controls.html" %}
-        </div>
-      </header>
-
-      <main class="content">
-        <section class="report-header">
-          <p class="section-kicker">Audit</p>
-          <h1>Audit log</h1>
-          <p class="report-copy">
-            Review recorded system actions for this workspace. Each entry includes action, record, user, and timestamp details.
-          </p>
-        </section>
-
-        <section class="page-grid">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="panel-kicker">Activity history</p>
-                <h2>Recorded actions</h2>
-              </div>
-            </div>
-            <div class="mini-stats" id="audit-log-summary"></div>
-            <div id="audit-log-list"></div>
-          </article>
-        </section>
-      </main>
-    </section>
-  </div>
-  {% include "portal/_app_scripts.html" %}
-</body>
-</html>
+      </div>
+      <div class="mini-stats" id="audit-log-summary"></div>
+      <div id="audit-log-list"></div>
+    </article>
+  </section>
+{% endblock %}

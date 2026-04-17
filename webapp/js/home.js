@@ -1,7 +1,6 @@
   function renderHomePage() {
     const controls = getAllControlViews();
     renderGlobalOverview(controls, {
-      mode: "home",
       currentMonthActivities: monthlyActivities(state.monthIndex),
     });
     renderHomeUpcoming();

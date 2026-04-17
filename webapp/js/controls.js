@@ -10,11 +10,73 @@
     selectedDocumentId: "",
     showAll: false,
   };
+  let controlStateMutationVersion = 0;
 
   function renderControlsPage() {
     const controls = filteredControls();
     renderControlsTable(controls);
     renderControlDetail();
+  }
+  function controlPersistenceStatusValue() {
+    if (!state.controlPersistenceStatus || typeof state.controlPersistenceStatus !== "object") {
+      return { message: "", tone: "" };
+    }
+    return {
+      message: typeof state.controlPersistenceStatus.message === "string" ? state.controlPersistenceStatus.message : "",
+      tone: typeof state.controlPersistenceStatus.tone === "string" ? state.controlPersistenceStatus.tone : "",
+    };
+  }
+  function controlPersistenceStatusElement() {
+    if (!els.controlDetail) {
+      return null;
+    }
+    return els.controlDetail.querySelector("[data-control-save-status]");
+  }
+  function controlPersistenceFallbackStatusElement() {
+    if (page === "controls" && els.mappingUploadStatus) {
+      return els.mappingUploadStatus;
+    }
+    if (page === "policies" && els.policyUploadStatus) {
+      return els.policyUploadStatus;
+    }
+    return null;
+  }
+  function renderControlPersistenceStatus() {
+    const status = controlPersistenceStatusValue();
+    const detailStatus = controlPersistenceStatusElement();
+    if (detailStatus) {
+      setUploadStatus(
+        detailStatus,
+        status.message || "Control changes sync with the shared portal database.",
+        status.tone || ""
+      );
+    }
+
+    const fallbackStatus = controlPersistenceFallbackStatusElement();
+    if (fallbackStatus && status.message) {
+      setUploadStatus(fallbackStatus, status.message, status.tone || "");
+    }
+  }
+  function setControlPersistenceStatus(message, tone) {
+    state.controlPersistenceStatus = {
+      message: message || "",
+      tone: tone || "",
+    };
+    renderControlPersistenceStatus();
+  }
+  function cloneControlStateSnapshot() {
+    const snapshot = {};
+    Object.entries(state.controlState || {}).forEach(([controlId, entry]) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const clonedEntry = { ...entry };
+      if (Array.isArray(entry.policyDocumentIds)) {
+        clonedEntry.policyDocumentIds = entry.policyDocumentIds.slice();
+      }
+      snapshot[controlId] = clonedEntry;
+    });
+    return snapshot;
   }
   function renderControlsTable(controls) {
     if (!els.controlsBody) {
@@ -105,6 +167,7 @@
           <span class="status-pill ${control.policyDocumentIds.length ? "is-active" : ""}">${control.policyDocumentIds.length} mapped policies</span>
         </div>
       </div>
+      <p class="helper-note" data-control-save-status></p>
 
       <div class="detail-grid">
         <article class="detail-card">
@@ -141,7 +204,7 @@
           <div class="quick-add-row" data-control-policy-mapper="${escapeHtml(control.id)}">
             <label class="form-field" for="control-policy-picker-input">
               <span>Policy document</span>
-              <div class="recommendation-picker" data-control-policy-picker>
+              <div class="recommendation-picker">
                 <input
                   id="control-policy-picker-input"
                   type="search"
@@ -196,6 +259,7 @@
       </div>
     `;
     renderControlPolicyOptions();
+    renderControlPersistenceStatus();
   }
   function controlPolicyMapper() {
     if (!els.controlDetail) {
@@ -295,23 +359,13 @@
     const mapper = controlPolicyMapper();
     const input = controlPolicyPickerInput(mapper);
     const list = controlPolicyPickerList(mapper);
-    if (!mapper || !input || !list || input.disabled) {
-      return;
-    }
-    list.hidden = false;
-    mapper.classList.add("is-open");
-    input.setAttribute("aria-expanded", "true");
+    openSharedSearchablePicker(mapper, input, list);
   }
   function closeControlPolicyPicker() {
     const mapper = controlPolicyMapper();
     const input = controlPolicyPickerInput(mapper);
     const list = controlPolicyPickerList(mapper);
-    if (!mapper || !input || !list) {
-      return;
-    }
-    list.hidden = true;
-    mapper.classList.remove("is-open");
-    input.setAttribute("aria-expanded", "false");
+    closeSharedSearchablePicker(mapper, input, list);
   }
   function applyControlPolicyPickerSelection(documentItem, shouldClose = true) {
     const mapper = controlPolicyMapper();
@@ -333,57 +387,41 @@
     const mapper = controlPolicyMapper();
     const input = controlPolicyPickerInput(mapper);
     const list = controlPolicyPickerList(mapper);
-    if (!mapper || !input || !list || input.dataset.controlPolicyPickerBound) {
+    if (!mapper || !input || !list) {
       return;
     }
-
-    input.dataset.controlPolicyPickerBound = "true";
-
-    input.addEventListener("focus", () => {
-      controlPolicyPickerState.showAll = true;
-      renderControlPolicyOptions();
-      openControlPolicyPicker();
-    });
-    input.addEventListener("click", () => {
-      controlPolicyPickerState.showAll = true;
-      renderControlPolicyOptions();
-      openControlPolicyPicker();
-    });
-    input.addEventListener("blur", () => {
-      window.setTimeout(closeControlPolicyPicker, 120);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    bindSharedSearchablePickerEvents({
+      picker: mapper,
+      input,
+      list,
+      boundDatasetKey: "controlPolicyPickerBound",
+      optionSelector: "[data-control-policy-document-id]",
+      onOpen: () => {
+        controlPolicyPickerState.showAll = true;
+        renderControlPolicyOptions();
+        openControlPolicyPicker();
+      },
+      onClose: () => {
         closeControlPolicyPicker();
-        return;
-      }
-      if (event.key !== "Enter") {
-        return;
-      }
-      const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
-      const selectedItem = findControlPolicyOptionById(controlId, controlPolicyPickerState.selectedDocumentId)
-        || findControlPolicyOptionByInputValue(controlId, input.value);
-      if (!selectedItem) {
-        return;
-      }
-      applyControlPolicyPickerSelection(selectedItem, true);
-      event.preventDefault();
-    });
-
-    list.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    list.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-control-policy-document-id]");
-      if (!option) {
-        return;
-      }
-      const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
-      const selectedItem = findControlPolicyOptionById(controlId, option.dataset.controlPolicyDocumentId);
-      if (!selectedItem) {
-        return;
-      }
-      applyControlPolicyPickerSelection(selectedItem, true);
+      },
+      onEnter: () => {
+        const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
+        const selectedItem = findControlPolicyOptionById(controlId, controlPolicyPickerState.selectedDocumentId)
+          || findControlPolicyOptionByInputValue(controlId, input.value);
+        if (!selectedItem) {
+          return false;
+        }
+        applyControlPolicyPickerSelection(selectedItem, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        const controlId = mapper.dataset.controlPolicyMapper || state.selectedControlId;
+        const selectedItem = findControlPolicyOptionById(controlId, option.dataset.controlPolicyDocumentId);
+        if (!selectedItem) {
+          return;
+        }
+        applyControlPolicyPickerSelection(selectedItem, true);
+      },
     });
   }
   function renderControlPolicyOptions() {
@@ -411,7 +449,15 @@
       controlPolicyPickerState.selectedDocumentId = "";
       addButton.disabled = true;
       input.value = "";
-      list.innerHTML = '<div class="recommendation-option-empty">No additional policy documents available</div>';
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute: "data-control-policy-document-id",
+        emptyMessage: "No additional policy documents available",
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => controlPolicyLabel(item),
+      });
       closeControlPolicyPicker();
       return;
     }
@@ -423,21 +469,15 @@
       controlPolicyPickerState.selectedDocumentId = "";
     }
 
-    if (!visibleOptions.length) {
-      list.innerHTML = '<div class="recommendation-option-empty">No matching policy documents</div>';
-    } else {
-      list.innerHTML = visibleOptions.map((item) => `
-        <button
-          class="recommendation-option ${item.id === controlPolicyPickerState.selectedDocumentId ? "is-active" : ""}"
-          type="button"
-          data-control-policy-document-id="${escapeHtml(item.id)}"
-          role="option"
-          aria-selected="${item.id === controlPolicyPickerState.selectedDocumentId ? "true" : "false"}"
-        >
-          ${escapeHtml(controlPolicyLabel(item))}
-        </button>
-      `).join("");
-    }
+    renderSharedSearchablePickerOptions({
+      list,
+      options: visibleOptions,
+      selectedId: controlPolicyPickerState.selectedDocumentId,
+      optionDataAttribute: "data-control-policy-document-id",
+      emptyMessage: "No matching policy documents",
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => controlPolicyLabel(item),
+    });
 
     addButton.disabled = !controlPolicyPickerState.selectedDocumentId;
   }
@@ -595,7 +635,7 @@
   function isBaseExcluded(control) {
     return normalizeControlApplicability(control.applicability) === "Excluded";
   }
-  function saveControlStateEntry(controlId, nextState) {
+  async function saveControlStateEntry(controlId, nextState) {
     const applicability = normalizeControlApplicability(nextState.applicability);
     const reason = typeof nextState.reason === "string" ? nextState.reason : "";
     const reviewFrequency = normalizeControlReviewFrequency(nextState.reviewFrequency);
@@ -624,17 +664,44 @@
       entry.preferredDocumentId = preferredDocumentId;
     }
 
+    const previousControlState = cloneControlStateSnapshot();
+    const mutationVersion = ++controlStateMutationVersion;
+
     if (!Object.keys(entry).length) {
       delete state.controlState[controlId];
     } else {
       state.controlState[controlId] = entry;
     }
-    saveControlState();
+
+    return runAsyncOperation(
+      (message, tone) => {
+        if (mutationVersion === controlStateMutationVersion) {
+          setControlPersistenceStatus(message, tone);
+        }
+      },
+      {
+        pending: "Saving control changes...",
+        success: (saved) => (saved ? "Control changes saved." : null),
+        error: "Unable to save control changes.",
+      },
+      async () => {
+        try {
+          await saveControlState();
+          return mutationVersion === controlStateMutationVersion;
+        } catch (error) {
+          if (mutationVersion !== controlStateMutationVersion) {
+            return false;
+          }
+          state.controlState = previousControlState;
+          throw error;
+        }
+      }
+    );
   }
-  function setControlApplicability(controlId, applicability) {
+  async function setControlApplicability(controlId, applicability) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -645,15 +712,12 @@
     if (nextState.applicability !== "Excluded") {
       nextState.reason = "";
     }
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function setControlExclusion(controlId, excluded) {
-    setControlApplicability(controlId, excluded ? "Excluded" : "");
-  }
-  function updateControlReviewFrequency(controlId, reviewFrequency) {
+  async function updateControlReviewFrequency(controlId, reviewFrequency) {
     const control = controlsById.get(controlId);
     if (!control) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -663,12 +727,12 @@
       ...existing,
       reviewFrequency: normalizedFrequency === baseReviewFrequency ? "" : normalizedFrequency,
     };
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function updateControlOwner(controlId, owner) {
+  async function updateControlOwner(controlId, owner) {
     const control = controlsById.get(controlId);
     if (!control) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -678,12 +742,12 @@
       ...existing,
       owner: normalizedOwner === baseOwner ? "" : normalizedOwner,
     };
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function updateControlReason(controlId, reason) {
+  async function updateControlReason(controlId, reason) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -692,12 +756,12 @@
       applicability: "Excluded",
       reason,
     };
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function updateControlPolicyMapping(controlId, nextPolicyDocumentIds, preferredDocumentId) {
+  async function updateControlPolicyMapping(controlId, nextPolicyDocumentIds, preferredDocumentId) {
     const control = controlsById.get(controlId);
     if (!control) {
-      return;
+      return false;
     }
 
     const existing = state.controlState[controlId] || {};
@@ -728,35 +792,35 @@
       delete nextState.preferredDocumentId;
     }
 
-    saveControlStateEntry(controlId, nextState);
+    return saveControlStateEntry(controlId, nextState);
   }
-  function mapPolicyToControl(controlId, documentId) {
+  async function mapPolicyToControl(controlId, documentId) {
     const normalizedDocumentId = normalizeControlPreferredDocumentId(documentId);
     if (!normalizedDocumentId || !documentsById.has(normalizedDocumentId)) {
-      return;
+      return false;
     }
 
     const control = getControlView(controlId);
     if (!control || control.policyDocumentIds.includes(normalizedDocumentId)) {
-      return;
+      return false;
     }
 
     const nextPolicyDocumentIds = control.policyDocumentIds.concat(normalizedDocumentId);
-    updateControlPolicyMapping(
+    return updateControlPolicyMapping(
       controlId,
       nextPolicyDocumentIds,
       control.preferredDocumentId || normalizedDocumentId
     );
   }
-  function unmapPolicyFromControl(controlId, documentId) {
+  async function unmapPolicyFromControl(controlId, documentId) {
     const normalizedDocumentId = normalizeControlPreferredDocumentId(documentId);
     if (!normalizedDocumentId) {
-      return;
+      return false;
     }
 
     const control = getControlView(controlId);
     if (!control || !control.policyDocumentIds.includes(normalizedDocumentId)) {
-      return;
+      return false;
     }
 
     const nextPolicyDocumentIds = control.policyDocumentIds.filter((item) => item !== normalizedDocumentId);
@@ -764,24 +828,16 @@
       ? (nextPolicyDocumentIds[0] || "")
       : control.preferredDocumentId;
 
-    updateControlPolicyMapping(controlId, nextPolicyDocumentIds, nextPreferredDocumentId);
+    return updateControlPolicyMapping(controlId, nextPolicyDocumentIds, nextPreferredDocumentId);
   }
   function filteredControls() {
     const searchLower = state.search.trim().toLowerCase();
-    const usesDomainFilter = page === "controls" || page === "reports";
-    const usesReportOnlyFilters = page === "reports";
 
     return getAllControlViews().filter((view) => {
-      if (usesDomainFilter && state.domain !== "All" && view.domain !== state.domain) {
+      if (page === "controls" && state.domain !== "All" && view.domain !== state.domain) {
         return false;
       }
-      if (usesReportOnlyFilters && state.applicability !== "All" && view.effectiveApplicability !== state.applicability) {
-        return false;
-      }
-      if (usesReportOnlyFilters && state.frequency !== "All" && view.effectiveReviewFrequency !== state.frequency) {
-        return false;
-      }
-      if (!searchLower || (page !== "controls" && page !== "reports")) {
+      if (!searchLower || page !== "controls") {
         return true;
       }
 
@@ -811,37 +867,4 @@
     if (!state.selectedControlId || !controls.some((control) => control.id === state.selectedControlId)) {
       state.selectedControlId = controls[0].id;
     }
-  }
-  function reviewCadence(reviewFrequency) {
-    const value = String(reviewFrequency || "").toLowerCase();
-    if (value.includes("monthly")) {
-      return "Monthly";
-    }
-    if (value.includes("quarterly")) {
-      return "Quarterly";
-    }
-    if (value.includes("significant change")) {
-      return "Change";
-    }
-    if (value.includes("per event") || value.includes("after incidents")) {
-      return "Event";
-    }
-    return "Annual";
-  }
-  function buildSmoothPath(points) {
-    if (!points.length) {
-      return "";
-    }
-    if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y}`;
-    }
-
-    let path = `M ${points[0].x} ${points[0].y}`;
-    for (let index = 0; index < points.length - 1; index += 1) {
-      const current = points[index];
-      const next = points[index + 1];
-      const midX = (current.x + next.x) / 2;
-      path += ` C ${midX} ${current.y}, ${midX} ${next.y}, ${next.x} ${next.y}`;
-    }
-    return path;
   }

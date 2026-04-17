@@ -7,6 +7,11 @@ from .models import (
     RiskRecord,
     UploadedPolicy,
     VendorResponse,
+    ZeroTrustAssessmentArtifact,
+    ZeroTrustAssessmentRun,
+    ZeroTrustAssessmentRunLog,
+    ZeroTrustCertificate,
+    ZeroTrustTenantProfile,
 )
 
 
@@ -43,3 +48,33 @@ class ReviewChecklistRecommendationAdmin(admin.ModelAdmin):
 @admin.register(PortalState)
 class PortalStateAdmin(admin.ModelAdmin):
     list_display = ("key", "updated_at")
+
+
+@admin.register(ZeroTrustTenantProfile)
+class ZeroTrustTenantProfileAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "tenant_id", "client_id", "certificate_thumbprint", "last_run_at", "updated_at")
+    search_fields = ("display_name", "tenant_id", "client_id", "certificate_thumbprint")
+
+
+@admin.register(ZeroTrustCertificate)
+class ZeroTrustCertificateAdmin(admin.ModelAdmin):
+    list_display = ("profile", "thumbprint", "subject", "not_after", "is_current", "created_at")
+    search_fields = ("thumbprint", "subject", "serial_number", "profile__tenant_id", "profile__client_id")
+
+
+@admin.register(ZeroTrustAssessmentRun)
+class ZeroTrustAssessmentRunAdmin(admin.ModelAdmin):
+    list_display = ("external_id", "profile", "status", "started_at", "completed_at", "requested_by", "worker_id")
+    search_fields = ("external_id", "profile__tenant_id", "profile__client_id", "requested_by", "worker_id")
+
+
+@admin.register(ZeroTrustAssessmentRunLog)
+class ZeroTrustAssessmentRunLogAdmin(admin.ModelAdmin):
+    list_display = ("run", "sequence", "level", "stream", "created_at")
+    search_fields = ("run__external_id", "message")
+
+
+@admin.register(ZeroTrustAssessmentArtifact)
+class ZeroTrustAssessmentArtifactAdmin(admin.ModelAdmin):
+    list_display = ("run", "relative_path", "content_type", "size_bytes", "is_entrypoint", "created_at")
+    search_fields = ("run__external_id", "relative_path", "content_type", "sha256")

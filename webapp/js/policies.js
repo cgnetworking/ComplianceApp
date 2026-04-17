@@ -8,6 +8,7 @@
     selectedControlId: "",
     showAll: false,
   };
+  const policyDocumentLoadPromises = new Map();
 
   function normalizePolicyLibraryTab(value) {
     const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -32,9 +33,6 @@
       return "";
     }
     return typeof currentUser.username === "string" ? currentUser.username.trim() : "";
-  }
-  function currentPolicyActorLabel() {
-    return currentPolicyUsername() || "Unknown user";
   }
   function currentPolicyUserIsStaff() {
     if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG !== "object") {
@@ -91,6 +89,92 @@
     uploadedDocuments[index] = normalizedDocument;
     return true;
   }
+  function updateAnyDocumentEntry(updatedDocument) {
+    if (!updatedDocument || typeof updatedDocument !== "object" || typeof updatedDocument.id !== "string") {
+      return false;
+    }
+
+    const uploadedIndex = uploadedDocuments.findIndex((item) => item.id === updatedDocument.id);
+    if (uploadedIndex >= 0) {
+      const mergedUploadedDocument = {
+        ...uploadedDocuments[uploadedIndex],
+        ...updatedDocument,
+      };
+      const normalizedUploadedDocument = typeof normalizeUploadedPolicyItem === "function"
+        ? normalizeUploadedPolicyItem(mergedUploadedDocument)
+        : mergedUploadedDocument;
+      if (!normalizedUploadedDocument) {
+        return false;
+      }
+      uploadedDocuments[uploadedIndex] = normalizedUploadedDocument;
+      refreshDocumentsIndex();
+      return true;
+    }
+
+    const mappingIndex = data.documents.findIndex((item) => item.id === updatedDocument.id);
+    if (mappingIndex < 0) {
+      return false;
+    }
+    const mergedMappingDocument = {
+      ...data.documents[mappingIndex],
+      ...updatedDocument,
+    };
+    const normalizedMappingDocument = typeof normalizeMappingDocumentItem === "function"
+      ? normalizeMappingDocumentItem(mergedMappingDocument)
+      : mergedMappingDocument;
+    if (!normalizedMappingDocument) {
+      return false;
+    }
+    data.documents[mappingIndex] = normalizedMappingDocument;
+    refreshDocumentsIndex();
+    return true;
+  }
+  async function fetchPolicyDocumentFromApi(documentId) {
+    return apiRequest(`/policies/${encodeURIComponent(documentId)}/`);
+  }
+  async function ensurePolicyDocumentContentLoaded(documentId) {
+    const normalizedDocumentId = typeof documentId === "string" ? documentId.trim() : "";
+    if (!normalizedDocumentId) {
+      return;
+    }
+    const currentDocument = documentsById.get(normalizedDocumentId);
+    if (!currentDocument || currentDocument.contentLoaded || currentDocument.contentAvailable === false) {
+      return;
+    }
+    if (policyDocumentLoadPromises.has(normalizedDocumentId)) {
+      await policyDocumentLoadPromises.get(normalizedDocumentId);
+      return;
+    }
+
+    const request = (async () => {
+      try {
+        const payload = await fetchPolicyDocumentFromApi(normalizedDocumentId);
+        const nextDocument = payload && payload.document && typeof payload.document === "object"
+          ? payload.document
+          : null;
+        if (!nextDocument || !updateAnyDocumentEntry(nextDocument)) {
+          throw new Error("Policy document response was invalid.");
+        }
+      } catch (error) {
+        const fallbackDocument = {
+          id: normalizedDocumentId,
+          contentHtml: '<div class="empty-state">Unable to load policy content at the moment.</div>',
+          contentLoaded: true,
+          contentAvailable: false,
+        };
+        updateAnyDocumentEntry(fallbackDocument);
+        setPolicyUploadStatus(error instanceof Error ? error.message : "Unable to load policy content.", "error");
+      } finally {
+        policyDocumentLoadPromises.delete(normalizedDocumentId);
+        if (state.activeDocumentId === normalizedDocumentId) {
+          renderPoliciesPage();
+        }
+      }
+    })();
+
+    policyDocumentLoadPromises.set(normalizedDocumentId, request);
+    await request;
+  }
   async function updatePolicyApproverViaApi(documentId, approver) {
     return apiRequest(`/policies/${encodeURIComponent(documentId)}/approver/`, {
       method: "PATCH",
@@ -101,6 +185,47 @@
     return apiRequest(`/policies/${encodeURIComponent(documentId)}/approval/`, {
       method: "POST",
     });
+  }
+  function policyDocumentDownloadUrl(documentId) {
+    const normalizedId = String(documentId || "").trim();
+    if (!normalizedId) {
+      return "";
+    }
+    const apiBaseUrl = typeof resolveApiBaseUrl === "function" ? resolveApiBaseUrl() : "/api";
+    return `${apiBaseUrl}/policies/${encodeURIComponent(normalizedId)}/download/`;
+  }
+  function policyAllDocumentsDownloadUrl() {
+    const apiBaseUrl = typeof resolveApiBaseUrl === "function" ? resolveApiBaseUrl() : "/api";
+    return `${apiBaseUrl}/policies/downloads/all/`;
+  }
+  function bindPolicyDownloadAllTrigger(buttonElement) {
+    if (!buttonElement || buttonElement.dataset.policyDownloadBound === "true") {
+      return;
+    }
+    buttonElement.dataset.policyDownloadBound = "true";
+    buttonElement.addEventListener("click", (event) => {
+      if (getPolicyLibraryRows().length) {
+        return;
+      }
+      event.preventDefault();
+      setPolicyUploadStatus("No policy documents are available to download.", "error");
+    });
+  }
+  function syncPolicyDownloadAllTrigger() {
+    const downloadTrigger = document.getElementById("policy-download-all-trigger");
+    if (!downloadTrigger) {
+      return;
+    }
+    bindPolicyDownloadAllTrigger(downloadTrigger);
+
+    const hasPolicies = getPolicyLibraryRows().length > 0;
+    downloadTrigger.setAttribute("href", policyAllDocumentsDownloadUrl());
+    downloadTrigger.setAttribute("aria-disabled", hasPolicies ? "false" : "true");
+    if (hasPolicies) {
+      downloadTrigger.classList.remove("disabled");
+    } else {
+      downloadTrigger.classList.add("disabled");
+    }
   }
   function policyApprovalDateLabel(value) {
     const formatted = typeof formatDateWithOrdinal === "function" ? formatDateWithOrdinal(value) : "";
@@ -119,36 +244,6 @@
     }
     const approverIdentity = normalizePolicyApproverIdentity(documentItem.approver);
     return approverIdentity === currentIdentity;
-  }
-  function ensurePolicyAuditLogState() {
-    if (!state.reviewState || typeof state.reviewState !== "object") {
-      state.reviewState = { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
-    }
-    if (!Array.isArray(state.reviewState.auditLog)) {
-      state.reviewState.auditLog = [];
-    }
-  }
-  function buildLocalPolicyApprovalAuditEntry(documentItem, occurredAt) {
-    const approvalDate = policyApprovalDateLabel(occurredAt) || occurredAt;
-    return {
-      id: `audit-${Math.random().toString(16).slice(2, 14)}`,
-      action: "policy_approved",
-      entityType: "policy",
-      entityId: documentItem.id,
-      summary: `Approved ${documentItem.id} / ${documentItem.title} on ${approvalDate}.`,
-      occurredAt,
-      actor: {
-        username: currentPolicyUsername() || "local-user",
-        displayName: currentPolicyActorLabel(),
-      },
-      metadata: {
-        source: "policies",
-        policyId: documentItem.id,
-        policyTitle: documentItem.title,
-        approvedBy: currentPolicyUsername() || "local-user",
-        approvedAt: occurredAt,
-      },
-    };
   }
   async function handlePolicyApprovalSelection(checkbox) {
     if (!checkbox) {
@@ -170,48 +265,37 @@
     }
 
     checkbox.disabled = true;
-    setPolicyUploadStatus(`Recording approval for ${documentItem.id}...`, "info");
     try {
-      if (isApiPersistence()) {
-        const payload = await approvePolicyViaApi(documentId);
-        const updatedDocument = payload && payload.document && typeof payload.document === "object"
-          ? payload.document
-          : null;
-        if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
-          throw new Error("Approved policy response was invalid.");
-        }
-        if (payload && payload.reviewState && typeof payload.reviewState === "object") {
-          state.reviewState = normalizeReviewStateValue(payload.reviewState);
-        }
-      } else {
-        const occurredAt = new Date().toISOString();
-        if (!updateUploadedDocumentEntry({
-          id: documentId,
-          approvedAt: occurredAt,
-          approvedBy: currentPolicyUsername() || "local-user",
-        })) {
-          throw new Error("Uploaded policy was not found in local storage.");
-        }
-        ensurePolicyAuditLogState();
-        state.reviewState.auditLog = normalizeReviewAuditLogEntries(
-          state.reviewState.auditLog.concat(buildLocalPolicyApprovalAuditEntry(documentItem, occurredAt)),
-        );
-        await saveUploadedPolicies(uploadedDocuments);
-        saveReviewState();
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: `Recording approval for ${documentItem.id}...`,
+          success: `Approved ${documentItem.id} / ${documentItem.title}.`,
+          error: "Policy approval could not be recorded.",
+        },
+        async () => {
+          const payload = await approvePolicyViaApi(documentId);
+          const updatedDocument = payload && payload.document && typeof payload.document === "object"
+            ? payload.document
+            : null;
+          if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+            throw new Error("Approved policy response was invalid.");
+          }
+          if (payload && payload.reviewState && typeof payload.reviewState === "object") {
+            state.reviewState = normalizeReviewStateValue(payload.reviewState);
+          }
 
-      refreshDocumentsIndex();
-      initializePolicySelection();
-      syncUrl();
-      renderPoliciesPage();
-      setPolicyUploadStatus(`Approved ${documentItem.id} / ${documentItem.title}.`, "success");
+          refreshDocumentsIndex();
+          initializePolicySelection();
+          syncUrl();
+          renderPoliciesPage();
+        }
+      );
     } catch (error) {
       checkbox.checked = false;
       checkbox.disabled = false;
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Policy approval could not be recorded.";
-      setPolicyUploadStatus(detail, "error");
     }
   }
   function policyApproverOptions(documentItem) {
@@ -292,38 +376,33 @@
       return;
     }
 
-    setPolicyUploadStatus(`Updating approver for ${documentItem.id}...`, "info");
     try {
-      if (isApiPersistence()) {
-        const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
-        const updatedDocument = payload && payload.document && typeof payload.document === "object"
-          ? payload.document
-          : null;
-        if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
-          throw new Error("Updated policy response was invalid.");
-        }
-      } else {
-        if (!updateUploadedDocumentEntry({
-          id: documentId,
-          approver: selectedApprover,
-          approvedAt: "",
-          approvedBy: "",
-        })) {
-          throw new Error("Uploaded policy was not found in local storage.");
-        }
-        await saveUploadedPolicies(uploadedDocuments);
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: `Updating approver for ${documentItem.id}...`,
+          success: "Policy approver updated.",
+          error: "Policy approver could not be updated.",
+        },
+        async () => {
+          const payload = await updatePolicyApproverViaApi(documentId, selectedApprover);
+          const updatedDocument = payload && payload.document && typeof payload.document === "object"
+            ? payload.document
+            : null;
+          if (!updatedDocument || !updateUploadedDocumentEntry(updatedDocument)) {
+            throw new Error("Updated policy response was invalid.");
+          }
 
-      refreshDocumentsIndex();
-      initializePolicySelection();
-      syncUrl();
-      renderPoliciesPage();
-      setPolicyUploadStatus("Policy approver updated.", "success");
+          refreshDocumentsIndex();
+          initializePolicySelection();
+          syncUrl();
+          renderPoliciesPage();
+        }
+      );
     } catch (error) {
-      const detail = error instanceof Error && error.message
-        ? error.message
-        : "Policy approver could not be updated.";
-      setPolicyUploadStatus(detail, "error");
+      // Status is already updated by the shared helper.
     }
   }
 
@@ -366,6 +445,7 @@
     bindPolicyLibraryTabs();
     renderPolicyLibraryTabs();
     syncPoliciesPageCapabilities();
+    syncPolicyDownloadAllTrigger();
     initializePolicySelection();
     renderSelectedControlBanner();
     renderPolicyCoverageList(filteredPolicyCoverage(), true);
@@ -375,66 +455,73 @@
     if (!files.length) {
       return;
     }
-
-    setPolicyUploadStatus(
-      files.length === 1 ? `Uploading ${files[0].name}...` : `Uploading ${files.length} policy files...`,
-    );
-
     try {
-      const result = isApiPersistence() ? await uploadPoliciesToApi(files) : await createUploadedDocuments(files);
-      if (!result.documents.length) {
-        setPolicyUploadStatus(result.messages[0] || "No supported policy files were selected.", "error");
-        return;
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: () => (files.length === 1 ? `Uploading ${files[0].name}...` : `Uploading ${files.length} policy files...`),
+          success: (result) => {
+            if (!result.documents.length) {
+              return null;
+            }
+            const message = result.documents.length === 1
+              ? `Uploaded ${result.documents[0].title}.`
+              : `Uploaded ${result.documents.length} policies.`;
+            return [message].concat(result.messages).join(" ");
+          },
+          error: "Policy upload failed.",
+        },
+        async () => {
+          const result = await uploadPoliciesToApi(files);
+          if (!result.documents.length) {
+            throw new Error(result.messages[0] || "No supported policy files were selected.");
+          }
 
-      const nextUploadedDocuments = uploadedDocuments.concat(result.documents);
-      await saveUploadedPolicies(nextUploadedDocuments);
-      uploadedDocuments = nextUploadedDocuments;
-      refreshDocumentsIndex();
+          uploadedDocuments = uploadedDocuments.concat(result.documents);
+          refreshDocumentsIndex();
 
-      state.policyContextControlId = "";
-      state.search = "";
-      state.activeDocumentId = result.documents[result.documents.length - 1].id;
-      if (els.searchInput) {
-        els.searchInput.value = "";
-      }
-      syncUrl();
-      renderPoliciesPage();
-
-      const message = result.documents.length === 1
-        ? `Uploaded ${result.documents[0].title}.`
-        : `Uploaded ${result.documents.length} policies.`;
-      setPolicyUploadStatus([message].concat(result.messages).join(" "), "success");
+          state.policyContextControlId = "";
+          state.search = "";
+          state.activeDocumentId = result.documents[result.documents.length - 1].id;
+          if (els.searchInput) {
+            els.searchInput.value = "";
+          }
+          syncUrl();
+          renderPoliciesPage();
+          return result;
+        }
+      );
     } catch (error) {
-      setPolicyUploadStatus(error.message || "Policy upload failed.", "error");
+      // The shared helper already set the error status.
     }
   }
   async function handleMappingUpload(files) {
     if (!files.length) {
       return;
     }
-
-    const selectedFile = files[0];
-    setMappingUploadStatus(`Uploading mapping from ${selectedFile.name}...`, "info");
-
-    if (!isApiPersistence()) {
-      setMappingUploadStatus("Mapping uploads require API persistence so the mapping can be stored in PostgreSQL.", "error");
-      return;
-    }
-
     try {
-      const payload = await uploadMappingToApi(selectedFile);
-      applyMappingPayload(payload.mapping);
-      initializeSelection();
-      syncUrl();
-      renderPage();
-
-      setMappingUploadStatus(
-        `Mapping uploaded (${data.controls.length} controls, ${data.documents.length} documents).`,
-        "success"
+      const selectedFile = files[0];
+      await runAsyncOperation(
+        (message, tone) => {
+          setMappingUploadStatus(message, tone);
+        },
+        {
+          pending: `Uploading mapping from ${selectedFile.name}...`,
+          success: () => `Mapping uploaded (${data.controls.length} controls, ${data.documents.length} documents).`,
+          error: "Mapping upload failed.",
+        },
+        async () => {
+          const payload = await uploadMappingToApi(selectedFile);
+          applyMappingPayload(payload.mapping);
+          initializeSelection();
+          syncUrl();
+          renderPage();
+        }
       );
     } catch (error) {
-      setMappingUploadStatus(error.message || "Mapping upload failed.", "error");
+      // The shared helper already set the error status.
     }
   }
   async function uploadMappingToApi(file) {
@@ -445,25 +532,6 @@
       method: "POST",
       body: formData,
     });
-  }
-  async function createUploadedDocuments(files) {
-    const documents = [];
-    const messages = [];
-    let nextNumber = nextUploadedPolicyNumber(uploadedDocuments);
-
-    for (const file of files) {
-      const extension = fileExtension(file.name);
-      if (!isSupportedUploadedPolicyType(extension)) {
-        messages.push(`${file.name} was skipped because only markdown, text, and HTML files are supported.`);
-        continue;
-      }
-
-      const rawContent = await readFileAsText(file);
-      documents.push(buildUploadedPolicyDocument(file, rawContent, nextNumber));
-      nextNumber += 1;
-    }
-
-    return { documents, messages };
   }
   async function uploadPoliciesToApi(files) {
     const formData = new FormData();
@@ -504,52 +572,32 @@
       return;
     }
 
-    setPolicyUploadStatus(`Deleting ${documentItem.id}...`, "info");
-
     try {
-      if (isApiPersistence()) {
-        await deletePolicyFromApi(selectedDocumentId);
-      }
+      await runAsyncOperation(
+        (message, tone) => {
+          setPolicyUploadStatus(message, tone);
+        },
+        {
+          pending: `Deleting ${documentItem.id}...`,
+          success: `Deleted ${documentItem.id} / ${documentItem.title}.`,
+          error: "Unable to delete the selected policy.",
+        },
+        async () => {
+          await deletePolicyFromApi(selectedDocumentId);
+          uploadedDocuments = uploadedDocuments.filter((item) => item.id !== selectedDocumentId);
+          refreshDocumentsIndex();
 
-      const nextUploadedDocuments = uploadedDocuments.filter((item) => item.id !== selectedDocumentId);
-      if (!isApiPersistence()) {
-        await saveUploadedPolicies(nextUploadedDocuments);
-      }
-      uploadedDocuments = nextUploadedDocuments;
-      refreshDocumentsIndex();
-
-      if (state.activeDocumentId === selectedDocumentId) {
-        state.activeDocumentId = "";
-      }
-      initializePolicySelection();
-      syncUrl();
-      renderPoliciesPage();
-      setPolicyUploadStatus(`Deleted ${documentItem.id} / ${documentItem.title}.`, "success");
+          if (state.activeDocumentId === selectedDocumentId) {
+            state.activeDocumentId = "";
+          }
+          initializePolicySelection();
+          syncUrl();
+          renderPoliciesPage();
+        }
+      );
     } catch (error) {
-      setPolicyUploadStatus(error.message || "Unable to delete the selected policy.", "error");
+      // The shared helper already set the error status.
     }
-  }
-  function buildUploadedPolicyDocument(file, rawContent, number) {
-    const extension = fileExtension(file.name);
-    const isHtmlUpload = extension === "html" || extension === "htm";
-    const contentHtml = isHtmlUpload ? sanitizeUploadedHtml(rawContent) : markdownToHtml(rawContent);
-
-    return {
-      id: formatUploadedPolicyId(number),
-      title: fileNameBase(file.name),
-      type: "Uploaded policy",
-      approver: "Pending review",
-      approvedAt: "",
-      approvedBy: "",
-      reviewFrequency: "Not scheduled",
-      path: `Local upload / ${file.name}`,
-      folder: "Uploaded",
-      purpose: extractPurposeFromMarkdown(rawContent) || `Uploaded from ${file.name}.`,
-      contentHtml: contentHtml || "<p>No content was found in the uploaded file.</p>",
-      isUploaded: true,
-      originalFilename: file.name,
-      uploadedAt: new Date().toISOString(),
-    };
   }
   function setPolicyUploadStatus(message, tone) {
     if (!els.policyUploadStatus) {
@@ -573,157 +621,6 @@
       return;
     }
     setUploadStatus(els.mappingUploadStatus, message, tone);
-  }
-  function isSupportedUploadedPolicyType(extension) {
-    return ["md", "markdown", "txt", "html", "htm"].includes(extension);
-  }
-  function fileExtension(fileName) {
-    const parts = String(fileName).toLowerCase().split(".");
-    return parts.length > 1 ? parts.pop() : "";
-  }
-  function fileNameBase(fileName) {
-    const withoutExtension = String(fileName).replace(/\.[^.]+$/, "");
-    const normalized = withoutExtension.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    return normalized || fileName;
-  }
-  function nextUploadedPolicyNumber(items) {
-    return items.reduce((max, item) => {
-      const match = /^UPL-(\d+)$/i.exec(item.id || "");
-      return match ? Math.max(max, Number(match[1])) : max;
-    }, 0) + 1;
-  }
-  function formatUploadedPolicyId(number) {
-    return `UPL-${String(number).padStart(2, "0")}`;
-  }
-  function readFileAsText(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(new Error(`Unable to read ${file.name}.`));
-      reader.readAsText(file);
-    });
-  }
-  function inlineMarkup(text) {
-    let rendered = escapeHtml(text);
-    rendered = rendered.replace(/`([^`]+)`/g, "<code>$1</code>");
-    rendered = rendered.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    rendered = rendered.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    return rendered;
-  }
-  function tableCells(line) {
-    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
-  }
-  function isTableSeparator(line) {
-    const stripped = line.trim();
-    if (!stripped.startsWith("|")) {
-      return false;
-    }
-    const cells = tableCells(stripped);
-    return cells.length > 0 && cells.every((cell) => cell && /^[\-:]+$/.test(cell));
-  }
-  function markdownToHtml(markdown) {
-    const lines = String(markdown).split(/\r?\n/);
-    const blocks = [];
-
-    for (let index = 0; index < lines.length;) {
-      const line = lines[index].replace(/\s+$/, "");
-      const stripped = line.trim();
-
-      if (!stripped) {
-        index += 1;
-        continue;
-      }
-
-      if (stripped.startsWith("|") && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
-        const header = tableCells(lines[index]);
-        index += 2;
-        const body = [];
-        while (index < lines.length && lines[index].trim().startsWith("|")) {
-          body.push(tableCells(lines[index]));
-          index += 1;
-        }
-        blocks.push(
-          "<table><thead><tr>"
-            + header.map((cell) => `<th>${inlineMarkup(cell)}</th>`).join("")
-            + "</tr></thead><tbody>"
-            + body.map((row) => `<tr>${row.map((cell) => `<td>${inlineMarkup(cell)}</td>`).join("")}</tr>`).join("")
-            + "</tbody></table>",
-        );
-        continue;
-      }
-
-      if (stripped.startsWith("- ")) {
-        const items = [];
-        while (index < lines.length && lines[index].trim().startsWith("- ")) {
-          items.push(lines[index].trim().slice(2));
-          index += 1;
-        }
-        blocks.push(`<ul>${items.map((item) => `<li>${inlineMarkup(item)}</li>`).join("")}</ul>`);
-        continue;
-      }
-
-      if (stripped.startsWith("#")) {
-        const level = Math.min(stripped.match(/^#+/)[0].length, 6);
-        blocks.push(`<h${level}>${inlineMarkup(stripped.slice(level).trim())}</h${level}>`);
-        index += 1;
-        continue;
-      }
-
-      const paragraph = [stripped];
-      index += 1;
-      while (index < lines.length) {
-        const candidate = lines[index].trim();
-        if (!candidate) {
-          index += 1;
-          break;
-        }
-        if (candidate.startsWith("#") || candidate.startsWith("- ")) {
-          break;
-        }
-        if (candidate.startsWith("|") && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
-          break;
-        }
-        paragraph.push(candidate);
-        index += 1;
-      }
-      blocks.push(`<p>${inlineMarkup(paragraph.join(" "))}</p>`);
-    }
-
-    return blocks.join("\n");
-  }
-  function extractPurposeFromMarkdown(markdown) {
-    const match = /^## 1\. Purpose\s+([\s\S]*?)\s+## /m.exec(String(markdown));
-    if (!match) {
-      return "";
-    }
-    return match[1]
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .join(" ");
-  }
-  function sanitizeUploadedHtml(html) {
-    const parser = new DOMParser();
-    const parsed = parser.parseFromString(String(html), "text/html");
-
-    parsed.querySelectorAll("script,style,iframe,object,embed,form,link,meta").forEach((node) => {
-      node.remove();
-    });
-
-    parsed.querySelectorAll("*").forEach((element) => {
-      Array.from(element.attributes).forEach((attribute) => {
-        const name = attribute.name.toLowerCase();
-        const value = attribute.value.trim().toLowerCase();
-        if (name.startsWith("on")) {
-          element.removeAttribute(attribute.name);
-        }
-        if ((name === "href" || name === "src") && value.startsWith("javascript:")) {
-          element.removeAttribute(attribute.name);
-        }
-      });
-    });
-
-    return parsed.body.innerHTML.trim() || `<p>${escapeHtml(html)}</p>`;
   }
   function renderSelectedControlBanner() {
     if (!els.selectedControlBanner) {
@@ -884,11 +781,11 @@
     const relatedControlIds = new Set(relatedControlViews.map((control) => control.id));
     const relatedControls = relatedControlViews
       .slice(0, 8)
-      .map((control) => `<a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)}</a>`)
+      .map((control) => `<a class="chip" href="/controls/?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)}</a>`)
       .join("");
     const mappedControlRows = relatedControlViews.map((control) => `
       <div class="mapping-row">
-        <a class="chip" href="./controls.html?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</a>
+        <a class="chip" href="/controls/?control=${encodeURIComponent(control.id)}">${escapeHtml(control.id)} / ${escapeHtml(control.name)}</a>
         ${isPolicyReader ? "" : `
           <button
             class="ghost-button danger-button mapping-remove-button"
@@ -934,9 +831,29 @@
           ${documentItem.reviewFrequency ? `<span class="chip">${escapeHtml(documentItem.reviewFrequency)}</span>` : ""}
         </div>
       `;
-    const documentActions = documentItem.isUploaded && !isPolicyReader
-      ? `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
-      : "";
+    const documentActions = [
+      `<a class="ghost-button" href="${escapeHtml(policyDocumentDownloadUrl(documentItem.id))}" download>Download Policy</a>`,
+    ];
+    if (documentItem.isUploaded && !isPolicyReader) {
+      documentActions.push(
+        `<button class="ghost-button danger-button" type="button" data-delete-policy="${escapeHtml(documentItem.id)}">Delete Policy</button>`
+      );
+    }
+    const shouldLoadDocumentContent = !documentItem.contentLoaded && documentItem.contentAvailable !== false;
+    if (shouldLoadDocumentContent) {
+      void ensurePolicyDocumentContentLoaded(documentItem.id);
+    }
+    const contentMarkup = documentItem.contentLoaded
+      ? (
+          documentItem.contentHtml
+            ? documentItem.contentHtml
+            : '<div class="empty-state">No embedded content is available for this policy document.</div>'
+        )
+      : (
+          documentItem.contentAvailable === false
+            ? '<div class="empty-state">No embedded content is available for this policy document.</div>'
+            : '<div class="empty-state">Loading policy content...</div>'
+        );
     const approverFieldMarkup = renderPolicyApproverField(documentItem);
     const controlMappingEditor = isPolicyReader
       ? '<p class="helper-note">Policy Reader access is view-only. Control mappings cannot be edited.</p>'
@@ -944,7 +861,7 @@
         <div class="quick-add-row" data-policy-control-mapper="${escapeHtml(documentItem.id)}">
           <label class="form-field" for="policy-control-picker-input">
             <span>Control</span>
-            <div class="recommendation-picker" data-policy-control-picker>
+            <div class="recommendation-picker">
               <input
                 id="policy-control-picker-input"
                 type="search"
@@ -989,9 +906,9 @@
           </div>
           ${controlMappingEditor}
         </div>
-        ${documentActions ? `<div class="document-actions">${documentActions}</div>` : ""}
+        ${documentActions.length ? `<div class="document-actions">${documentActions.join("")}</div>` : ""}
       </div>
-      <div class="content-frame">${documentItem.contentHtml}</div>
+      <div class="content-frame">${contentMarkup}</div>
     `;
     renderPolicyControlOptions();
   }
@@ -1095,23 +1012,13 @@
     const mapper = policyControlMapper();
     const input = policyControlPickerInput(mapper);
     const list = policyControlPickerList(mapper);
-    if (!mapper || !input || !list || input.disabled) {
-      return;
-    }
-    list.hidden = false;
-    mapper.classList.add("is-open");
-    input.setAttribute("aria-expanded", "true");
+    openSharedSearchablePicker(mapper, input, list);
   }
   function closePolicyControlPicker() {
     const mapper = policyControlMapper();
     const input = policyControlPickerInput(mapper);
     const list = policyControlPickerList(mapper);
-    if (!mapper || !input || !list) {
-      return;
-    }
-    list.hidden = true;
-    mapper.classList.remove("is-open");
-    input.setAttribute("aria-expanded", "false");
+    closeSharedSearchablePicker(mapper, input, list);
   }
   function applyPolicyControlPickerSelection(control, shouldClose = true) {
     const mapper = policyControlMapper();
@@ -1133,57 +1040,41 @@
     const mapper = policyControlMapper();
     const input = policyControlPickerInput(mapper);
     const list = policyControlPickerList(mapper);
-    if (!mapper || !input || !list || input.dataset.policyControlPickerBound) {
+    if (!mapper || !input || !list) {
       return;
     }
-
-    input.dataset.policyControlPickerBound = "true";
-
-    input.addEventListener("focus", () => {
-      policyControlPickerState.showAll = true;
-      renderPolicyControlOptions();
-      openPolicyControlPicker();
-    });
-    input.addEventListener("click", () => {
-      policyControlPickerState.showAll = true;
-      renderPolicyControlOptions();
-      openPolicyControlPicker();
-    });
-    input.addEventListener("blur", () => {
-      window.setTimeout(closePolicyControlPicker, 120);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
+    bindSharedSearchablePickerEvents({
+      picker: mapper,
+      input,
+      list,
+      boundDatasetKey: "policyControlPickerBound",
+      optionSelector: "[data-policy-control-id]",
+      onOpen: () => {
+        policyControlPickerState.showAll = true;
+        renderPolicyControlOptions();
+        openPolicyControlPicker();
+      },
+      onClose: () => {
         closePolicyControlPicker();
-        return;
-      }
-      if (event.key !== "Enter") {
-        return;
-      }
-      const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
-      const selectedControl = findPolicyControlOptionById(documentId, policyControlPickerState.selectedControlId)
-        || findPolicyControlOptionByInputValue(documentId, input.value);
-      if (!selectedControl) {
-        return;
-      }
-      applyPolicyControlPickerSelection(selectedControl, true);
-      event.preventDefault();
-    });
-
-    list.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    list.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-policy-control-id]");
-      if (!option) {
-        return;
-      }
-      const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
-      const selectedControl = findPolicyControlOptionById(documentId, option.dataset.policyControlId);
-      if (!selectedControl) {
-        return;
-      }
-      applyPolicyControlPickerSelection(selectedControl, true);
+      },
+      onEnter: () => {
+        const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+        const selectedControl = findPolicyControlOptionById(documentId, policyControlPickerState.selectedControlId)
+          || findPolicyControlOptionByInputValue(documentId, input.value);
+        if (!selectedControl) {
+          return false;
+        }
+        applyPolicyControlPickerSelection(selectedControl, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        const documentId = mapper.dataset.policyControlMapper || state.activeDocumentId;
+        const selectedControl = findPolicyControlOptionById(documentId, option.dataset.policyControlId);
+        if (!selectedControl) {
+          return;
+        }
+        applyPolicyControlPickerSelection(selectedControl, true);
+      },
     });
   }
   function renderPolicyControlOptions() {
@@ -1211,7 +1102,15 @@
       policyControlPickerState.selectedControlId = "";
       addButton.disabled = true;
       input.value = "";
-      list.innerHTML = '<div class="recommendation-option-empty">No additional controls available</div>';
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute: "data-policy-control-id",
+        emptyMessage: "No additional controls available",
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => policyControlLabel(item),
+      });
       closePolicyControlPicker();
       return;
     }
@@ -1223,21 +1122,15 @@
       policyControlPickerState.selectedControlId = "";
     }
 
-    if (!visibleOptions.length) {
-      list.innerHTML = '<div class="recommendation-option-empty">No matching controls</div>';
-    } else {
-      list.innerHTML = visibleOptions.map((item) => `
-        <button
-          class="recommendation-option ${item.id === policyControlPickerState.selectedControlId ? "is-active" : ""}"
-          type="button"
-          data-policy-control-id="${escapeHtml(item.id)}"
-          role="option"
-          aria-selected="${item.id === policyControlPickerState.selectedControlId ? "true" : "false"}"
-        >
-          ${escapeHtml(policyControlLabel(item))}
-        </button>
-      `).join("");
-    }
+    renderSharedSearchablePickerOptions({
+      list,
+      options: visibleOptions,
+      selectedId: policyControlPickerState.selectedControlId,
+      optionDataAttribute: "data-policy-control-id",
+      emptyMessage: "No matching controls",
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => policyControlLabel(item),
+    });
 
     addButton.disabled = !policyControlPickerState.selectedControlId;
   }
@@ -1396,5 +1289,5 @@
       query.set("doc", documentId);
     }
     const suffix = query.toString();
-    return `./policies.html${suffix ? `?${suffix}` : ""}`;
+    return `/policies/${suffix ? `?${suffix}` : ""}`;
   }

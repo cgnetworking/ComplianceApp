@@ -1,0 +1,7 @@
+Django>=5.2,<5.3
+bleach
+cryptography
+gunicorn
+psycopg[binary]
+social-auth-app-django
+whitenoise
