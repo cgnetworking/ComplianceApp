@@ -16,6 +16,13 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 
+from .authorization import (
+    PAGE_PERMISSION_REQUIREMENTS,
+    PortalAction,
+    PortalResource,
+    has_any_portal_permission,
+    has_portal_permission,
+)
 from .services.bootstrap import (
     append_portal_audit_entry,
     create_review_checklist_item,
@@ -24,7 +31,7 @@ from .services.bootstrap import (
     review_state_payload_for_viewer,
     update_review_state,
 )
-from .services.common import ValidationError, normalize_control_state, normalize_mapping_payload, set_state_payload, user_is_policy_reader
+from .services.common import ValidationError, normalize_control_state, normalize_mapping_payload, set_state_payload
 from .services.mapping import replace_mapping_payload
 from .services.policies import (
     approve_uploaded_policy,
@@ -52,11 +59,9 @@ from .view_helpers import (
     api_login_required,
     current_audit_actor,
     parse_json_body_or_400,
-    policy_reader_api_access,
-    policy_reader_forbidden_response,
+    portal_api_forbidden_response,
+    portal_page_permission_required,
     render_portal_page,
-    staff_api_forbidden_response,
-    staff_page_required,
 )
 
 
@@ -207,6 +212,10 @@ def named_item_preview(items: list[object], *, limit: int = 3) -> str:
     return preview
 
 
+def page_permission_detail(page_label: str) -> str:
+    return f"You do not have permission to access the {page_label} page."
+
+
 @ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
 def login_page(request: HttpRequest) -> HttpResponse:
@@ -270,74 +279,81 @@ def logout_view(request: HttpRequest) -> HttpResponse:
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["home"])
 def home_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/index.html")
 
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["controls"])
 def controls_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/controls.html")
 
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["reviews"])
 def reviews_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/reviews.html")
 
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["review-tasks"])
 def review_tasks_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/review_tasks.html")
 
 
 @login_required(login_url="portal-login")
-@staff_page_required
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["audit-log"])
 def audit_log_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/audit_log.html")
 
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["policies"])
 def policies_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/policies.html", allow_policy_reader=True)
 
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["risks"])
 def risks_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/risks.html")
 
 
 @login_required(login_url="portal-login")
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["vendors"])
 def vendors_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/vendors.html")
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=True)
 @ensure_csrf_cookie
 @require_GET
 def bootstrap_state(request: HttpRequest) -> JsonResponse:
     page = str(request.GET.get("page") or "").strip().lower()
-    if page == "audit-log" and not request.user.is_staff:
-        return staff_api_forbidden_response("Only staff users can access the audit log.")
+    page_requirements = PAGE_PERMISSION_REQUIREMENTS.get(page)
+    if page_requirements and not has_any_portal_permission(request.user, page_requirements):
+        return portal_api_forbidden_response(page_permission_detail(page.replace("-", " ")))
     return JsonResponse(
         get_bootstrap_payload(
             viewer=request.user,
-            policy_reader=user_is_policy_reader(request.user),
             page=page,
         )
     )
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def upload_policies(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.POLICY_DOCUMENT, PortalAction.ADD):
+        return portal_api_forbidden_response("You do not have permission to upload policy documents.")
     files = request.FILES.getlist("files")
     if not files:
         return JsonResponse({"detail": "Select at least one policy file to upload."}, status=400)
@@ -380,20 +396,22 @@ def upload_policies(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=True)
 @require_http_methods(["GET", "DELETE"])
 def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
     if request.method == "GET":
         try:
-            document = get_policy_document(document_id)
+            document = get_policy_document(document_id, viewer=request.user)
         except ValidationError as error:
             detail = str(error)
-            status_code = 404 if detail == "Policy document was not found." else 400
+            if detail == "You do not have permission to access this policy document.":
+                status_code = 403
+            else:
+                status_code = 404 if detail == "Policy document was not found." else 400
             return JsonResponse({"detail": detail}, status=status_code)
         return JsonResponse({"document": document})
 
-    if user_is_policy_reader(request.user):
-        return policy_reader_forbidden_response()
+    if not has_portal_permission(request.user, PortalResource.POLICY_DOCUMENT, PortalAction.DELETE):
+        return portal_api_forbidden_response("You do not have permission to delete policy documents.")
 
     try:
         deleted_document = delete_uploaded_policy(document_id)
@@ -421,11 +439,10 @@ def policy_document(request: HttpRequest, document_id: str) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PATCH", "PUT"])
 def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResponse:
-    if not request.user.is_staff:
-        return JsonResponse({"detail": "Only admins can assign policy approvers."}, status=403)
+    if not has_portal_permission(request.user, PortalResource.POLICY_DOCUMENT, PortalAction.ASSIGN):
+        return portal_api_forbidden_response("You do not have permission to assign policy approvers.")
 
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
@@ -444,9 +461,10 @@ def policy_document_approver(request: HttpRequest, document_id: str) -> JsonResp
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def policy_document_approval(request: HttpRequest, document_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.POLICY_DOCUMENT, PortalAction.APPROVE):
+        return portal_api_forbidden_response("You do not have permission to approve policy documents.")
     username, display_name = current_audit_actor(request)
 
     try:
@@ -471,9 +489,10 @@ def policy_document_approval(request: HttpRequest, document_id: str) -> JsonResp
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def upload_mapping(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.MAPPING, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify mappings.")
     file_obj = request.FILES.get("file")
     if file_obj is None:
         files = request.FILES.getlist("files")
@@ -516,11 +535,15 @@ def upload_mapping(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "POST"])
 def upload_vendors(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        return JsonResponse({"responses": list_vendor_responses()})
+        if not has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.VIEW):
+            return portal_api_forbidden_response("You do not have permission to view vendor responses.")
+        return JsonResponse({"responses": list_vendor_responses(viewer=request.user)})
+
+    if not has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.ADD):
+        return portal_api_forbidden_response("You do not have permission to import vendor responses.")
 
     files = request.FILES.getlist("files")
     if not files:
@@ -558,9 +581,10 @@ def upload_vendors(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["DELETE"])
 def vendor_response(request: HttpRequest, response_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.DELETE):
+        return portal_api_forbidden_response("You do not have permission to delete vendor responses.")
     try:
         deleted_response = delete_vendor_response(response_id)
     except ValidationError as error:
@@ -591,17 +615,20 @@ def vendor_response(request: HttpRequest, response_id: str) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["GET", "POST", "PUT"])
 def risk_register(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        return JsonResponse({"riskRegister": list_risk_register()})
+        if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.VIEW):
+            return portal_api_forbidden_response("You do not have permission to view risk records.")
+        return JsonResponse({"riskRegister": list_risk_register(viewer=request.user)})
 
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
         return error_response
 
     if request.method == "POST":
+        if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.ADD):
+            return portal_api_forbidden_response("You do not have permission to create risk records.")
         if not isinstance(body, dict) or "risk" not in body:
             return JsonResponse({"detail": "Risk payload is required."}, status=400)
         payload = body.get("risk")
@@ -610,6 +637,9 @@ def risk_register(request: HttpRequest) -> JsonResponse:
         except ValidationError as error:
             return JsonResponse({"detail": str(error)}, status=400)
         return JsonResponse({"risk": created_risk}, status=201)
+
+    if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify risk records.")
 
     if not isinstance(body, dict) or "riskRegister" not in body:
         return JsonResponse({"detail": "riskRegister payload is required."}, status=400)
@@ -646,10 +676,11 @@ def risk_register(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PATCH", "PUT", "DELETE"])
 def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
     if request.method == "DELETE":
+        if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.DELETE):
+            return portal_api_forbidden_response("You do not have permission to delete risk records.")
         try:
             deleted_risk = delete_risk_record(risk_id)
         except ValidationError as error:
@@ -682,6 +713,8 @@ def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
 
     if not isinstance(body, dict) or "risk" not in body:
         return JsonResponse({"detail": "Risk payload is required."}, status=400)
+    if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify risk records.")
     payload = body.get("risk")
     try:
         updated_risk = update_risk_record(risk_id, payload)
@@ -693,9 +726,10 @@ def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def checklist_items(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.REVIEW_STATE, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify review tasks.")
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
         return error_response
@@ -713,9 +747,10 @@ def checklist_items(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["DELETE"])
 def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.REVIEW_STATE, PortalAction.DELETE):
+        return portal_api_forbidden_response("You do not have permission to delete review tasks.")
     try:
         deleted_checklist_item = delete_review_checklist_item(checklist_item_id)
     except ValidationError as error:
@@ -746,9 +781,10 @@ def checklist_item(request: HttpRequest, checklist_item_id: str) -> JsonResponse
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PUT"])
 def review_state(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.REVIEW_STATE, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify review state.")
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
         return error_response
@@ -766,9 +802,10 @@ def review_state(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PUT"])
 def control_state(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.CONTROL_STATE, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify control state.")
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
         return error_response
@@ -782,9 +819,10 @@ def control_state(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["PUT"])
 def mapping_state(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.MAPPING, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to modify mappings.")
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
         return error_response

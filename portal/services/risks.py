@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.db import transaction
 
+from ..authorization import PortalAction, PortalResource, restrict_queryset
 from ..contracts import serialize_risk_record
 from ..models import RiskRecord
 from .common import ValidationError, normalize_string
@@ -11,8 +12,16 @@ from .risk_validation import RISK_RECORD_MODEL_FIELDS, normalize_risk_record
 RISK_RECORD_UPDATE_FIELDS = RISK_RECORD_MODEL_FIELDS + ("created_by",)
 
 
-def list_risk_register() -> list[dict[str, object]]:
-    return [serialize_risk_record(item) for item in RiskRecord.objects.all()]
+def list_risk_register(*, viewer: object | None = None) -> list[dict[str, object]]:
+    return [
+        serialize_risk_record(item)
+        for item in restrict_queryset(
+            RiskRecord.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.RISK_RECORD,
+        )
+    ]
 
 
 def risk_record_model_values(record: dict[str, object]) -> dict[str, object]:

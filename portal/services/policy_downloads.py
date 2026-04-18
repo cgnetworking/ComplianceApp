@@ -9,6 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.utils import timezone
 
+from ..authorization import PortalAction, PortalResource, has_portal_permission, restrict_queryset
 from ..models import UploadedPolicy
 from .common import ValidationError, normalize_string
 from .mapping import get_mapping_payload
@@ -136,9 +137,17 @@ def _mapping_document_artifact(document: dict[str, object]) -> PolicyDownloadArt
     )
 
 
-def _iter_all_policy_artifacts() -> Iterable[PolicyDownloadArtifact]:
+def _iter_all_policy_artifacts(*, viewer: object | None = None) -> Iterable[PolicyDownloadArtifact]:
+    if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+        return
+
     seen_ids: set[str] = set()
-    for uploaded_policy in UploadedPolicy.objects.all():
+    for uploaded_policy in restrict_queryset(
+        UploadedPolicy.objects.all(),
+        viewer,
+        PortalAction.EXPORT,
+        resource=PortalResource.POLICY_DOCUMENT,
+    ):
         document_id = normalize_string(uploaded_policy.document_id)
         if not document_id or document_id in seen_ids:
             continue
@@ -169,7 +178,7 @@ def _deduplicate_entry_name(file_name: str, seen: set[str]) -> str:
         counter += 1
 
 
-def build_policy_document_download(document_id: str) -> PolicyDownloadArtifact:
+def build_policy_document_download(document_id: str, *, viewer: object | None = None) -> PolicyDownloadArtifact:
     normalized_id = normalize_string(document_id)
     if not normalized_id:
         raise ValidationError("Policy id is required.")
@@ -180,17 +189,24 @@ def build_policy_document_download(document_id: str) -> PolicyDownloadArtifact:
         uploaded_policy = None
 
     if uploaded_policy is not None:
+        if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+            raise ValidationError("You do not have permission to export this policy document.")
         return _uploaded_document_artifact(uploaded_policy)
 
     mapping_document = _mapping_document_by_id(normalized_id)
     if mapping_document is not None:
+        if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+            raise ValidationError("You do not have permission to export this policy document.")
         return _mapping_document_artifact(mapping_document)
 
     raise ValidationError("Policy document was not found.")
 
 
-def build_all_policies_download() -> PolicyDownloadArtifact:
-    artifacts = list(_iter_all_policy_artifacts())
+def build_all_policies_download(*, viewer: object | None = None) -> PolicyDownloadArtifact:
+    if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+        raise ValidationError("You do not have permission to export policy documents.")
+
+    artifacts = list(_iter_all_policy_artifacts(viewer=viewer))
     if not artifacts:
         raise ValidationError("No policy documents are available for download.")
 

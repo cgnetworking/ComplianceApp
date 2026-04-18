@@ -7,6 +7,11 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
+from ..authorization import (
+    PortalAction,
+    PortalResource,
+    has_portal_permission,
+)
 from ..models import PortalState, ReviewChecklistItem
 from .common import (
     BOOTSTRAP_PAGES,
@@ -342,14 +347,14 @@ def update_review_state(
 
 def review_state_payload_for_viewer(review_state: object, *, viewer: object | None) -> dict[str, object]:
     normalized = normalize_review_state(review_state)
-    if bool(getattr(viewer, "is_staff", False)):
-        return normalized
+    can_view_review_state = has_portal_permission(viewer, PortalResource.REVIEW_STATE, PortalAction.VIEW)
+    can_view_audit_log = has_portal_permission(viewer, PortalResource.AUDIT_LOG, PortalAction.VIEW)
 
     return {
-        "activities": normalized.get("activities", {}),
-        "checklist": normalized.get("checklist", {}),
-        "completedAt": normalized.get("completedAt", {}),
-        "auditLog": [],
+        "activities": normalized.get("activities", {}) if can_view_review_state else {},
+        "checklist": normalized.get("checklist", {}) if can_view_review_state else {},
+        "completedAt": normalized.get("completedAt", {}) if can_view_review_state else {},
+        "auditLog": normalized.get("auditLog", []) if can_view_audit_log else [],
     }
 
 
@@ -358,31 +363,39 @@ def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool =
     include_all_sections = normalized_page == ""
     include_document_content = include_all_sections
 
-    payload: dict[str, object] = {
-        "persistenceMode": "api",
-        "mapping": get_mapping_bootstrap_payload(include_document_content=include_document_content),
-        "uploadedDocuments": list_uploaded_documents(include_content=include_document_content),
-    }
+    can_view_mapping = has_portal_permission(viewer, PortalResource.MAPPING, PortalAction.VIEW)
+    can_view_policy_documents = has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.VIEW)
+    can_view_review_state = has_portal_permission(viewer, PortalResource.REVIEW_STATE, PortalAction.VIEW)
+    can_view_audit_log = has_portal_permission(viewer, PortalResource.AUDIT_LOG, PortalAction.VIEW)
+    can_view_control_state = has_portal_permission(viewer, PortalResource.CONTROL_STATE, PortalAction.VIEW)
+    can_view_vendor_responses = has_portal_permission(viewer, PortalResource.VENDOR_RESPONSE, PortalAction.VIEW)
+    can_view_risks = has_portal_permission(viewer, PortalResource.RISK_RECORD, PortalAction.VIEW)
 
-    if policy_reader:
-        return payload
+    payload: dict[str, object] = {"persistenceMode": "api"}
+    if can_view_mapping:
+        payload["mapping"] = get_mapping_bootstrap_payload(include_document_content=include_document_content)
+    if can_view_policy_documents:
+        payload["uploadedDocuments"] = list_uploaded_documents(include_content=include_document_content, viewer=viewer)
 
     assignable_users = list_assignable_users_for_viewer(viewer, page=normalized_page)
     if assignable_users:
         payload["assignableUsers"] = assignable_users
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_REVIEW_STATE:
-        payload["checklistItems"] = list_review_checklist_items()
-        payload["recommendedChecklistItems"] = list_review_checklist_recommendations()
-        payload["reviewState"] = review_state_payload_for_viewer(
-            get_state_payload("review_state", {}),
-            viewer=viewer,
-        )
+        if can_view_review_state:
+            payload["checklistItems"] = list_review_checklist_items(viewer=viewer)
+            payload["recommendedChecklistItems"] = list_review_checklist_recommendations(viewer=viewer)
+        if can_view_review_state or can_view_audit_log:
+            payload["reviewState"] = review_state_payload_for_viewer(
+                get_state_payload("review_state", {}),
+                viewer=viewer,
+            )
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
-        payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
-    if include_all_sections:
-        payload["vendorSurveyResponses"] = list_vendor_responses()
-    if include_all_sections or normalized_page == "risks":
-        payload["riskRegister"] = list_risk_register()
+        if can_view_control_state:
+            payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
+    if include_all_sections and can_view_vendor_responses:
+        payload["vendorSurveyResponses"] = list_vendor_responses(viewer=viewer)
+    if (include_all_sections or normalized_page == "risks") and can_view_risks:
+        payload["riskRegister"] = list_risk_register(viewer=viewer)
     return payload
 
 

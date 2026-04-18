@@ -1,11 +1,90 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db.models import Q
 from django.db import models
 from django.utils import timezone
 
 RISK_FACTOR_VALIDATORS = [MinValueValidator(1), MaxValueValidator(5)]
 RISK_SCORE_VALIDATORS = [MinValueValidator(1), MaxValueValidator(25)]
+
+
+class PortalResource(models.TextChoices):
+    POLICY_DOCUMENT = "policy_document", "Policy document"
+    MAPPING = "mapping", "Mapping"
+    CONTROL_STATE = "control_state", "Control state"
+    REVIEW_STATE = "review_state", "Review state"
+    VENDOR_RESPONSE = "vendor_response", "Vendor response"
+    RISK_RECORD = "risk_record", "Risk record"
+    AUDIT_LOG = "audit_log", "Audit log"
+    ASSESSMENT = "assessment", "Assessment"
+
+
+class PortalAction(models.TextChoices):
+    VIEW = "view", "View"
+    ADD = "add", "Add"
+    CHANGE = "change", "Change"
+    DELETE = "delete", "Delete"
+    EXPORT = "export", "Export"
+    APPROVE = "approve", "Approve"
+    ASSIGN = "assign", "Assign"
+    VIEW_RAW = "view_raw", "View raw"
+
+
+class PortalPermissionGrant(models.Model):
+    name = models.CharField(max_length=120, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="portal_permission_grants",
+    )
+    group = models.ForeignKey(
+        "auth.Group",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="portal_permission_grants",
+    )
+    resource = models.CharField(max_length=64, choices=PortalResource.choices)
+    action = models.CharField(max_length=32, choices=PortalAction.choices)
+    constraints = models.JSONField(default=dict, blank=True)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["resource", "action", "id"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (Q(user__isnull=False) & Q(group__isnull=True))
+                    | (Q(user__isnull=True) & Q(group__isnull=False))
+                ),
+                name="portal_perm_one_principal_ck",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "resource", "action"],
+                condition=Q(user__isnull=False),
+                name="portal_perm_user_uq",
+            ),
+            models.UniqueConstraint(
+                fields=["group", "resource", "action"],
+                condition=Q(group__isnull=False),
+                name="portal_perm_group_uq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        principal = ""
+        if self.user_id:
+            principal = f"user:{self.user_id}"
+        elif self.group_id:
+            principal = f"group:{self.group_id}"
+        return self.name or f"{principal}:{self.resource}:{self.action}"
 
 
 class UploadedPolicy(models.Model):

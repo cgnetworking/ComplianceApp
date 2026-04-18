@@ -5,10 +5,11 @@ from datetime import date
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET, require_http_methods
 
+from .authorization import PortalAction, PortalResource, has_portal_permission
 from .services.bootstrap import append_portal_audit_entry
 from .services.risk_csv import serialize_risk_records_to_csv
 from .services.risks import ValidationError, list_risk_register, replace_risk_register
-from .view_helpers import api_login_required, current_audit_actor, parse_json_body_or_400, policy_reader_api_access
+from .view_helpers import api_login_required, current_audit_actor, parse_json_body_or_400, portal_api_forbidden_response
 
 
 def risk_csv_actor(request: HttpRequest) -> tuple[str, str]:
@@ -16,10 +17,11 @@ def risk_csv_actor(request: HttpRequest) -> tuple[str, str]:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def risk_register_csv_export(request: HttpRequest) -> HttpResponse:
-    risk_register = list_risk_register()
+    if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export risk records.")
+    risk_register = list_risk_register(viewer=request.user)
     csv_payload = serialize_risk_records_to_csv(risk_register)
     export_file_name = f"risk-register-{date.today().isoformat()}.csv"
     response = HttpResponse(csv_payload, content_type="text/csv; charset=utf-8")
@@ -44,9 +46,10 @@ def risk_register_csv_export(request: HttpRequest) -> HttpResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_http_methods(["POST"])
 def risk_register_csv_import(request: HttpRequest) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.RISK_RECORD, PortalAction.CHANGE):
+        return portal_api_forbidden_response("You do not have permission to import risk records.")
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
         return error_response

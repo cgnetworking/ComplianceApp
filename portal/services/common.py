@@ -627,7 +627,16 @@ def set_state_payload(key: str, payload: dict[str, object]) -> dict[str, object]
 def normalize_review_state_boolean_map(value: object) -> dict[str, bool]:
     if not isinstance(value, dict):
         return {}
-    return {str(key).strip(): bool(item) for key, item in value.items() if str(key).strip()}
+    normalized: dict[str, bool] = {}
+    for key, item in value.items():
+        normalized_key = str(key).strip()
+        if not normalized_key:
+            continue
+        month_index, scoped_item_id = parse_review_state_month_scope(normalized_key)
+        if month_index is None or not scoped_item_id:
+            continue
+        normalized[normalized_key] = bool(item)
+    return normalized
 
 
 def parse_iso_date(value: object) -> date:
@@ -667,10 +676,16 @@ def normalize_review_state_timestamp_map(value: object) -> dict[str, str]:
         key = str(raw_key).strip()
         if not key:
             continue
+        month_index, scoped_item_id = parse_review_state_month_scope(key)
+        if month_index is None or not scoped_item_id:
+            continue
         raw_timestamp = normalize_string(raw_value)
         if not raw_timestamp:
             continue
-        normalized[key] = parse_iso_datetime(raw_timestamp).isoformat()
+        try:
+            normalized[key] = parse_iso_datetime(raw_timestamp).isoformat()
+        except ValidationError:
+            continue
     return normalized
 
 
@@ -728,7 +743,10 @@ def normalize_review_state_audit_log(value: object) -> list[dict[str, object]]:
 
     normalized: list[dict[str, object]] = []
     for entry in value:
-        normalized_entry = normalize_review_state_audit_entry(entry)
+        try:
+            normalized_entry = normalize_review_state_audit_entry(entry)
+        except ValidationError:
+            continue
         if normalized_entry is None:
             continue
         normalized.append(normalized_entry)

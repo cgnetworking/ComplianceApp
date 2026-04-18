@@ -7,13 +7,23 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from portal.authorization import PortalAction, PortalResource
 from portal.services.risk_csv import serialize_risk_records_to_csv
+from portal.tests.permissions import grant_user_permissions
 
 
 class RiskMutationTests(TestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
         self.user = user_model.objects.create_user(username="risk-user", password="password")
+        grant_user_permissions(
+            self.user,
+            (PortalResource.RISK_RECORD, PortalAction.VIEW),
+            (PortalResource.RISK_RECORD, PortalAction.ADD),
+            (PortalResource.RISK_RECORD, PortalAction.CHANGE),
+            (PortalResource.RISK_RECORD, PortalAction.DELETE),
+            (PortalResource.RISK_RECORD, PortalAction.EXPORT),
+        )
         self.client.force_login(self.user)
 
     def risk_payload(

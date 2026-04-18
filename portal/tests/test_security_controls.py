@@ -7,7 +7,9 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
+from portal.authorization import PortalAction, PortalResource
 from portal.models import PortalState
+from portal.tests.permissions import grant_user_permissions
 
 
 class UploadSecurityTests(TestCase):
@@ -15,6 +17,12 @@ class UploadSecurityTests(TestCase):
         cache.clear()
         user_model = get_user_model()
         self.user = user_model.objects.create_user(username="upload-user", password="password")
+        grant_user_permissions(
+            self.user,
+            (PortalResource.POLICY_DOCUMENT, PortalAction.ADD),
+            (PortalResource.MAPPING, PortalAction.CHANGE),
+            (PortalResource.VENDOR_RESPONSE, PortalAction.ADD),
+        )
         self.client.force_login(self.user)
 
     @override_settings(POLICY_UPLOAD_MAX_FILE_BYTES=32)
@@ -195,6 +203,12 @@ class AuditVisibilityTests(TestCase):
                     }
                 ],
             },
+        )
+        grant_user_permissions(
+            self.user,
+            (PortalResource.REVIEW_STATE, PortalAction.VIEW),
+            (PortalResource.REVIEW_STATE, PortalAction.CHANGE),
+            (PortalResource.RISK_RECORD, PortalAction.VIEW),
         )
 
     def test_non_staff_bootstrap_hides_sensitive_audit_data_and_full_user_directory(self) -> None:

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 from urllib.parse import quote
 
 from django.utils import timezone
 
+from ..authorization import PortalAction, PortalResource, has_portal_permission, restrict_queryset
+from ..contracts import serialize_vendor_response
 from ..models import VendorResponse
 from .common import ValidationError, normalize_string
 
@@ -83,12 +86,28 @@ def escape_csv_formula(value: object) -> str:
     return normalized
 
 
-def build_single_vendor_response_download(response_id: object) -> tuple[str, bytes, str]:
+def build_vendor_response_metadata_download(response: VendorResponse) -> tuple[str, bytes, str]:
+    file_name = build_vendor_response_file_name(response, extension="json")
+    payload = serialize_vendor_response(response)
+    payload["rawTextAvailable"] = bool((response.raw_text or "").replace("\x00", "").strip())
+    content = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return file_name, content, MIME_TYPE_BY_EXTENSION["json"]
+
+
+def build_single_vendor_response_download(
+    response_id: object,
+    *,
+    viewer: object | None = None,
+    include_raw_text: bool = False,
+) -> tuple[str, bytes, str]:
     response = get_vendor_response_for_download(response_id)
+    if viewer is not None and not has_portal_permission(viewer, PortalResource.VENDOR_RESPONSE, PortalAction.EXPORT):
+        raise ValidationError("You do not have permission to export vendor responses.")
+
     raw_text = (response.raw_text or "").replace("\x00", "")
 
-    if not raw_text:
-        raise ValidationError("Vendor response raw text is unavailable for download.")
+    if not include_raw_text or not raw_text:
+        return build_vendor_response_metadata_download(response)
 
     extension = normalize_download_extension(response.extension)
     file_name = build_vendor_response_file_name(response, extension=extension)
@@ -96,8 +115,20 @@ def build_single_vendor_response_download(response_id: object) -> tuple[str, byt
     return file_name, raw_text.encode("utf-8"), mime_type
 
 
-def build_all_vendor_responses_download() -> tuple[str, bytes, str]:
-    rows = VendorResponse.objects.all()
+def build_all_vendor_responses_download(
+    *,
+    viewer: object | None = None,
+    include_raw_text: bool = False,
+) -> tuple[str, bytes, str]:
+    if viewer is not None and not has_portal_permission(viewer, PortalResource.VENDOR_RESPONSE, PortalAction.EXPORT):
+        raise ValidationError("You do not have permission to export vendor responses.")
+
+    rows = restrict_queryset(
+        VendorResponse.objects.all(),
+        viewer,
+        PortalAction.EXPORT,
+        resource=PortalResource.VENDOR_RESPONSE,
+    )
     timestamp = timezone.now().strftime("%Y%m%d-%H%M%S")
     file_name = f"vendor-survey-responses-{timestamp}.csv"
 
@@ -112,26 +143,27 @@ def build_all_vendor_responses_download() -> tuple[str, bytes, str]:
         "importedAt",
         "summary",
         "status",
-        "rawText",
     ]
+    if include_raw_text:
+        field_names.append("rawText")
     writer = csv.DictWriter(output, fieldnames=field_names)
     writer.writeheader()
 
     for item in rows:
-        writer.writerow(
-            {
-                "id": escape_csv_formula(item.external_id),
-                "vendorName": escape_csv_formula(item.vendor_name),
-                "fileName": escape_csv_formula(item.file_name),
-                "extension": escape_csv_formula(item.extension),
-                "mimeType": escape_csv_formula(item.mime_type),
-                "fileSize": escape_csv_formula(int(item.file_size or 0)),
-                "importedAt": escape_csv_formula(item.imported_at.isoformat()),
-                "summary": escape_csv_formula(item.summary),
-                "status": escape_csv_formula(item.status),
-                "rawText": escape_csv_formula(item.raw_text or ""),
-            }
-        )
+        row = {
+            "id": escape_csv_formula(item.external_id),
+            "vendorName": escape_csv_formula(item.vendor_name),
+            "fileName": escape_csv_formula(item.file_name),
+            "extension": escape_csv_formula(item.extension),
+            "mimeType": escape_csv_formula(item.mime_type),
+            "fileSize": escape_csv_formula(int(item.file_size or 0)),
+            "importedAt": escape_csv_formula(item.imported_at.isoformat()),
+            "summary": escape_csv_formula(item.summary),
+            "status": escape_csv_formula(item.status),
+        }
+        if include_raw_text:
+            row["rawText"] = escape_csv_formula(item.raw_text or "")
+        writer.writerow(row)
 
     return file_name, output.getvalue().encode("utf-8"), MIME_TYPE_BY_EXTENSION["csv"]
 

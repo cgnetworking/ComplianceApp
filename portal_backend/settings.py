@@ -32,6 +32,21 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_optional_int(name: str, default: int | None = None) -> int | None:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"", "none", "null"}:
+        return None
+
+    try:
+        return int(normalized)
+    except ValueError:
+        return default
+
+
 def parse_database_url(database_url: str) -> dict[str, object]:
     parsed = urlparse(database_url)
     scheme = parsed.scheme.lower()
@@ -86,6 +101,8 @@ if not SECRET_KEY:
         raise RuntimeError(
             "DJANGO_SECRET_KEY is required when DJANGO_DEBUG is disabled."
         )
+if len(SECRET_KEY) < 50:
+    raise RuntimeError("DJANGO_SECRET_KEY must be at least 50 characters long.")
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:8000")
 SOCIAL_AUTH_SSO_BACKEND_PATH = os.environ.get(
@@ -149,6 +166,17 @@ AUTHENTICATION_BACKENDS = [
     SOCIAL_AUTH_SSO_BACKEND_PATH,
     "django.contrib.auth.backends.ModelBackend",
 ]
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {
+            "min_length": 12,
+        },
+    },
+    {
+        "NAME": "portal.password_validation.AlphanumericPasswordValidator",
+    },
+]
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.environ.get("TIME_ZONE", "UTC")
@@ -159,6 +187,10 @@ LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/login/"
 LOGIN_ERROR_URL = "/login/"
+LOGIN_TIMEOUT = env_optional_int("LOGIN_TIMEOUT", 1209600)
+if LOGIN_TIMEOUT is not None:
+    LOGIN_TIMEOUT = max(60, LOGIN_TIMEOUT)
+LOGIN_PERSISTENCE = env_bool("LOGIN_PERSISTENCE", default=False)
 SOCIAL_AUTH_LOGIN_URL = LOGIN_URL
 SOCIAL_AUTH_LOGIN_REDIRECT_URL = LOGIN_REDIRECT_URL
 SOCIAL_AUTH_LOGIN_ERROR_URL = LOGIN_ERROR_URL
@@ -204,6 +236,10 @@ TRUSTED_PROXY_IPS = env_list("TRUSTED_PROXY_IPS", "127.0.0.1,::1,::ffff:127.0.0.
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=not RUNNING_TESTS)
 SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", default=not RUNNING_TESTS)
 CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", default=not RUNNING_TESTS)
+CSRF_COOKIE_HTTPONLY = env_bool("CSRF_COOKIE_HTTPONLY", default=True)
+if LOGIN_TIMEOUT is not None:
+    SESSION_COOKIE_AGE = LOGIN_TIMEOUT
+SESSION_SAVE_EVERY_REQUEST = bool(LOGIN_PERSISTENCE)
 SECURE_HSTS_SECONDS = max(0, env_int("SECURE_HSTS_SECONDS", 31536000 if not RUNNING_TESTS else 0))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
     "SECURE_HSTS_INCLUDE_SUBDOMAINS",

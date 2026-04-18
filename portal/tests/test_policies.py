@@ -6,13 +6,20 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
+from portal.authorization import PortalAction, PortalResource
 from portal.models import PortalState, UploadedPolicy
+from portal.tests.permissions import grant_user_permissions
 
 
 class PolicySanitizationTests(TestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
         self.user = user_model.objects.create_user(username="policy-user", password="password")
+        grant_user_permissions(
+            self.user,
+            (PortalResource.POLICY_DOCUMENT, PortalAction.ADD),
+            (PortalResource.MAPPING, PortalAction.CHANGE),
+        )
         self.client.force_login(self.user)
 
     def test_uploaded_html_policy_is_sanitized_before_persist(self) -> None:
@@ -75,4 +82,3 @@ class PolicySanitizationTests(TestCase):
         self.assertIn("<p>safe</p>", persisted_html)
         self.assertNotIn("<script", persisted_html)
         self.assertNotIn("javascript:", persisted_html)
-

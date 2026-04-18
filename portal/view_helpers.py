@@ -5,8 +5,9 @@ from functools import wraps
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import render
 
+from .authorization import has_any_portal_permission, portal_permissions_for_context
 from .services.common import ValidationError, user_is_policy_reader
 
 COMMON_SCRIPT_PATHS = (
@@ -67,6 +68,44 @@ def policy_reader_api_access(*, allow_policy_reader: bool):
     return decorator
 
 
+def portal_api_forbidden_response(
+    detail: str = "You do not have permission to access this resource.",
+) -> JsonResponse:
+    return JsonResponse({"detail": detail}, status=403)
+
+
+def portal_page_permission_required(
+    *requirements: tuple[str, str],
+    detail: str = "Forbidden",
+):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(request: HttpRequest, *args, **kwargs):
+            if not has_any_portal_permission(request.user, requirements):
+                return HttpResponse(detail, status=403)
+            return view_func(request, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def portal_api_permission_required(
+    *requirements: tuple[str, str],
+    detail: str = "You do not have permission to access this resource.",
+):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(request: HttpRequest, *args, **kwargs):
+            if not has_any_portal_permission(request.user, requirements):
+                return portal_api_forbidden_response(detail)
+            return view_func(request, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 def staff_page_required(view_func):
     @wraps(view_func)
     def wrapped(request: HttpRequest, *args, **kwargs):
@@ -103,6 +142,7 @@ def current_user_context(request: HttpRequest) -> dict[str, object]:
         "username": username,
         "isStaff": bool(request.user.is_staff),
         "isPolicyReader": is_policy_reader,
+        "portalPermissions": portal_permissions_for_context(request.user) if request.user.is_authenticated else {},
     }
 
 
@@ -125,9 +165,6 @@ def render_portal_page(
     *,
     allow_policy_reader: bool = False,
 ) -> HttpResponse:
-    if user_is_policy_reader(request.user) and not allow_policy_reader:
-        return redirect("portal-policies")
-
     return render(
         request,
         template_name,
@@ -157,6 +194,9 @@ def parse_json_body_or_400(request: HttpRequest) -> tuple[object | None, JsonRes
 
 __all__ = [
     "api_login_required",
+    "portal_api_forbidden_response",
+    "portal_page_permission_required",
+    "portal_api_permission_required",
     "policy_reader_forbidden_response",
     "policy_reader_api_access",
     "staff_page_required",

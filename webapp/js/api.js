@@ -24,7 +24,7 @@ async function apiRequest(path, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const csrfToken = readCookie("csrftoken");
+  const csrfToken = resolveCsrfToken();
   if (csrfToken && !/^(GET|HEAD|OPTIONS|TRACE)$/i.test(method)) {
     headers.set("X-CSRFToken", csrfToken);
   }
@@ -60,8 +60,16 @@ async function apiRequest(path, options = {}) {
   return returnValue;
 }
 
-function readCookie(name) {
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : "";
+function resolveCsrfToken() {
+  const csrfTokenElement = document.querySelector('meta[name="portal-csrf-token"]');
+  if (!csrfTokenElement) {
+    return "";
+  }
+
+  const csrfToken = typeof csrfTokenElement.content === "string" ? csrfTokenElement.content.trim() : "";
+  if (!csrfToken || csrfToken === "NOTPROVIDED") {
+    return "";
+  }
+
+  return csrfToken;
 }

@@ -6,12 +6,14 @@ from zipfile import ZipFile
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 
+from portal.authorization import PortalAction, PortalResource
 from portal.models import PortalState, UploadedPolicy
 from portal.policy_download_views import policy_document_download, policy_documents_download_all
 from portal.services.policy_downloads import (
     build_all_policies_download,
     build_policy_document_download,
 )
+from portal.tests.permissions import grant_user_permissions
 
 
 class PolicyDownloadServiceTests(TestCase):
@@ -82,6 +84,7 @@ class PolicyDownloadViewTests(TestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
         self.user = user_model.objects.create_user(username="download-user", password="password")
+        grant_user_permissions(self.user, (PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT))
         self.factory = RequestFactory()
 
         UploadedPolicy.objects.create(
@@ -124,4 +127,3 @@ class PolicyDownloadViewTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/zip")
         zip_file = ZipFile(BytesIO(response.content), mode="r")
         self.assertTrue(zip_file.namelist())
-

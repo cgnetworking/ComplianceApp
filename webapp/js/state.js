@@ -132,7 +132,7 @@ function normalizeReviewStateMapByMonth(value) {
       return;
     }
     if (!isMonthScopedReviewStateKey(key)) {
-      throw new Error(`Review state key '${key}' is not month scoped.`);
+      return;
     }
     normalized[key] = Boolean(rawValue);
   });
@@ -151,11 +151,11 @@ function normalizeReviewStateTimestampMap(value) {
     if (!key) {
       return;
     }
-    if (Number.isNaN(parsed.getTime())) {
-      throw new Error(`Review state timestamp for '${key}' is invalid.`);
-    }
     if (!isMonthScopedReviewStateKey(key)) {
-      throw new Error(`Review state timestamp key '${key}' is not month scoped.`);
+      return;
+    }
+    if (Number.isNaN(parsed.getTime())) {
+      return;
     }
     normalized[key] = parsed.toISOString();
   });
@@ -182,7 +182,7 @@ function normalizeReviewAuditLogEntries(value) {
         || typeof entry.actor !== "object"
         || typeof entry.actor.username !== "string"
       ) {
-        throw new Error("Review state audit log entry shape is invalid.");
+        return null;
       }
       return {
         id: entry.id.trim(),
@@ -455,27 +455,28 @@ function normalizeRiskRecord(item) {
 }
 
 function normalizeDataPayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    throw new Error("Mapping payload must be an object.");
-  }
-  if (typeof payload.generatedAt !== "string" || !payload.generatedAt.trim()) {
-    throw new Error("Mapping payload generatedAt is required.");
-  }
-  if (!payload.sourceSnapshot || typeof payload.sourceSnapshot !== "object") {
-    throw new Error("Mapping payload sourceSnapshot is required.");
-  }
-  if (!payload.summary || typeof payload.summary !== "object") {
-    throw new Error("Mapping payload summary is required.");
-  }
-  if (!Array.isArray(payload.controls) || !Array.isArray(payload.documents) || !Array.isArray(payload.activities)
-    || !Array.isArray(payload.checklist) || !Array.isArray(payload.policyCoverage)) {
-    throw new Error("Mapping payload arrays are required.");
-  }
+  const source = payload && typeof payload === "object" ? payload : {};
+  const defaults = createEmptyMappingPayload();
+  return {
+    generatedAt: typeof source.generatedAt === "string" && source.generatedAt.trim()
+      ? source.generatedAt
+      : defaults.generatedAt,
+    sourceSnapshot: source.sourceSnapshot && typeof source.sourceSnapshot === "object"
+      ? source.sourceSnapshot
+      : defaults.sourceSnapshot,
+    summary: source.summary && typeof source.summary === "object"
+      ? source.summary
+      : defaults.summary,
+    controls: Array.isArray(source.controls) ? source.controls : [],
+    documents: Array.isArray(source.documents) ? source.documents : [],
+    activities: Array.isArray(source.activities) ? source.activities : [],
+    checklist: Array.isArray(source.checklist) ? source.checklist : [],
+    policyCoverage: Array.isArray(source.policyCoverage) ? source.policyCoverage : [],
+  };
 }
 
 function applyMappingPayload(payload) {
-  const mappingPayload = payload && typeof payload === "object" ? payload : {};
-  normalizeDataPayload(mappingPayload);
+  const mappingPayload = normalizeDataPayload(payload);
 
   data.generatedAt = mappingPayload.generatedAt;
   data.sourceSnapshot = mappingPayload.sourceSnapshot;

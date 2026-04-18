@@ -6,6 +6,12 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_GET, require_http_methods
 
+from .authorization import (
+    PAGE_PERMISSION_REQUIREMENTS,
+    PortalAction,
+    PortalResource,
+    has_portal_permission,
+)
 from .services.bootstrap import append_portal_audit_entry
 from .assessment_services import (
     AssessmentValidationError,
@@ -25,13 +31,13 @@ from .view_helpers import (
     api_login_required,
     current_audit_actor,
     parse_json_body_or_400,
+    portal_api_forbidden_response,
+    portal_page_permission_required,
     render_portal_page,
-    staff_api_access,
-    staff_page_required,
 )
 
 
-ASSESSMENT_STAFF_DETAIL = "Only staff users can manage assessments."
+ASSESSMENT_PERMISSION_DETAIL = "You do not have permission to access assessments."
 
 
 ASSESSMENT_REPORT_CSP = (
@@ -70,18 +76,22 @@ def assessment_audit_actor(request: HttpRequest) -> tuple[str, str]:
 
 
 @login_required(login_url="portal-login")
-@staff_page_required
 @ensure_csrf_cookie
+@portal_page_permission_required(*PAGE_PERMISSION_REQUIREMENTS["assessments"])
 def assessments_page(request: HttpRequest) -> HttpResponse:
     return render_portal_page(request, "portal/assessments.html")
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["GET", "POST"])
 def assessments_collection(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
+        if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.VIEW):
+            return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
         return JsonResponse({"profiles": list_zero_trust_profiles()})
+
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.CHANGE):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
 
     body, error_response = parse_json_body_or_400(request)
     if error_response is not None:
@@ -98,10 +108,11 @@ def assessments_collection(request: HttpRequest) -> JsonResponse:
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["GET", "DELETE"])
 def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResponse:
     if request.method == "DELETE":
+        if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.DELETE):
+            return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
         try:
             deleted_profile = delete_zero_trust_profile(profile_id)
         except AssessmentValidationError as error:
@@ -127,6 +138,8 @@ def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResp
         )
         return JsonResponse({"deletedProfile": deleted_profile})
 
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.VIEW):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
     try:
         detail = get_zero_trust_profile_detail(profile_id)
     except AssessmentValidationError as error:
@@ -135,9 +148,10 @@ def assessment_profile_detail(request: HttpRequest, profile_id: str) -> JsonResp
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["POST"])
 def assessment_profile_certificate(request: HttpRequest, profile_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.CHANGE):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
     try:
         payload = generate_zero_trust_certificate(profile_id)
     except AssessmentValidationError as error:
@@ -146,9 +160,10 @@ def assessment_profile_certificate(request: HttpRequest, profile_id: str) -> Jso
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_GET
 def assessment_profile_certificate_download(request: HttpRequest, profile_id: str) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.EXPORT):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
     try:
         file_name, content = get_zero_trust_certificate_download(profile_id)
     except AssessmentValidationError as error:
@@ -177,9 +192,10 @@ def assessment_profile_certificate_download(request: HttpRequest, profile_id: st
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_http_methods(["POST"])
 def assessment_profile_runs(request: HttpRequest, profile_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.CHANGE):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
     actor_username = request.user.get_username().strip() if request.user.is_authenticated else ""
     try:
         run = create_zero_trust_run(profile_id, actor_username=actor_username)
@@ -189,9 +205,10 @@ def assessment_profile_runs(request: HttpRequest, profile_id: str) -> JsonRespon
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_GET
 def assessment_run_detail(request: HttpRequest, run_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.VIEW):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
     try:
         payload = get_zero_trust_run_detail(run_id)
     except AssessmentValidationError as error:
@@ -200,9 +217,10 @@ def assessment_run_detail(request: HttpRequest, run_id: str) -> JsonResponse:
 
 
 @api_login_required
-@staff_api_access(detail=ASSESSMENT_STAFF_DETAIL)
 @require_GET
 def assessment_run_logs(request: HttpRequest, run_id: str) -> JsonResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.VIEW):
+        return portal_api_forbidden_response(ASSESSMENT_PERMISSION_DETAIL)
     after_value = request.GET.get("after", "0")
     try:
         after_sequence = max(0, int(after_value))
@@ -217,10 +235,11 @@ def assessment_run_logs(request: HttpRequest, run_id: str) -> JsonResponse:
 
 
 @login_required(login_url="portal-login")
-@staff_page_required
 @xframe_options_sameorigin
 @require_GET
 def assessment_run_report(request: HttpRequest, run_id: str) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.VIEW):
+        return HttpResponse("Forbidden", status=403)
     try:
         html = get_zero_trust_report_html(run_id)
     except AssessmentValidationError as error:
@@ -232,9 +251,10 @@ def assessment_run_report(request: HttpRequest, run_id: str) -> HttpResponse:
 
 
 @login_required(login_url="portal-login")
-@staff_page_required
 @require_GET
 def assessment_run_artifact(request: HttpRequest, run_id: str, relative_path: str) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.VIEW):
+        return HttpResponse("Forbidden", status=403)
     try:
         artifact = get_zero_trust_artifact(run_id, relative_path=relative_path)
     except AssessmentValidationError as error:

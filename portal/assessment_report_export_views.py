@@ -3,13 +3,14 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
 
+from .authorization import PortalAction, PortalResource, has_portal_permission
 from .assessment_services import AssessmentValidationError
 from .services.bootstrap import append_portal_audit_entry
 from .services.assessment_report_exports import (
     create_assessment_reports_export,
     create_assessment_run_report_export,
 )
-from .view_helpers import api_login_required, current_audit_actor, staff_api_access
+from .view_helpers import api_login_required, current_audit_actor, portal_api_forbidden_response
 
 ASSESSMENT_EXPORT_NOT_FOUND_ERRORS = frozenset(
     {
@@ -38,9 +39,10 @@ def assessment_export_error_response(error: AssessmentValidationError) -> JsonRe
 
 
 @api_login_required
-@staff_api_access(detail="Only staff users can manage assessments.")
 @require_GET
 def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export assessments.")
     try:
         file_name, content = create_assessment_run_report_export(run_id)
     except AssessmentValidationError as error:
@@ -70,9 +72,10 @@ def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpRespo
 
 
 @api_login_required
-@staff_api_access(detail="Only staff users can manage assessments.")
 @require_GET
 def assessment_reports_export(request: HttpRequest) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export assessments.")
     profile_id = str(request.GET.get("profileId") or "").strip()
     try:
         file_name, content = create_assessment_reports_export(profile_id=profile_id)

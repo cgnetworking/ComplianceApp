@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    PortalPermissionGrant,
     PortalState,
     ReviewChecklistItem,
     ReviewChecklistRecommendation,
@@ -13,6 +14,13 @@ from .models import (
     ZeroTrustCertificate,
     ZeroTrustTenantProfile,
 )
+
+
+@admin.register(PortalPermissionGrant)
+class PortalPermissionGrantAdmin(admin.ModelAdmin):
+    list_display = ("resource", "action", "user", "group", "enabled", "updated_at")
+    list_filter = ("resource", "action", "enabled")
+    search_fields = ("name", "description", "user__username", "group__name")
 
 
 @admin.register(UploadedPolicy)

@@ -8,6 +8,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 
+from ..authorization import PortalAction, PortalResource, has_portal_permission, restrict_queryset
 from ..contracts import (
     serialize_review_checklist_item,
     serialize_review_checklist_recommendation,
@@ -61,14 +62,24 @@ def get_mapping_bootstrap_payload(*, include_document_content: bool) -> dict[str
     return next_payload
 
 
-def list_uploaded_documents(*, include_content: bool) -> list[dict[str, object]]:
+def list_uploaded_documents(*, include_content: bool, viewer: object | None = None) -> list[dict[str, object]]:
     return [
         serialize_policy_document_payload(serialize_uploaded_policy(item), include_content=include_content)
-        for item in UploadedPolicy.objects.all()
+        for item in restrict_queryset(
+            UploadedPolicy.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.POLICY_DOCUMENT,
+        )
     ]
 
 
-def get_policy_document(document_id: str, *, include_content: bool = True) -> dict[str, object]:
+def get_policy_document(
+    document_id: str,
+    *,
+    include_content: bool = True,
+    viewer: object | None = None,
+) -> dict[str, object]:
     normalized_id = normalize_string(document_id)
     if not normalized_id:
         raise ValidationError("Policy id is required.")
@@ -79,6 +90,8 @@ def get_policy_document(document_id: str, *, include_content: bool = True) -> di
         uploaded = None
 
     if uploaded is not None:
+        if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.VIEW):
+            raise ValidationError("You do not have permission to access this policy document.")
         return serialize_policy_document_payload(serialize_uploaded_policy(uploaded), include_content=include_content)
 
     mapping_payload = get_mapping_payload()
@@ -88,6 +101,11 @@ def get_policy_document(document_id: str, *, include_content: bool = True) -> di
             if not isinstance(item, dict):
                 continue
             if normalize_string(item.get("id")) == normalized_id:
+                if viewer is not None and not (
+                    has_portal_permission(viewer, PortalResource.MAPPING, PortalAction.VIEW)
+                    or has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.VIEW)
+                ):
+                    raise ValidationError("You do not have permission to access this policy document.")
                 return serialize_policy_document_payload(item, include_content=include_content)
 
     raise ValidationError("Policy document was not found.")
@@ -125,16 +143,32 @@ def normalize_policy_approver_value(value: object) -> str:
     return normalized_value
 
 
-def list_review_checklist_items() -> list[dict[str, str]]:
+def list_review_checklist_items(*, viewer: object | None = None) -> list[dict[str, str]]:
     from ..models import ReviewChecklistItem
 
-    return [serialize_review_checklist_item(item) for item in ReviewChecklistItem.objects.all()]
+    return [
+        serialize_review_checklist_item(item)
+        for item in restrict_queryset(
+            ReviewChecklistItem.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.REVIEW_STATE,
+        )
+    ]
 
 
-def list_review_checklist_recommendations() -> list[dict[str, str]]:
+def list_review_checklist_recommendations(*, viewer: object | None = None) -> list[dict[str, str]]:
     from ..models import ReviewChecklistRecommendation
 
-    return [serialize_review_checklist_recommendation(item) for item in ReviewChecklistRecommendation.objects.all()]
+    return [
+        serialize_review_checklist_recommendation(item)
+        for item in restrict_queryset(
+            ReviewChecklistRecommendation.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.REVIEW_STATE,
+        )
+    ]
 
 
 def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, object]], list[str]]:
@@ -298,8 +332,16 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
     return [serialize_vendor_response(item) for item in created_items]
 
 
-def list_vendor_responses() -> list[dict[str, object]]:
-    return [serialize_vendor_response(item) for item in VendorResponse.objects.all()]
+def list_vendor_responses(*, viewer: object | None = None) -> list[dict[str, object]]:
+    return [
+        serialize_vendor_response(item)
+        for item in restrict_queryset(
+            VendorResponse.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.VENDOR_RESPONSE,
+        )
+    ]
 
 
 def delete_vendor_response(response_id: str) -> dict[str, object]:
