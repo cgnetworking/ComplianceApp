@@ -60,9 +60,9 @@ class PortalPermissionGrant(models.Model):
         ordering = ["resource", "action", "id"]
         constraints = [
             models.CheckConstraint(
-                check=(
-                    (Q(user__isnull=False) & Q(group__isnull=True))
-                    | (Q(user__isnull=True) & Q(group__isnull=False))
+                condition=(
+                    (Q(group__isnull=True, user__isnull=False))
+                    | (Q(group__isnull=False, user__isnull=True))
                 ),
                 name="portal_perm_one_principal_ck",
             ),
