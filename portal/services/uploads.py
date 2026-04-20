@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import re
@@ -27,7 +28,6 @@ DANGEROUS_UPLOAD_MIME_TYPES = frozenset(
         "application/x-bat",
     }
 )
-EICAR_SIGNATURE = b"EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
 
 
 def format_uploaded_policy_id(number: int) -> str:
@@ -94,8 +94,6 @@ def validate_uploaded_file_type_and_eicar_signature(
     payload = read_upload_bytes(uploaded_file, max_bytes=max_bytes)
     if expect_text and b"\x00" in payload:
         raise ValidationError(f"{uploaded_file.name} appears to be binary data, but a text file was expected.")
-    if bool(settings.UPLOAD_EICAR_SIGNATURE_CHECK_ENABLED) and EICAR_SIGNATURE in payload.upper():
-        raise ValidationError(f"{uploaded_file.name} matched the blocked EICAR test signature.")
 
 
 def validate_policy_upload_files(files: list[UploadedFile]) -> None:

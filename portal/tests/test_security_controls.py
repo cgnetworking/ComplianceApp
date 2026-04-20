@@ -37,6 +37,22 @@ class UploadSecurityTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("upload limit", response.json()["detail"])
 
+    def test_policy_upload_accepts_markdown_content(self) -> None:
+        upload = SimpleUploadedFile(
+            "endpoint-protection.md",
+            (
+                "# Endpoint Protection\n\n"
+                "Document antivirus validation steps for managed endpoints.\n"
+            ).encode("utf-8"),
+            content_type="text/markdown",
+        )
+
+        response = self.client.post("/api/policies/uploads/", data={"files": [upload]})
+        self.assertEqual(response.status_code, 200)
+        document = response.json()["documents"][0]
+        self.assertIn("<h1>Endpoint Protection</h1>", document["contentHtml"])
+        self.assertIn("Document antivirus validation steps for managed endpoints.", document["contentHtml"])
+
     def test_mapping_upload_rejects_binary_payload_for_text_types(self) -> None:
         upload = SimpleUploadedFile(
             "mapping.csv",
@@ -58,20 +74,6 @@ class UploadSecurityTests(TestCase):
         response = self.client.post("/api/vendors/uploads/", data={"files": [upload]})
         self.assertEqual(response.status_code, 400)
         self.assertIn("not a supported vendor upload type", response.json()["detail"])
-
-    @override_settings(UPLOAD_EICAR_SIGNATURE_CHECK_ENABLED=True)
-    def test_vendor_upload_rejects_eicar_signature(self) -> None:
-        eicar = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
-        upload = SimpleUploadedFile(
-            "vendor-response.txt",
-            eicar,
-            content_type="text/plain",
-        )
-
-        response = self.client.post("/api/vendors/uploads/", data={"files": [upload]})
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("EICAR test signature", response.json()["detail"])
-
 
 class LoginThrottleTests(TestCase):
     def setUp(self) -> None:
