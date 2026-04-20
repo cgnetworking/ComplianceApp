@@ -1,10 +1,11 @@
   function populateFilters() {
-    const controls = getAllControlViews();
-    if (els.domainFilter) {
-      populateSelect(els.domainFilter, ["All"].concat(uniqueValues(controls, "domain")));
-      els.domainFilter.value = valueOrFallback(els.domainFilter, state.domain);
-      state.domain = els.domainFilter.value;
+    if (!els.domainFilter || typeof getAllControlViews !== "function") {
+      return;
     }
+    const controls = getAllControlViews();
+    populateSelect(els.domainFilter, ["All"].concat(uniqueValues(controls, "domain")));
+    els.domainFilter.value = valueOrFallback(els.domainFilter, state.domain);
+    state.domain = els.domainFilter.value;
   }
   function initializeSelection() {
     if (page === "controls") {
@@ -898,11 +899,13 @@
     }).join("");
   }
   function valueOrFallback(select, value) {
-    const exists = Array.from(select.options).some((option) => option.value === value);
-    if (!exists) {
-      throw new Error(`Select option '${value}' is unavailable.`);
+    const options = Array.from(select.options || []);
+    const normalizedValue = typeof value === "string" ? value : String(value || "");
+    const exists = options.some((option) => option.value === normalizedValue);
+    if (exists) {
+      return normalizedValue;
     }
-    return value;
+    return options.length ? options[0].value : "";
   }
   function uniqueValues(items, key) {
     return Array.from(new Set(items.map((item) => item[key]))).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
