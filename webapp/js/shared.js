@@ -368,9 +368,15 @@
     }
   }
   function bindUploadEvents() {
-    bindFilePicker(els.policyUploadTrigger, els.policyUploadInput, handlePolicyUpload);
-    bindFilePicker(els.mappingUploadTrigger, els.mappingUploadInput, handleMappingUpload);
-    bindFilePicker(els.vendorUploadTrigger, els.vendorUploadInput, handleVendorUpload);
+    if (typeof handlePolicyUpload === "function") {
+      bindFilePicker(els.policyUploadTrigger, els.policyUploadInput, handlePolicyUpload);
+    }
+    if (typeof handleMappingUpload === "function") {
+      bindFilePicker(els.mappingUploadTrigger, els.mappingUploadInput, handleMappingUpload);
+    }
+    if (typeof handleVendorUpload === "function") {
+      bindFilePicker(els.vendorUploadTrigger, els.vendorUploadInput, handleVendorUpload);
+    }
   }
   function bindVendorEvents() {
     if (!els.vendorResponses) {
