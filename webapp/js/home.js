@@ -45,7 +45,9 @@
               <span>${row.count}</span>
             </div>
             <div class="metric-bar">
-              <span style="width:${row.width}%;background:${domainColors[row.domain] || "#7442b8"}"></span>
+              <svg viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <rect width="${Math.max(0, Math.min(row.width, 100)).toFixed(2)}" height="10" rx="5" ry="5" fill="${domainColors[row.domain] || "#7442b8"}"></rect>
+              </svg>
             </div>
           </article>
         `).join("")}

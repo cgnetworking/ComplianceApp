@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.urls import path
@@ -68,6 +70,12 @@ class NonceCspTests(TestCase):
         response = self.client.get("/api/state/?page=home")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("Content-Security-Policy", response)
+
+    def test_home_domain_widget_does_not_depend_on_inline_styles(self) -> None:
+        source = Path(settings.BASE_DIR / "webapp" / "js" / "home.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('style="', source)
+        self.assertIn('<svg viewBox="0 0 100 10"', source)
 
     @override_settings(ROOT_URLCONF="portal.tests.test_csp")
     def test_untrusted_html_scripts_do_not_get_nonce_injected(self) -> None:

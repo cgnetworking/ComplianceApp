@@ -716,10 +716,10 @@ a {
   overflow: hidden;
 }
 
-.metric-bar span {
+.metric-bar svg {
   display: block;
+  inline-size: 100%;
   block-size: 100%;
-  border-radius: inherit;
 }
 
 
