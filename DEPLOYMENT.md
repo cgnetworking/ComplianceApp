@@ -67,12 +67,17 @@ Recommended:
 
 ## Local setup
 
-`scripts/local_setup.sh` is designed for Ubuntu 24.04+.
+The local bootstrap flow is split into two entrypoints:
 
 The repo now targets Django 5.2 LTS, which requires Python 3.10 or newer. The supported Ubuntu 24.04 setup path uses Python 3.12.
 
+### Full host bootstrap
+
+Use `scripts/local_setup.sh` on Ubuntu 24.04+ when you want the full local host setup with PostgreSQL, NGINX, Gunicorn, and the Zero Trust assessment worker.
+
 1. Run `./scripts/local_setup.sh` from the repository root.
-2. Run `python manage.py createsuperuser` if you want Django admin access.
+2. Activate the environment if needed with `source .venv/bin/activate`.
+3. Run `python manage.py createsuperuser` if you want Django admin access.
 
 The setup script creates `.env` if it does not already exist, installs dependencies into `.venv`, installs PostgreSQL when needed, prompts for `DATABASE_PASSWORD` if empty, ensures the database role and database exist, runs migrations, collects static assets, renders and installs NGINX site config, creates a dedicated non-login system runtime user for Gunicorn (default: `complianceapp`), stages a root-owned runtime bundle under `/opt/complianceapp` (app code and venv by default), creates/enables/starts Gunicorn systemd service units, creates the Zero Trust assessment worker service and writable assessment storage roots, validates app readiness, and starts/enables NGINX when config validation passes.
 
@@ -80,10 +85,29 @@ During setup, the script asks a yes/no question about generating a local self-si
 
 For non-interactive runs, set `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=true` or `LOCAL_SETUP_CREATE_SELF_SIGNED_CERT=false`.
 
-For local development outside the setup script, set:
+### Local dev bootstrap
 
-- `DJANGO_DEBUG=true`
-- `DJANGO_SECRET_KEY` to any local secret value
+Use `scripts/local_dev.sh` when PostgreSQL is already available and you only want the project virtualenv, environment file, migrations, and static asset collection.
+
+1. Make sure PostgreSQL is already running and `.env` points at the correct database.
+2. Run `./scripts/local_dev.sh` from the repository root.
+3. Activate the environment with `source .venv/bin/activate`.
+4. Start Django manually with `python manage.py runserver`.
+
+`scripts/local_dev.sh` creates `.env` if it does not already exist, installs dependencies into `.venv`, runs migrations, and collects static assets. It does not install PostgreSQL, NGINX, systemd units, or PowerShell modules.
+
+### Local environment requirements
+
+If either script creates `.env`, it will generate a compliant `DJANGO_SECRET_KEY` for you. If you manage `.env` manually, note the current requirements:
+
+- `DJANGO_SECRET_KEY` must be at least 50 characters long.
+- `DJANGO_DEBUG=true` is recommended for manual local development.
+
+If you are upgrading an existing install, rerun migrations after pulling changes:
+
+- `source .venv/bin/activate && python manage.py migrate`
+
+This is required for the portal permission tables and seeded group grants added in the newer migrations.
 
 Useful local setup overrides:
 
