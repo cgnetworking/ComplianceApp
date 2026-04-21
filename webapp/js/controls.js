@@ -32,15 +32,6 @@
     }
     return els.controlDetail.querySelector("[data-control-save-status]");
   }
-  function controlPersistenceFallbackStatusElement() {
-    if (page === "controls" && els.mappingUploadStatus) {
-      return els.mappingUploadStatus;
-    }
-    if (page === "policies" && els.policyUploadStatus) {
-      return els.policyUploadStatus;
-    }
-    return null;
-  }
   function renderControlPersistenceStatus() {
     const status = controlPersistenceStatusValue();
     const detailStatus = controlPersistenceStatusElement();
@@ -50,11 +41,6 @@
         status.message || "Control changes sync with the shared portal database.",
         status.tone || ""
       );
-    }
-
-    const fallbackStatus = controlPersistenceFallbackStatusElement();
-    if (fallbackStatus && status.message) {
-      setUploadStatus(fallbackStatus, status.message, status.tone || "");
     }
   }
   function setControlPersistenceStatus(message, tone) {
@@ -549,21 +535,12 @@
     return typeof value === "string" ? value.trim() : "";
   }
   function defaultControlPolicyDocumentIds(control) {
-    const primary = normalizeControlPolicyDocumentIds(control.policyDocumentIds);
-    if (primary.length) {
-      return primary;
-    }
-    return normalizeControlPolicyDocumentIds(control.documentIds);
+    return normalizeControlPolicyDocumentIds(control.policyDocumentIds);
   }
-  function resolvePreferredControlDocumentId(preferredDocumentId, documentIds, fallbackDocumentId = "") {
+  function resolvePreferredControlDocumentId(preferredDocumentId, documentIds) {
     const preferred = normalizeControlPreferredDocumentId(preferredDocumentId);
     if (preferred && documentIds.includes(preferred)) {
       return preferred;
-    }
-
-    const fallback = normalizeControlPreferredDocumentId(fallbackDocumentId);
-    if (fallback && documentIds.includes(fallback)) {
-      return fallback;
     }
 
     return documentIds[0] || "";
@@ -605,8 +582,7 @@
     const storedOwner = normalizeControlOwner(stored.owner);
     const baseOwner = normalizeControlOwner(control.owner);
     const baseExcluded = isBaseExcluded(control);
-    const legacyLocalExcluded = Boolean(stored.excluded) && !baseExcluded && storedApplicability !== "Applicable";
-    const effectiveApplicability = (baseExcluded || storedApplicability === "Excluded" || legacyLocalExcluded)
+    const effectiveApplicability = (baseExcluded || storedApplicability === "Excluded")
       ? "Excluded"
       : (storedApplicability || baseApplicability);
     const effectiveExcluded = effectiveApplicability === "Excluded";
@@ -624,7 +600,7 @@
       applicability: effectiveApplicability,
       reviewFrequency: effectiveReviewFrequency,
       isBaseExcluded: baseExcluded,
-      isLocallyExcluded: legacyLocalExcluded,
+      isLocallyExcluded: storedApplicability === "Excluded" && !baseExcluded,
       isExcluded: effectiveExcluded,
       effectiveApplicability: effectiveApplicability,
       effectiveReviewFrequency: effectiveReviewFrequency,

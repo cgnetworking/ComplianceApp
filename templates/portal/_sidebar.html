@@ -25,7 +25,9 @@
     {% endif %}
     <a class="nav-link{% if active_page == 'controls' %} is-active{% endif %}" href="{% url 'portal-controls' %}">Controls</a>
     <a class="nav-link{% if active_page == 'reviews' %} is-active{% endif %}" href="{% url 'portal-reviews' %}">Reviews</a>
+    {% if current_user.isStaff %}
     <a class="nav-link{% if active_page == 'audit-log' %} is-active{% endif %}" href="{% url 'portal-audit-log' %}">Audit Log</a>
+    {% endif %}
     <a class="nav-link{% if active_page == 'policies' %} is-active{% endif %}" href="{% url 'portal-policies' %}">Policies</a>
     <a class="nav-link{% if active_page == 'risks' %} is-active{% endif %}" href="{% url 'portal-risks' %}">Risk Register</a>
     <a class="nav-link{% if active_page == 'vendors' %} is-active{% endif %}" href="{% url 'portal-vendors' %}">Vendors</a>

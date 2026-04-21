@@ -13,6 +13,7 @@ from portal.assessment_services import (
     assessment_script_contents,
     delete_zero_trust_profile,
     generate_zero_trust_certificate,
+    ingest_assessment_artifacts,
 )
 from portal.models import ZeroTrustAssessmentRun, ZeroTrustCertificate, ZeroTrustTenantProfile
 
@@ -115,6 +116,38 @@ class AssessmentCertificateStorageTests(TestCase):
         self.assertIn("[System.IO.File]::ReadAllText($pfxPasswordPath).Trim()", script)
         self.assertNotIn("test-assessment-password", script)
 
+    @override_settings(ASSESSMENT_MODULE_VERSION="2.2.0")
+    def test_assessment_script_requires_pinned_module_without_runtime_install(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-script-module",
+            display_name="Script Module Tenant",
+            tenant_id="tenant-script-module",
+            client_id="client-script-module",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                payload = generate_zero_trust_certificate(profile.external_id)
+                certificate = ZeroTrustCertificate.objects.get(external_id=payload["certificate"]["id"])
+
+            run = ZeroTrustAssessmentRun.objects.create(
+                external_id="zt-run-script-module",
+                profile=profile,
+                certificate=certificate,
+            )
+
+            script = assessment_script_contents(run, Path(certificate_root) / "output")
+
+        self.assertIn("$requiredModuleVersion = '2.2.0'", script)
+        self.assertIn("Import-Module ZeroTrustAssessment -RequiredVersion $requiredModuleVersion -Force", script)
+        self.assertIn("Run scripts/local_setup.sh to install the pinned module before starting the worker.", script)
+        self.assertNotIn("Install-Module ZeroTrustAssessment", script)
+        self.assertNotIn("Install-PSResource -Name ZeroTrustAssessment", script)
+
     @override_settings(ASSESSMENT_CERTIFICATE_ROOT="")
     def test_certificate_generation_requires_certificate_root_setting(self) -> None:
         profile = ZeroTrustTenantProfile.objects.create(
@@ -148,4 +181,29 @@ class AssessmentCertificateStorageTests(TestCase):
         self.assertEqual(
             str(raised.exception),
             "Assessment PFX password credential 'assessment-pfx-password' is not available to this service.",
+        )
+
+    @override_settings(ASSESSMENT_ARTIFACT_MAX_FILE_BYTES=8)
+    def test_ingest_assessment_artifacts_rejects_files_over_per_file_limit(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-large-artifact",
+            display_name="Large Artifact Tenant",
+            tenant_id="tenant-large-artifact",
+            client_id="client-large-artifact",
+        )
+        run = ZeroTrustAssessmentRun.objects.create(
+            external_id="zt-run-large-artifact",
+            profile=profile,
+        )
+
+        with TemporaryDirectory() as export_root:
+            export_path = Path(export_root)
+            (export_path / "ZeroTrustAssessmentReport.html").write_bytes(b"123456789")
+
+            with self.assertRaises(AssessmentValidationError) as raised:
+                ingest_assessment_artifacts(run, export_path)
+
+        self.assertEqual(
+            str(raised.exception),
+            "Assessment artifact ZeroTrustAssessmentReport.html exceeds the 8 byte(s) per-file limit.",
         )

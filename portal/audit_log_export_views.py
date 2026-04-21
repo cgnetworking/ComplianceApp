@@ -3,25 +3,26 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.http import require_GET
 
+from .authorization import PortalAction, PortalResource, has_portal_permission
 from .services.bootstrap import append_portal_audit_entry
 from .services.audit_log_exports import build_review_state_audit_log_export
-from .views import api_login_required, policy_reader_api_access
+from .view_helpers import api_login_required, current_audit_actor, portal_api_forbidden_response
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def audit_log_export_csv(request: HttpRequest) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.AUDIT_LOG, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export the audit log.")
     file_name, csv_content = build_review_state_audit_log_export()
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    username, display_name = current_audit_actor(request)
     append_portal_audit_entry(
         action="export_audit_log",
         entity_type="audit_log",
         entity_id="review_state",
         summary=f"Exported audit log file {file_name}.",
-        actor_username=username or "system",
-        actor_display_name=display_name or username or "System",
+        actor_username=username,
+        actor_display_name=display_name,
         metadata={
             "source": "audit-log",
             "exportType": "audit_log_csv",

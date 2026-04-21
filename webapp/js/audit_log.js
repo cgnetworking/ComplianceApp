@@ -1,19 +1,36 @@
   function normalizeAuditLogEntries(entries) {
     return entries
       .filter((entry) => entry && typeof entry === "object")
-      .map((entry) => ({
-        id: typeof entry.id === "string" ? entry.id : "",
-        action: typeof entry.action === "string" && entry.action.trim() ? entry.action.trim() : "state_changed",
-        entityType: typeof entry.entityType === "string" && entry.entityType.trim() ? entry.entityType.trim() : "record",
-        entityId: typeof entry.entityId === "string" ? entry.entityId.trim() : "",
-        summary: typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.",
-        occurredAt: typeof entry.occurredAt === "string" ? entry.occurredAt : "",
-        actor: entry.actor && typeof entry.actor === "object" ? entry.actor : {},
-        metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
-      }))
+      .map((entry) => {
+        if (
+          typeof entry.id !== "string"
+          || typeof entry.action !== "string"
+          || typeof entry.entityType !== "string"
+          || typeof entry.summary !== "string"
+          || typeof entry.occurredAt !== "string"
+          || !entry.actor
+          || typeof entry.actor !== "object"
+          || typeof entry.actor.username !== "string"
+        ) {
+          throw new Error("Audit log entry payload was invalid.");
+        }
+        return {
+          id: entry.id.trim(),
+          action: entry.action.trim(),
+          entityType: entry.entityType.trim(),
+          entityId: typeof entry.entityId === "string" ? entry.entityId.trim() : "",
+          summary: entry.summary.trim(),
+          occurredAt: entry.occurredAt,
+          actor: entry.actor,
+          metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
+        };
+      })
       .sort((left, right) => {
-        const leftTime = Date.parse(left.occurredAt) || 0;
-        const rightTime = Date.parse(right.occurredAt) || 0;
+        const leftTime = Date.parse(left.occurredAt);
+        const rightTime = Date.parse(right.occurredAt);
+        if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+          throw new Error("Audit log entry timestamp was invalid.");
+        }
         return rightTime - leftTime;
       });
   }
@@ -25,7 +42,7 @@
   }
 
   function auditActionLabel(entry) {
-    return String(entry.action || "state_changed")
+    return String(entry.action)
       .split("_")
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
@@ -39,7 +56,7 @@
         return `Deleted risk '${riskText}'.`;
       }
     }
-    return typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : "State updated.";
+    return entry.summary;
   }
 
   function auditChecklistLookup() {
@@ -99,7 +116,7 @@
       const createdMonth = auditChecklistCreatedMonth(checklistItem);
       return `${checklistName} / Created ${createdMonth}`;
     }
-    const entityType = String(entry.entityType || "record").replaceAll("_", " ");
+    const entityType = String(entry.entityType).replaceAll("_", " ");
     const normalizedEntityType = entityType.charAt(0).toUpperCase() + entityType.slice(1);
     if (entry.entityId) {
       return `${normalizedEntityType} / ${entry.entityId}`;
@@ -145,14 +162,7 @@
   }
 
   function auditMetadataCsvValue(metadata) {
-    if (!metadata || typeof metadata !== "object") {
-      return "{}";
-    }
-    try {
-      return JSON.stringify(metadata);
-    } catch (error) {
-      return "{}";
-    }
+    return JSON.stringify(metadata);
   }
 
   function auditCsvEscape(value) {
@@ -225,34 +235,19 @@
     link.remove();
     URL.revokeObjectURL(url);
   }
-  function parseAuditExportFilename(dispositionHeader, fallbackName) {
+  function parseAuditExportFilename(dispositionHeader) {
     if (typeof dispositionHeader !== "string" || !dispositionHeader.trim()) {
-      return fallbackName;
+      throw new Error("Audit log export response did not include a Content-Disposition filename.");
     }
     const utf8Match = dispositionHeader.match(/filename\*=UTF-8''([^;]+)/i);
     if (utf8Match && utf8Match[1]) {
-      try {
-        return decodeURIComponent(utf8Match[1]);
-      } catch (error) {
-        // Ignore malformed filenames and use fallback handling below.
-      }
+      return decodeURIComponent(utf8Match[1]);
     }
     const plainMatch = dispositionHeader.match(/filename=\"?([^\";]+)\"?/i);
     if (plainMatch && plainMatch[1]) {
       return plainMatch[1];
     }
-    return fallbackName;
-  }
-
-  async function loadAuditEntriesForExport() {
-    try {
-      const payload = await apiRequest("/state/?page=audit-log");
-      const reviewState = payload && typeof payload.reviewState === "object" ? payload.reviewState : {};
-      const auditLog = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
-      return normalizeAuditLogEntries(auditLog);
-    } catch (error) {
-      return auditLogEntries();
-    }
+    throw new Error("Audit log export filename was invalid.");
   }
 
   function bindAuditLogExportTrigger() {
@@ -275,23 +270,17 @@
           credentials: "same-origin",
         });
         if (!response.ok) {
-          let detail = `Unable to export the audit log (${response.status}).`;
-          try {
-            const errorPayload = await response.json();
-            if (errorPayload && typeof errorPayload.detail === "string" && errorPayload.detail.trim()) {
-              detail = errorPayload.detail;
-            }
-          } catch (error) {
-            // Ignore non-JSON errors and keep fallback detail.
+          const errorText = await response.text();
+          if (!errorText) {
+            throw new Error(`Unable to export the audit log (${response.status}).`);
           }
-          throw new Error(detail);
+          const errorPayload = JSON.parse(errorText);
+          const detail = errorPayload && typeof errorPayload.detail === "string" ? errorPayload.detail.trim() : "";
+          throw new Error(detail || `Unable to export the audit log (${response.status}).`);
         }
 
         const csvBlob = await response.blob();
-        const fileName = parseAuditExportFilename(
-          response.headers.get("Content-Disposition"),
-          auditExportFileName(),
-        );
+        const fileName = parseAuditExportFilename(response.headers.get("Content-Disposition"));
         const downloadUrl = URL.createObjectURL(csvBlob);
         const link = document.createElement("a");
         link.href = downloadUrl;

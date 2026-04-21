@@ -1,37 +1,36 @@
 function resolveApiBaseUrl() {
-  if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl === "string") {
-    return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
+  if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl !== "string") {
+    throw new Error("Portal API base URL is not configured.");
   }
-  return "/api";
+  return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
 }
 
 function resolveLoginUrl() {
-  if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.loginUrl === "string") {
-    return window.ISMS_PORTAL_CONFIG.loginUrl;
+  if (!window.ISMS_PORTAL_CONFIG || typeof window.ISMS_PORTAL_CONFIG.loginUrl !== "string") {
+    throw new Error("Portal login URL is not configured.");
   }
-  return "/login/";
+  return window.ISMS_PORTAL_CONFIG.loginUrl;
 }
 
-async function apiRequest(path, options) {
-  const requestOptions = options || {};
-  const method = requestOptions.method || "GET";
-  const headers = new Headers(requestOptions.headers || {});
-  const isFormData = typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+async function apiRequest(path, options = {}) {
+  const method = typeof options.method === "string" ? options.method : "GET";
+  const headers = new Headers(options.headers || {});
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
 
   if (!headers.has("Accept")) {
     headers.set("Accept", "application/json");
   }
-  if (requestOptions.body && !isFormData && !headers.has("Content-Type")) {
+  if (options.body && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  const csrfToken = readCookie("csrftoken");
+  const csrfToken = resolveCsrfToken();
   if (csrfToken && !/^(GET|HEAD|OPTIONS|TRACE)$/i.test(method)) {
     headers.set("X-CSRFToken", csrfToken);
   }
 
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
-    ...requestOptions,
+    ...options,
     method,
     headers,
     credentials: "same-origin",
@@ -44,24 +43,33 @@ async function apiRequest(path, options) {
   }
 
   const responseText = await response.text();
-  let payload = null;
+  let returnValue = null;
   if (responseText) {
     try {
-      payload = JSON.parse(responseText);
+      returnValue = JSON.parse(responseText);
     } catch (error) {
-      payload = null;
+      throw new Error("API response was not valid JSON.");
     }
   }
 
   if (!response.ok) {
-    throw new Error((payload && (payload.detail || payload.message)) || `Request failed (${response.status}).`);
+    const detail = returnValue && (returnValue.detail || returnValue.message);
+    throw new Error(typeof detail === "string" && detail.trim() ? detail : `Request failed (${response.status}).`);
   }
 
-  return payload;
+  return returnValue;
 }
 
-function readCookie(name) {
-  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = document.cookie.match(new RegExp(`(?:^|; )${escapedName}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : "";
+function resolveCsrfToken() {
+  const csrfTokenElement = document.querySelector('meta[name="portal-csrf-token"]');
+  if (!csrfTokenElement) {
+    return "";
+  }
+
+  const csrfToken = typeof csrfTokenElement.content === "string" ? csrfTokenElement.content.trim() : "";
+  if (!csrfToken || csrfToken === "NOTPROVIDED") {
+    return "";
+  }
+
+  return csrfToken;
 }

@@ -3,11 +3,11 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
 
 from django.utils import timezone
 
-from .common import ValidationError, get_state_payload, normalize_review_state, parse_iso_datetime
+from .common import get_state_payload, normalize_review_state, parse_iso_datetime
 
 
 AUDIT_LOG_EXPORT_HEADERS = (
@@ -21,14 +21,18 @@ AUDIT_LOG_EXPORT_HEADERS = (
     "actor_display_name",
     "metadata_json",
 )
-_EPOCH_UTC = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _escape_csv_formula(value: object) -> str:
+    normalized = "" if value is None else str(value)
+    if normalized.startswith(_CSV_FORMULA_PREFIXES):
+        return f"'{normalized}"
+    return normalized
 
 
 def _parse_occurred_at(value: object) -> datetime:
-    try:
-        return parse_iso_datetime(value, fallback=_EPOCH_UTC)
-    except ValidationError:
-        return _EPOCH_UTC
+    return parse_iso_datetime(value)
 
 
 def _normalize_audit_log_row(value: object) -> dict[str, object] | None:
@@ -77,15 +81,15 @@ def build_review_state_audit_log_csv(entries: list[dict[str, object]] | None = N
     for row in rows:
         writer.writerow(
             [
-                row.get("id", ""),
-                row.get("action", ""),
-                row.get("entity_type", ""),
-                row.get("entity_id", ""),
-                row.get("summary", ""),
-                row.get("occurred_at", ""),
-                row.get("actor_username", ""),
-                row.get("actor_display_name", ""),
-                row.get("metadata_json", "{}"),
+                _escape_csv_formula(row.get("id", "")),
+                _escape_csv_formula(row.get("action", "")),
+                _escape_csv_formula(row.get("entity_type", "")),
+                _escape_csv_formula(row.get("entity_id", "")),
+                _escape_csv_formula(row.get("summary", "")),
+                _escape_csv_formula(row.get("occurred_at", "")),
+                _escape_csv_formula(row.get("actor_username", "")),
+                _escape_csv_formula(row.get("actor_display_name", "")),
+                _escape_csv_formula(row.get("metadata_json", "{}")),
             ]
         )
     return buffer.getvalue()

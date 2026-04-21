@@ -8,28 +8,37 @@ from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 
+from ..authorization import PortalAction, PortalResource, has_portal_permission, restrict_queryset
+from ..contracts import (
+    serialize_review_checklist_item,
+    serialize_review_checklist_recommendation,
+    serialize_uploaded_policy,
+    serialize_vendor_response,
+)
 from ..models import UploadedPolicy, VendorResponse
 from .common import (
     PENDING_POLICY_APPROVER,
-    SUPPORTED_POLICY_EXTENSIONS,
     ValidationError,
+    get_state_payload,
+    normalize_string,
+    normalize_review_state,
+    set_state_payload,
+)
+from .mapping import get_mapping_payload
+from .uploads import (
+    SUPPORTED_POLICY_EXTENSIONS,
     build_preview_text,
     decode_upload,
     extract_purpose_from_markdown,
     file_extension,
     file_name_base,
     format_uploaded_policy_id,
-    get_state_payload,
     infer_vendor_name,
     is_text_like_file,
     markdown_to_html,
-    normalize_string,
-    normalize_review_state,
     sanitize_uploaded_html,
-    set_state_payload,
     summarize_vendor_survey,
 )
-from .mapping import get_mapping_payload
 
 
 def serialize_policy_document_payload(document: dict[str, object], *, include_content: bool) -> dict[str, object]:
@@ -53,11 +62,24 @@ def get_mapping_bootstrap_payload(*, include_document_content: bool) -> dict[str
     return next_payload
 
 
-def list_uploaded_documents(*, include_content: bool) -> list[dict[str, object]]:
-    return [serialize_policy_document_payload(item.to_portal_dict(), include_content=include_content) for item in UploadedPolicy.objects.all()]
+def list_uploaded_documents(*, include_content: bool, viewer: object | None = None) -> list[dict[str, object]]:
+    return [
+        serialize_policy_document_payload(serialize_uploaded_policy(item), include_content=include_content)
+        for item in restrict_queryset(
+            UploadedPolicy.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.POLICY_DOCUMENT,
+        )
+    ]
 
 
-def get_policy_document(document_id: str, *, include_content: bool = True) -> dict[str, object]:
+def get_policy_document(
+    document_id: str,
+    *,
+    include_content: bool = True,
+    viewer: object | None = None,
+) -> dict[str, object]:
     normalized_id = normalize_string(document_id)
     if not normalized_id:
         raise ValidationError("Policy id is required.")
@@ -68,7 +90,9 @@ def get_policy_document(document_id: str, *, include_content: bool = True) -> di
         uploaded = None
 
     if uploaded is not None:
-        return serialize_policy_document_payload(uploaded.to_portal_dict(), include_content=include_content)
+        if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.VIEW):
+            raise ValidationError("You do not have permission to access this policy document.")
+        return serialize_policy_document_payload(serialize_uploaded_policy(uploaded), include_content=include_content)
 
     mapping_payload = get_mapping_payload()
     mapping_documents = mapping_payload.get("documents")
@@ -77,6 +101,11 @@ def get_policy_document(document_id: str, *, include_content: bool = True) -> di
             if not isinstance(item, dict):
                 continue
             if normalize_string(item.get("id")) == normalized_id:
+                if viewer is not None and not (
+                    has_portal_permission(viewer, PortalResource.MAPPING, PortalAction.VIEW)
+                    or has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.VIEW)
+                ):
+                    raise ValidationError("You do not have permission to access this policy document.")
                 return serialize_policy_document_payload(item, include_content=include_content)
 
     raise ValidationError("Policy document was not found.")
@@ -114,16 +143,32 @@ def normalize_policy_approver_value(value: object) -> str:
     return normalized_value
 
 
-def list_review_checklist_items() -> list[dict[str, str]]:
+def list_review_checklist_items(*, viewer: object | None = None) -> list[dict[str, str]]:
     from ..models import ReviewChecklistItem
 
-    return [item.to_portal_dict() for item in ReviewChecklistItem.objects.all()]
+    return [
+        serialize_review_checklist_item(item)
+        for item in restrict_queryset(
+            ReviewChecklistItem.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.REVIEW_STATE,
+        )
+    ]
 
 
-def list_review_checklist_recommendations() -> list[dict[str, str]]:
+def list_review_checklist_recommendations(*, viewer: object | None = None) -> list[dict[str, str]]:
     from ..models import ReviewChecklistRecommendation
 
-    return [item.to_portal_dict() for item in ReviewChecklistRecommendation.objects.all()]
+    return [
+        serialize_review_checklist_recommendation(item)
+        for item in restrict_queryset(
+            ReviewChecklistRecommendation.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.REVIEW_STATE,
+        )
+    ]
 
 
 def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, object]], list[str]]:
@@ -140,7 +185,7 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
 
         raw_text = decode_upload(
             uploaded_file,
-            max_bytes=int(getattr(settings, "POLICY_UPLOAD_MAX_FILE_BYTES", 2097152)),
+            max_bytes=int(settings.POLICY_UPLOAD_MAX_FILE_BYTES),
         )
         content_html = sanitize_uploaded_html(raw_text) if extension in {"html", "htm"} else markdown_to_html(raw_text)
         policy = UploadedPolicy.objects.create(
@@ -163,7 +208,7 @@ def create_uploaded_policies(files: list[UploadedFile]) -> tuple[list[dict[str, 
     if not created_items and messages:
         raise ValidationError(messages[0])
 
-    return [item.to_portal_dict() for item in created_items], messages
+    return [serialize_uploaded_policy(item) for item in created_items], messages
 
 
 def delete_uploaded_policy(document_id: str) -> dict[str, object]:
@@ -176,7 +221,7 @@ def delete_uploaded_policy(document_id: str) -> dict[str, object]:
     except UploadedPolicy.DoesNotExist as error:
         raise ValidationError("Uploaded policy was not found.") from error
 
-    deleted_payload = policy.to_portal_dict()
+    deleted_payload = serialize_uploaded_policy(policy)
     policy.delete()
     return deleted_payload
 
@@ -203,7 +248,7 @@ def update_uploaded_policy_approver(document_id: str, approver: object) -> dict[
         update_fields.append("approver")
     if update_fields:
         policy.save(update_fields=update_fields)
-    return policy.to_portal_dict()
+    return serialize_uploaded_policy(policy)
 
 
 def approve_uploaded_policy(
@@ -236,7 +281,7 @@ def approve_uploaded_policy(
 
         if policy.approved_at:
             review_state = normalize_review_state(get_state_payload("review_state", {}))
-            return policy.to_portal_dict(), review_state
+            return serialize_uploaded_policy(policy), review_state
 
         approval_time = timezone.now()
         policy.approved_by = normalized_actor_username
@@ -248,12 +293,12 @@ def approve_uploaded_policy(
             build_policy_approval_audit_entry(
                 policy,
                 actor_username=normalized_actor_username,
-                actor_display_name=normalize_string(actor_display_name, normalized_actor_username),
+                actor_display_name=normalize_string(actor_display_name),
                 occurred_at=approval_time,
             )
         ]
     )
-    return policy.to_portal_dict(), review_state
+    return serialize_uploaded_policy(policy), review_state
 
 
 def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]]:
@@ -264,7 +309,7 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
         raw_text = (
             decode_upload(
                 uploaded_file,
-                max_bytes=int(getattr(settings, "VENDOR_UPLOAD_MAX_FILE_BYTES", 10485760)),
+                max_bytes=int(settings.VENDOR_UPLOAD_MAX_FILE_BYTES),
             ).replace("\x00", "").strip()
             if is_text_like_file(uploaded_file, extension)
             else ""
@@ -284,11 +329,19 @@ def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]
         )
         created_items.append(response)
 
-    return [item.to_portal_dict() for item in created_items]
+    return [serialize_vendor_response(item) for item in created_items]
 
 
-def list_vendor_responses() -> list[dict[str, object]]:
-    return [item.to_portal_dict() for item in VendorResponse.objects.all()]
+def list_vendor_responses(*, viewer: object | None = None) -> list[dict[str, object]]:
+    return [
+        serialize_vendor_response(item)
+        for item in restrict_queryset(
+            VendorResponse.objects.all(),
+            viewer,
+            PortalAction.VIEW,
+            resource=PortalResource.VENDOR_RESPONSE,
+        )
+    ]
 
 
 def delete_vendor_response(response_id: str) -> dict[str, object]:
@@ -301,7 +354,7 @@ def delete_vendor_response(response_id: str) -> dict[str, object]:
     except VendorResponse.DoesNotExist as error:
         raise ValidationError("Vendor response was not found.") from error
 
-    deleted_payload = response.to_portal_dict()
+    deleted_payload = serialize_vendor_response(response)
     response.delete()
     return deleted_payload
 

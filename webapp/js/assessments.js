@@ -8,10 +8,7 @@
   function selectedZeroTrustProfile() {
     const profileId = state.selectedAssessmentProfileId;
     if (!profileId) {
-      return zeroTrustProfileDetail;
-    }
-    if (zeroTrustProfileDetail && zeroTrustProfileDetail.id === profileId) {
-      return zeroTrustProfileDetail;
+      return null;
     }
     return zeroTrustProfiles.find((profile) => profile.id === profileId) || null;
   }
@@ -19,23 +16,13 @@
   function selectedZeroTrustRun() {
     const runId = state.selectedAssessmentRunId;
     if (!runId) {
-      return zeroTrustRuns[0] || null;
+      return null;
     }
     return zeroTrustRuns.find((run) => run.id === runId) || null;
   }
 
   function zeroTrustRunIsActive(run) {
     return Boolean(run && ["queued", "claimed", "running", "ingesting"].includes(run.status));
-  }
-
-  function resolveAssessmentApiBaseUrl() {
-    if (typeof resolveApiBaseUrl === "function") {
-      return resolveApiBaseUrl();
-    }
-    if (window.ISMS_PORTAL_CONFIG && typeof window.ISMS_PORTAL_CONFIG.apiBaseUrl === "string") {
-      return window.ISMS_PORTAL_CONFIG.apiBaseUrl.replace(/\/+$/, "");
-    }
-    return "/api";
   }
 
   function zeroTrustHasStoredReports() {
@@ -45,38 +32,34 @@
     return zeroTrustProfiles.some((profile) => Boolean(profile && profile.latestRun && profile.latestRun.hasReport));
   }
 
-  function normalizeAssessmentDownloadFilename(fileName, fallbackName) {
+  function normalizeAssessmentDownloadFilename(fileName) {
     const raw = typeof fileName === "string" ? fileName.trim() : "";
     const sanitized = raw.replace(/[\\/]/g, "-").replace(/\s+/g, " ");
     if (sanitized) {
       return sanitized;
     }
-    return fallbackName;
+    throw new Error("Assessment export file name was invalid.");
   }
 
-  function parseAssessmentExportFilename(dispositionHeader, fallbackName) {
+  function parseAssessmentExportFilename(dispositionHeader) {
     const disposition = typeof dispositionHeader === "string" ? dispositionHeader : "";
     const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
     if (utf8Match && utf8Match[1]) {
-      try {
-        return normalizeAssessmentDownloadFilename(decodeURIComponent(utf8Match[1]), fallbackName);
-      } catch (error) {
-        return normalizeAssessmentDownloadFilename(utf8Match[1], fallbackName);
-      }
+      return normalizeAssessmentDownloadFilename(decodeURIComponent(utf8Match[1]));
     }
 
     const plainMatch = disposition.match(/filename="?([^\";]+)"?/i);
     if (plainMatch && plainMatch[1]) {
-      return normalizeAssessmentDownloadFilename(plainMatch[1], fallbackName);
+      return normalizeAssessmentDownloadFilename(plainMatch[1]);
     }
-    return fallbackName;
+    throw new Error("Assessment export response did not include a valid filename.");
   }
 
   function triggerAssessmentArchiveDownload(blob, fileName) {
     const objectUrl = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = objectUrl;
-    link.download = normalizeAssessmentDownloadFilename(fileName, "assessment-reports.zip");
+    link.download = normalizeAssessmentDownloadFilename(fileName);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -85,7 +68,7 @@
     }, 1000);
   }
 
-  async function downloadAssessmentArchive(url, fallbackName) {
+  async function downloadAssessmentArchive(url) {
     const response = await fetch(url, {
       method: "GET",
       credentials: "same-origin",
@@ -103,17 +86,13 @@
       const responseText = await response.text();
       let detail = "";
       if (responseText) {
-        try {
-          const payload = JSON.parse(responseText);
-          detail = payload && (payload.detail || payload.message) ? String(payload.detail || payload.message) : "";
-        } catch (error) {
-          detail = "";
-        }
+        const payload = JSON.parse(responseText);
+        detail = payload && (payload.detail || payload.message) ? String(payload.detail || payload.message) : "";
       }
       throw new Error(detail || `Request failed (${response.status}).`);
     }
 
-    const fileName = parseAssessmentExportFilename(response.headers.get("Content-Disposition"), fallbackName);
+    const fileName = parseAssessmentExportFilename(response.headers.get("Content-Disposition"));
     const archiveBlob = await response.blob();
     triggerAssessmentArchiveDownload(archiveBlob, fileName);
   }
@@ -130,8 +109,8 @@
       await operation();
       setUploadStatus(els.assessmentStatus, messages.success, "success");
     } catch (error) {
-      const fallbackMessage = error instanceof Error ? error.message : messages.error;
-      setUploadStatus(els.assessmentStatus, fallbackMessage, "error");
+      const detail = error instanceof Error ? error.message : messages.error;
+      setUploadStatus(els.assessmentStatus, detail, "error");
     } finally {
       zeroTrustExportInFlight = false;
       renderZeroTrustReport();
@@ -146,8 +125,7 @@
       return;
     }
 
-    const fallbackName = `assessment-report-${run.id}.zip`;
-    const downloadUrl = `${resolveAssessmentApiBaseUrl()}/assessments/runs/${encodeURIComponent(run.id)}/export/`;
+    const downloadUrl = `${resolveApiBaseUrl()}/assessments/runs/${encodeURIComponent(run.id)}/export/`;
     await runAssessmentExport(
       {
         pending: "Preparing selected report export...",
@@ -155,7 +133,7 @@
         error: "Unable to export the selected report.",
       },
       async () => {
-        await downloadAssessmentArchive(downloadUrl, fallbackName);
+        await downloadAssessmentArchive(downloadUrl);
       }
     );
   }
@@ -166,7 +144,7 @@
       return;
     }
 
-    const downloadUrl = `${resolveAssessmentApiBaseUrl()}/assessments/reports/export/`;
+    const downloadUrl = `${resolveApiBaseUrl()}/assessments/reports/export/`;
     await runAssessmentExport(
       {
         pending: "Preparing export for all stored assessment reports...",
@@ -174,7 +152,7 @@
         error: "Unable to export all stored assessment reports.",
       },
       async () => {
-        await downloadAssessmentArchive(downloadUrl, "assessment-reports.zip");
+        await downloadAssessmentArchive(downloadUrl);
       }
     );
   }
@@ -566,12 +544,19 @@
   }
 
   function collectZeroTrustProfileForm() {
+    const displayNameInput = document.getElementById("assessment-display-name");
+    const tenantIdInput = document.getElementById("assessment-tenant-id");
+    const clientIdInput = document.getElementById("assessment-client-id");
+    const thumbprintInput = document.getElementById("assessment-thumbprint");
+    if (!displayNameInput || !tenantIdInput || !clientIdInput || !thumbprintInput) {
+      throw new Error("Assessment profile form is incomplete.");
+    }
     return {
       id: state.selectedAssessmentProfileId,
-      displayName: document.getElementById("assessment-display-name") ? document.getElementById("assessment-display-name").value.trim() : "",
-      tenantId: document.getElementById("assessment-tenant-id") ? document.getElementById("assessment-tenant-id").value.trim() : "",
-      clientId: document.getElementById("assessment-client-id") ? document.getElementById("assessment-client-id").value.trim() : "",
-      certificateThumbprint: document.getElementById("assessment-thumbprint") ? document.getElementById("assessment-thumbprint").value.trim() : "",
+      displayName: displayNameInput.value.trim(),
+      tenantId: tenantIdInput.value.trim(),
+      clientId: clientIdInput.value.trim(),
+      certificateThumbprint: thumbprintInput.value.trim(),
     };
   }
 
@@ -663,8 +648,8 @@
       setUploadStatus(els.assessmentStatus, "Select a saved tenant profile before deleting it.", "error");
       return;
     }
-    const profile = zeroTrustProfiles.find((item) => item.id === profileId) || zeroTrustProfileDetail;
-    const label = profile ? (profile.displayName || profile.tenantId) : "this tenant";
+    const profile = zeroTrustProfiles.find((item) => item.id === profileId);
+    const label = profile ? profile.displayName : profileId;
     if (!window.confirm(`Delete ${label} and all stored assessment history for it? This cannot be undone.`)) {
       return;
     }
@@ -715,13 +700,14 @@
       const payload = await apiRequest(`/assessments/runs/${encodeURIComponent(run.id)}/`);
       const refreshedRun = payload && payload.run ? payload.run : null;
       zeroTrustLogs = Array.isArray(payload && payload.logs) ? payload.logs : [];
-      if (refreshedRun) {
-        zeroTrustRuns = zeroTrustRuns.map((item) => (item.id === refreshedRun.id ? refreshedRun : item));
-        const profile = selectedZeroTrustProfile();
-        if (profile && zeroTrustProfileDetail) {
-          zeroTrustProfileDetail.latestRun = refreshedRun;
-          replaceZeroTrustProfile(zeroTrustProfileDetail);
-        }
+      if (!refreshedRun) {
+        throw new Error("Assessment run response was invalid.");
+      }
+      zeroTrustRuns = zeroTrustRuns.map((item) => (item.id === refreshedRun.id ? refreshedRun : item));
+      const profile = selectedZeroTrustProfile();
+      if (profile && zeroTrustProfileDetail) {
+        zeroTrustProfileDetail.latestRun = refreshedRun;
+        replaceZeroTrustProfile(zeroTrustProfileDetail);
       }
       renderZeroTrustPage();
       if (!zeroTrustRunIsActive(refreshedRun)) {
@@ -774,7 +760,7 @@
         if (!target) {
           return;
         }
-        state.selectedAssessmentProfileId = target.dataset.assessmentProfile || "";
+        state.selectedAssessmentProfileId = target.dataset.assessmentProfile;
         state.selectedAssessmentRunId = "";
         syncUrl();
         void loadZeroTrustProfileDetail(state.selectedAssessmentProfileId);
@@ -791,19 +777,19 @@
 
         const createCertificate = event.target.closest("[data-assessment-create-certificate]");
         if (createCertificate) {
-          void handleZeroTrustCertificateCreate(createCertificate.dataset.assessmentCreateCertificate || "");
+          void handleZeroTrustCertificateCreate(createCertificate.dataset.assessmentCreateCertificate);
           return;
         }
 
         const startRun = event.target.closest("[data-assessment-run-start]");
         if (startRun) {
-          void handleZeroTrustRunStart(startRun.dataset.assessmentRunStart || "");
+          void handleZeroTrustRunStart(startRun.dataset.assessmentRunStart);
           return;
         }
 
         const deleteProfile = event.target.closest("[data-assessment-delete-profile]");
         if (deleteProfile) {
-          void handleZeroTrustProfileDelete(deleteProfile.dataset.assessmentDeleteProfile || "");
+          void handleZeroTrustProfileDelete(deleteProfile.dataset.assessmentDeleteProfile);
           return;
         }
 

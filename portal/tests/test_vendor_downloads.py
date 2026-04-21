@@ -7,11 +7,13 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 
+from portal.authorization import PortalAction, PortalResource
 from portal.models import VendorResponse
 from portal.services.vendor_downloads import (
     build_all_vendor_responses_download,
     build_single_vendor_response_download,
 )
+from portal.tests.permissions import grant_user_permissions
 from portal.vendor_download_views import vendor_response_downloads
 
 
@@ -50,7 +52,10 @@ class VendorDownloadServiceTests(TestCase):
             raw_text='{"status":"complete"}',
         )
 
-        file_name, content, content_type = build_single_vendor_response_download(response.external_id)
+        file_name, content, content_type = build_single_vendor_response_download(
+            response.external_id,
+            include_raw_text=True,
+        )
 
         self.assertTrue(file_name.endswith(".json"))
         self.assertIn("Acme-Co", file_name)
@@ -68,7 +73,10 @@ class VendorDownloadServiceTests(TestCase):
             status="Metadata only",
         )
 
-        file_name, content, content_type = build_single_vendor_response_download(response.external_id)
+        file_name, content, content_type = build_single_vendor_response_download(
+            response.external_id,
+            include_raw_text=True,
+        )
         payload = json.loads(content.decode("utf-8"))
 
         self.assertTrue(file_name.endswith(".json"))
@@ -101,7 +109,7 @@ class VendorDownloadServiceTests(TestCase):
             status="-status",
         )
 
-        _, content, _ = build_all_vendor_responses_download()
+        _, content, _ = build_all_vendor_responses_download(include_raw_text=True)
         row = list(csv.DictReader(io.StringIO(content.decode("utf-8"))))[0]
         self.assertEqual(row["id"], "'=vendor-download-5")
         self.assertEqual(row["vendorName"], "'+Vendor")
@@ -114,6 +122,11 @@ class VendorDownloadViewTests(TestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
         self.user = user_model.objects.create_user(username="vendor-user", password="password")
+        grant_user_permissions(
+            self.user,
+            (PortalResource.VENDOR_RESPONSE, PortalAction.EXPORT),
+            (PortalResource.VENDOR_RESPONSE, PortalAction.VIEW_RAW),
+        )
         self.factory = RequestFactory()
 
     def create_vendor_response(self, external_id: str, raw_text: str = '{"ok":true}') -> VendorResponse:

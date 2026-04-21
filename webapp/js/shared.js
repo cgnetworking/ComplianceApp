@@ -1,10 +1,11 @@
   function populateFilters() {
-    const controls = getAllControlViews();
-    if (els.domainFilter) {
-      populateSelect(els.domainFilter, ["All"].concat(uniqueValues(controls, "domain")));
-      els.domainFilter.value = valueOrFallback(els.domainFilter, state.domain);
-      state.domain = els.domainFilter.value;
+    if (!els.domainFilter || typeof getAllControlViews !== "function") {
+      return;
     }
+    const controls = getAllControlViews();
+    populateSelect(els.domainFilter, ["All"].concat(uniqueValues(controls, "domain")));
+    els.domainFilter.value = valueOrFallback(els.domainFilter, state.domain);
+    state.domain = els.domainFilter.value;
   }
   function initializeSelection() {
     if (page === "controls") {
@@ -26,14 +27,34 @@
   function bindEvents() {
     bindSearchEvents();
     bindFilterEvents();
-    bindControlEvents();
-    bindPolicyEvents();
-    bindUploadEvents();
-    bindVendorEvents();
-    bindReviewEvents();
-    bindReviewTaskEvents();
-    bindRiskEvents();
-    if (typeof bindZeroTrustEvents === "function") {
+    if (page === "controls") {
+      bindControlEvents();
+      bindUploadEvents();
+      return;
+    }
+    if (page === "policies") {
+      bindPolicyEvents();
+      bindUploadEvents();
+      return;
+    }
+    if (page === "vendors") {
+      bindUploadEvents();
+      bindVendorEvents();
+      return;
+    }
+    if (page === "reviews") {
+      bindReviewEvents();
+      return;
+    }
+    if (page === "review-tasks" && typeof bindReviewTaskEvents === "function") {
+      bindReviewTaskEvents();
+      return;
+    }
+    if (page === "risks") {
+      bindRiskEvents();
+      return;
+    }
+    if (page === "assessments" && typeof bindZeroTrustEvents === "function") {
       bindZeroTrustEvents();
     }
   }
@@ -347,9 +368,15 @@
     }
   }
   function bindUploadEvents() {
-    bindFilePicker(els.policyUploadTrigger, els.policyUploadInput, handlePolicyUpload);
-    bindFilePicker(els.mappingUploadTrigger, els.mappingUploadInput, handleMappingUpload);
-    bindFilePicker(els.vendorUploadTrigger, els.vendorUploadInput, handleVendorUpload);
+    if (typeof handlePolicyUpload === "function") {
+      bindFilePicker(els.policyUploadTrigger, els.policyUploadInput, handlePolicyUpload);
+    }
+    if (typeof handleMappingUpload === "function") {
+      bindFilePicker(els.mappingUploadTrigger, els.mappingUploadInput, handleMappingUpload);
+    }
+    if (typeof handleVendorUpload === "function") {
+      bindFilePicker(els.vendorUploadTrigger, els.vendorUploadInput, handleVendorUpload);
+    }
   }
   function bindVendorEvents() {
     if (!els.vendorResponses) {
@@ -878,26 +905,33 @@
     }).join("");
   }
   function valueOrFallback(select, value) {
-    const exists = Array.from(select.options).some((option) => option.value === value);
-    return exists ? value : select.options[0].value;
+    const options = Array.from(select.options || []);
+    const normalizedValue = typeof value === "string" ? value : String(value || "");
+    const exists = options.some((option) => option.value === normalizedValue);
+    if (exists) {
+      return normalizedValue;
+    }
+    return options.length ? options[0].value : "";
   }
   function uniqueValues(items, key) {
     return Array.from(new Set(items.map((item) => item[key]))).sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
   }
   function parseMonth(rawValue) {
-    const fallbackMonth = today.getMonth();
     if (page !== "reviews") {
-      return fallbackMonth;
+      return today.getMonth();
     }
     if (rawValue === null || rawValue === undefined) {
-      return fallbackMonth;
+      return today.getMonth();
     }
     const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : String(rawValue).trim();
     if (!normalizedValue) {
-      return fallbackMonth;
+      return today.getMonth();
     }
     const parsed = Number(normalizedValue);
-    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 11 ? parsed : fallbackMonth;
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 11) {
+      throw new Error("Review month query parameter is invalid.");
+    }
+    return parsed;
   }
   function groupBy(items, key) {
     return items.reduce((groups, item) => {

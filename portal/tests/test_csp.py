@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.urls import path
 
+from portal.authorization import PortalAction, PortalResource
+from portal.tests.permissions import grant_user_permissions
 
 NONCE_RE = re.compile(r"script-src 'nonce-([^']+)'")
 SCRIPT_SRC_DIRECTIVE_RE = re.compile(r"script-src ([^;]+);")
@@ -25,6 +29,11 @@ class NonceCspTests(TestCase):
     def setUp(self) -> None:
         user_model = get_user_model()
         self.user = user_model.objects.create_user(username="csp-user", password="password")
+        grant_user_permissions(
+            self.user,
+            (PortalResource.POLICY_DOCUMENT, PortalAction.VIEW),
+            (PortalResource.MAPPING, PortalAction.VIEW),
+        )
         self.client.force_login(self.user)
 
     def test_html_pages_use_nonce_based_csp_and_nonce_script_tags(self) -> None:
@@ -61,6 +70,12 @@ class NonceCspTests(TestCase):
         response = self.client.get("/api/state/?page=home")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("Content-Security-Policy", response)
+
+    def test_home_domain_widget_does_not_depend_on_inline_styles(self) -> None:
+        source = Path(settings.BASE_DIR / "webapp" / "js" / "home.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('style="', source)
+        self.assertIn('<svg viewBox="0 0 100 10"', source)
 
     @override_settings(ROOT_URLCONF="portal.tests.test_csp")
     def test_untrusted_html_scripts_do_not_get_nonce_injected(self) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
 
+from .authorization import PortalAction, PortalResource, has_portal_permission
 from .services.bootstrap import append_portal_audit_entry
 from .services.common import ValidationError, normalize_string
 from .services.vendor_downloads import (
@@ -10,7 +11,7 @@ from .services.vendor_downloads import (
     build_attachment_disposition,
     build_single_vendor_response_download,
 )
-from .views import api_login_required, policy_reader_api_access
+from .view_helpers import api_login_required, current_audit_actor, portal_api_forbidden_response
 
 
 def vendor_download_error_response(error: ValidationError) -> JsonResponse:
@@ -28,23 +29,24 @@ def build_vendor_download_response(file_name: str, content: bytes, content_type:
 
 
 def vendor_download_actor(request: HttpRequest) -> tuple[str, str]:
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    normalized_username = username or "system"
-    normalized_display_name = display_name or username or "System"
-    return normalized_username, normalized_display_name
+    return current_audit_actor(request)
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def vendor_response_downloads(request: HttpRequest) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export vendor responses.")
     scope = normalize_string(request.GET.get("scope")).lower()
     response_id = request.GET.get("responseId") or request.GET.get("id")
+    include_raw_text = has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.VIEW_RAW)
 
     try:
         if scope == "all":
-            file_name, content, content_type = build_all_vendor_responses_download()
+            file_name, content, content_type = build_all_vendor_responses_download(
+                viewer=request.user,
+                include_raw_text=include_raw_text,
+            )
             action = "export_vendor_responses"
             entity_id = "all"
             summary = f"Exported vendor response archive {file_name}."
@@ -55,7 +57,11 @@ def vendor_response_downloads(request: HttpRequest) -> HttpResponse:
                 "fileName": file_name,
             }
         else:
-            file_name, content, content_type = build_single_vendor_response_download(response_id)
+            file_name, content, content_type = build_single_vendor_response_download(
+                response_id,
+                viewer=request.user,
+                include_raw_text=include_raw_text,
+            )
             normalized_response_id = normalize_string(response_id)
             action = "export_vendor_response"
             entity_id = normalized_response_id
@@ -84,11 +90,16 @@ def vendor_response_downloads(request: HttpRequest) -> HttpResponse:
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def vendor_response_download(request: HttpRequest, response_id: str) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export vendor responses.")
     try:
-        file_name, content, content_type = build_single_vendor_response_download(response_id)
+        file_name, content, content_type = build_single_vendor_response_download(
+            response_id,
+            viewer=request.user,
+            include_raw_text=has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.VIEW_RAW),
+        )
     except ValidationError as error:
         return vendor_download_error_response(error)
 
@@ -113,10 +124,17 @@ def vendor_response_download(request: HttpRequest, response_id: str) -> HttpResp
 
 
 @api_login_required
-@policy_reader_api_access(allow_policy_reader=False)
 @require_GET
 def vendor_response_download_all(request: HttpRequest) -> HttpResponse:
-    file_name, content, content_type = build_all_vendor_responses_download()
+    if not has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export vendor responses.")
+    try:
+        file_name, content, content_type = build_all_vendor_responses_download(
+            viewer=request.user,
+            include_raw_text=has_portal_permission(request.user, PortalResource.VENDOR_RESPONSE, PortalAction.VIEW_RAW),
+        )
+    except ValidationError as error:
+        return vendor_download_error_response(error)
 
     actor_username, actor_display_name = vendor_download_actor(request)
     append_portal_audit_entry(

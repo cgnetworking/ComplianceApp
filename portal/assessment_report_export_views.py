@@ -3,13 +3,14 @@ from __future__ import annotations
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET
 
+from .authorization import PortalAction, PortalResource, has_portal_permission
 from .assessment_services import AssessmentValidationError
 from .services.bootstrap import append_portal_audit_entry
-from .assessment_views import assessment_staff_api_required
 from .services.assessment_report_exports import (
     create_assessment_reports_export,
     create_assessment_run_report_export,
 )
+from .view_helpers import api_login_required, current_audit_actor, portal_api_forbidden_response
 
 ASSESSMENT_EXPORT_NOT_FOUND_ERRORS = frozenset(
     {
@@ -37,23 +38,28 @@ def assessment_export_error_response(error: AssessmentValidationError) -> JsonRe
     return JsonResponse({"detail": detail}, status=status_code)
 
 
-@assessment_staff_api_required
+@api_login_required
 @require_GET
 def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export assessments.")
     try:
         file_name, content = create_assessment_run_report_export(run_id)
     except AssessmentValidationError as error:
         return assessment_export_error_response(error)
 
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
+    username, display_name = current_audit_actor(
+        request,
+        error_cls=AssessmentValidationError,
+        message="Authenticated assessment actions require a username.",
+    )
     append_portal_audit_entry(
         action="export_assessment_report",
         entity_type="assessment_run",
         entity_id=run_id,
         summary=f"Exported assessment report archive {file_name}.",
-        actor_username=username or "system",
-        actor_display_name=display_name or username or "System",
+        actor_username=username,
+        actor_display_name=display_name,
         metadata={
             "source": "assessments",
             "exportType": "assessment_report_selected",
@@ -65,25 +71,30 @@ def assessment_run_report_export(request: HttpRequest, run_id: str) -> HttpRespo
     return assessment_export_response(file_name, content)
 
 
-@assessment_staff_api_required
+@api_login_required
 @require_GET
 def assessment_reports_export(request: HttpRequest) -> HttpResponse:
+    if not has_portal_permission(request.user, PortalResource.ASSESSMENT, PortalAction.EXPORT):
+        return portal_api_forbidden_response("You do not have permission to export assessments.")
     profile_id = str(request.GET.get("profileId") or "").strip()
     try:
         file_name, content = create_assessment_reports_export(profile_id=profile_id)
     except AssessmentValidationError as error:
         return assessment_export_error_response(error)
 
-    username = request.user.get_username() if request.user.is_authenticated else ""
-    display_name = request.user.get_full_name().strip() if request.user.is_authenticated else ""
-    entity_id = profile_id or "all"
+    username, display_name = current_audit_actor(
+        request,
+        error_cls=AssessmentValidationError,
+        message="Authenticated assessment actions require a username.",
+    )
+    entity_id = profile_id
     append_portal_audit_entry(
         action="export_assessment_reports",
         entity_type="assessment_run",
         entity_id=entity_id,
         summary=f"Exported assessment reports archive {file_name}.",
-        actor_username=username or "system",
-        actor_display_name=display_name or username or "System",
+        actor_username=username,
+        actor_display_name=display_name,
         metadata={
             "source": "assessments",
             "exportType": "assessment_reports_all",

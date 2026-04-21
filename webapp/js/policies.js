@@ -156,14 +156,8 @@
           throw new Error("Policy document response was invalid.");
         }
       } catch (error) {
-        const fallbackDocument = {
-          id: normalizedDocumentId,
-          contentHtml: '<div class="empty-state">Unable to load policy content at the moment.</div>',
-          contentLoaded: true,
-          contentAvailable: false,
-        };
-        updateAnyDocumentEntry(fallbackDocument);
         setPolicyUploadStatus(error instanceof Error ? error.message : "Unable to load policy content.", "error");
+        throw error;
       } finally {
         policyDocumentLoadPromises.delete(normalizedDocumentId);
         if (state.activeDocumentId === normalizedDocumentId) {
@@ -191,12 +185,10 @@
     if (!normalizedId) {
       return "";
     }
-    const apiBaseUrl = typeof resolveApiBaseUrl === "function" ? resolveApiBaseUrl() : "/api";
-    return `${apiBaseUrl}/policies/${encodeURIComponent(normalizedId)}/download/`;
+    return `${resolveApiBaseUrl()}/policies/${encodeURIComponent(normalizedId)}/download/`;
   }
   function policyAllDocumentsDownloadUrl() {
-    const apiBaseUrl = typeof resolveApiBaseUrl === "function" ? resolveApiBaseUrl() : "/api";
-    return `${apiBaseUrl}/policies/downloads/all/`;
+    return `${resolveApiBaseUrl()}/policies/downloads/all/`;
   }
   function bindPolicyDownloadAllTrigger(buttonElement) {
     if (!buttonElement || buttonElement.dataset.policyDownloadBound === "true") {

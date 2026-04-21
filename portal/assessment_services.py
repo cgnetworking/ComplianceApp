@@ -23,6 +23,13 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from .contracts import (
+    serialize_zero_trust_certificate,
+    serialize_zero_trust_run,
+    serialize_zero_trust_run_log,
+    serialize_zero_trust_tenant_profile,
+)
+from .services.uploads import upload_size_label
 from .models import (
     ZeroTrustAssessmentArtifact,
     ZeroTrustAssessmentRun,
@@ -42,11 +49,11 @@ class AssessmentValidationError(Exception):
     pass
 
 
-def normalize_string(value: object, fallback: str = "") -> str:
+def normalize_string(value: object) -> str:
     if value is None:
-        return fallback
+        return ""
     normalized = str(value).strip()
-    return normalized if normalized else fallback
+    return normalized
 
 
 def normalize_thumbprint(value: object) -> str:
@@ -95,18 +102,18 @@ def powershell_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def safe_certificate_component(value: object, fallback: str) -> str:
+def safe_certificate_component(value: object) -> str:
     normalized = normalize_string(value)
     if not normalized:
-        return fallback
+        raise AssessmentValidationError("Certificate path component is required.")
     sanitized = SAFE_CERTIFICATE_COMPONENT_RE.sub("-", normalized).strip("-.")
-    return sanitized or fallback
+    if not sanitized:
+        raise AssessmentValidationError("Certificate path component is invalid.")
+    return sanitized
 
 
 def resolve_assessment_certificate_root() -> Path:
-    configured_root = normalize_string(
-        getattr(settings, "ASSESSMENT_CERTIFICATE_ROOT", "") or os.environ.get("ASSESSMENT_CERTIFICATE_ROOT", "")
-    )
+    configured_root = normalize_string(settings.ASSESSMENT_CERTIFICATE_ROOT)
     if not configured_root:
         raise AssessmentValidationError("ASSESSMENT_CERTIFICATE_ROOT is not configured on the server.")
 
@@ -125,16 +132,11 @@ def resolve_assessment_certificate_root() -> Path:
 
 
 def resolve_assessment_pfx_password_path() -> Path:
-    configured_path = normalize_string(
-        getattr(settings, "ASSESSMENT_PFX_PASSWORD_FILE", "") or os.environ.get("ASSESSMENT_PFX_PASSWORD_FILE", "")
-    )
+    configured_path = normalize_string(settings.ASSESSMENT_PFX_PASSWORD_FILE)
     if configured_path:
         return Path(configured_path).expanduser().resolve()
 
-    credential_name = normalize_string(
-        getattr(settings, "ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME", ""),
-        "assessment-pfx-password",
-    )
+    credential_name = normalize_string(settings.ASSESSMENT_PFX_PASSWORD_CREDENTIAL_NAME)
     credentials_directory = normalize_string(os.environ.get("CREDENTIALS_DIRECTORY"))
     if not credentials_directory:
         raise AssessmentValidationError(
@@ -157,8 +159,8 @@ def load_assessment_pfx_password() -> bytes:
 
 def certificate_storage_directory(profile: ZeroTrustTenantProfile) -> Path:
     root_path = resolve_assessment_certificate_root()
-    tenant_component = safe_certificate_component(profile.tenant_id, "tenant")
-    profile_component = safe_certificate_component(profile.external_id, "profile")
+    tenant_component = safe_certificate_component(profile.tenant_id)
+    profile_component = safe_certificate_component(profile.external_id)
     directory = root_path / f"{tenant_component}-{profile_component}"
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -173,8 +175,8 @@ def certificate_storage_directory(profile: ZeroTrustTenantProfile) -> Path:
 
 def certificate_pfx_file_path(profile: ZeroTrustTenantProfile, certificate_id: str, thumbprint: str) -> Path:
     storage_dir = certificate_storage_directory(profile)
-    certificate_component = safe_certificate_component(certificate_id, "certificate")
-    thumbprint_component = safe_certificate_component(thumbprint.lower(), "thumbprint")
+    certificate_component = safe_certificate_component(certificate_id)
+    thumbprint_component = safe_certificate_component(thumbprint.lower())
     return storage_dir / f"{certificate_component}-{thumbprint_component}.pfx"
 
 
@@ -248,10 +250,10 @@ def create_run_log(
 
 
 def build_profile_payload(profile: ZeroTrustTenantProfile) -> dict[str, object]:
-    payload = profile.to_portal_dict()
+    payload = serialize_zero_trust_tenant_profile(profile)
     certificate = current_profile_certificate(profile)
     latest_run = profile.assessment_runs.select_related("certificate").order_by("-created_at").first()
-    payload["currentCertificate"] = certificate.to_portal_dict() if certificate else None
+    payload["currentCertificate"] = serialize_zero_trust_certificate(certificate) if certificate else None
     payload["latestRun"] = build_run_payload(latest_run) if latest_run else None
     return payload
 
@@ -259,7 +261,7 @@ def build_profile_payload(profile: ZeroTrustTenantProfile) -> dict[str, object]:
 def build_run_payload(run: ZeroTrustAssessmentRun | None) -> dict[str, object] | None:
     if run is None:
         return None
-    payload = run.to_portal_dict()
+    payload = serialize_zero_trust_run(run)
     payload["reportUrl"] = f"/assessments/runs/{run.external_id}/report/" if run.has_report else ""
     payload["assetBaseUrl"] = f"/assessments/runs/{run.external_id}/files/"
     return payload
@@ -335,6 +337,8 @@ def save_zero_trust_profile(payload: object) -> dict[str, object]:
         raise AssessmentValidationError("TenantId is required.")
     if not client_id:
         raise AssessmentValidationError("ClientId is required.")
+    if not display_name:
+        raise AssessmentValidationError("DisplayName is required.")
 
     with transaction.atomic():
         if profile_id:
@@ -354,7 +358,7 @@ def save_zero_trust_profile(payload: object) -> dict[str, object]:
 
         profile.tenant_id = tenant_id
         profile.client_id = client_id
-        profile.display_name = display_name or tenant_id
+        profile.display_name = display_name
 
         if (
             ZeroTrustTenantProfile.objects.exclude(pk=profile.pk)
@@ -381,7 +385,9 @@ def save_zero_trust_profile(payload: object) -> dict[str, object]:
 
 
 def make_certificate_subject(profile: ZeroTrustTenantProfile) -> str:
-    tenant_label = re.sub(r"[^A-Za-z0-9-]", "-", profile.tenant_id)[:48] or "tenant"
+    tenant_label = re.sub(r"[^A-Za-z0-9-]", "-", profile.tenant_id).strip("-")[:48]
+    if not tenant_label:
+        raise AssessmentValidationError("TenantId cannot be converted into a certificate subject.")
     return f"CN=ZeroTrustAssessment-{tenant_label}"
 
 
@@ -476,7 +482,7 @@ def generate_zero_trust_certificate(profile_id: str) -> dict[str, object]:
 
     return {
         "profile": build_profile_payload(profile),
-        "certificate": stored_certificate.to_portal_dict(),
+        "certificate": serialize_zero_trust_certificate(stored_certificate),
         "downloadUrl": f"/api/assessments/{profile.external_id}/certificate.cer",
     }
 
@@ -536,7 +542,7 @@ def get_zero_trust_run(run_id: str) -> ZeroTrustAssessmentRun:
 def list_zero_trust_run_logs(run_id: str, *, after_sequence: int = 0, limit: int = 200) -> list[dict[str, object]]:
     run = get_zero_trust_run(run_id)
     logs = run.logs.filter(sequence__gt=max(0, after_sequence)).order_by("sequence")[: max(1, min(limit, 500))]
-    return [log.to_portal_dict() for log in logs]
+    return [serialize_zero_trust_run_log(log) for log in logs]
 
 
 def get_zero_trust_run_detail(run_id: str) -> dict[str, object]:
@@ -654,25 +660,23 @@ def assessment_script_contents(run: ZeroTrustAssessmentRun, output_root: Path) -
 
     encoded_pfx = base64.b64encode(pfx_bytes).decode("ascii")
     pfx_password_path = str(resolve_assessment_pfx_password_path())
+    module_version = normalize_string(settings.ASSESSMENT_MODULE_VERSION)
+    if not module_version:
+        raise AssessmentValidationError("ASSESSMENT_MODULE_VERSION is not configured.")
 
     script_lines = [
         "$ErrorActionPreference = 'Stop'",
         "$ProgressPreference = 'SilentlyContinue'",
         "$InformationPreference = 'Continue'",
         "try {",
-        "  if (Get-Command Set-PSRepository -ErrorAction SilentlyContinue) {",
-        "    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue | Out-Null",
+        f"  $requiredModuleVersion = {powershell_literal(module_version)}",
+        "  $module = Get-Module -ListAvailable -Name ZeroTrustAssessment | Where-Object { $_.Version -eq [version]$requiredModuleVersion } | Select-Object -First 1",
+        "  if (-not $module) {",
+        "    throw ('ZeroTrustAssessment PowerShell module version ' + $requiredModuleVersion + ' is not installed for the runtime user. Run scripts/local_setup.sh to install the pinned module before starting the worker.')",
         "  }",
-        "  if (-not (Get-Module -ListAvailable -Name ZeroTrustAssessment)) {",
-        "    if (Get-Command Install-PSResource -ErrorAction SilentlyContinue) {",
-        "      Install-PSResource -Name ZeroTrustAssessment -Scope CurrentUser -TrustRepository -Quiet",
-        "    } else {",
-        "      Install-Module ZeroTrustAssessment -Scope CurrentUser -Force -AllowClobber",
-        "    }",
-        "  }",
-        "  Import-Module ZeroTrustAssessment -Force",
+        "  Import-Module ZeroTrustAssessment -RequiredVersion $requiredModuleVersion -Force",
         "  $moduleVersion = ''",
-        "  $module = Get-Module ZeroTrustAssessment | Select-Object -First 1",
+        "  $module = Get-Module ZeroTrustAssessment | Where-Object { $_.Version -eq [version]$requiredModuleVersion } | Select-Object -First 1",
         "  if ($module) { $moduleVersion = $module.Version.ToString() }",
         "  $metadata = @{",
         "    moduleVersion = $moduleVersion",
@@ -716,6 +720,7 @@ def ingest_assessment_artifacts(run: ZeroTrustAssessmentRun, export_root: Path) 
     entrypoint_relative_path = ""
     artifact_rows: list[ZeroTrustAssessmentArtifact] = []
     total_bytes = 0
+    max_artifact_file_bytes = int(settings.ASSESSMENT_ARTIFACT_MAX_FILE_BYTES)
     for path in sorted(files):
         if path.is_symlink():
             raise AssessmentValidationError("Symbolic links are not allowed in assessment artifacts.")
@@ -723,16 +728,27 @@ def ingest_assessment_artifacts(run: ZeroTrustAssessmentRun, export_root: Path) 
         if not entrypoint_relative_path and Path(relative_path).name in ENTRYPOINT_CANDIDATE_NAMES:
             entrypoint_relative_path = relative_path
 
-        content = path.read_bytes()
+        try:
+            size_bytes = int(path.stat().st_size)
+        except OSError as error:
+            raise AssessmentValidationError(f"Unable to inspect assessment artifact {relative_path}.") from error
+        if max_artifact_file_bytes > 0 and size_bytes > max_artifact_file_bytes:
+            raise AssessmentValidationError(
+                f"Assessment artifact {relative_path} exceeds the {upload_size_label(max_artifact_file_bytes)} per-file limit."
+            )
+        try:
+            content = path.read_bytes()
+        except OSError as error:
+            raise AssessmentValidationError(f"Unable to read assessment artifact {relative_path}.") from error
         sha256 = hashlib.sha256(content).hexdigest()
-        total_bytes += len(content)
+        total_bytes += size_bytes
         artifact_rows.append(
             ZeroTrustAssessmentArtifact(
                 run=run,
                 relative_path=relative_path,
                 artifact_type=infer_artifact_type(relative_path),
                 content_type=guess_content_type(relative_path),
-                size_bytes=len(content),
+                size_bytes=size_bytes,
                 sha256=sha256,
                 is_entrypoint=False,
                 content=content,
@@ -858,7 +874,6 @@ def process_zero_trust_run(run_id: str, *, worker_id: str) -> ZeroTrustAssessmen
                     stderr=subprocess.STDOUT,
                     text=True,
                     encoding="utf-8",
-                    errors="replace",
                     bufsize=1,
                 )
             except FileNotFoundError as error:
@@ -1021,7 +1036,10 @@ def inject_report_base_href(html: str, *, run: ZeroTrustAssessmentRun) -> str:
 def get_zero_trust_report_html(run_id: str) -> str:
     run = get_zero_trust_run(run_id)
     artifact = get_zero_trust_artifact(run_id)
-    html = bytes(artifact.content).decode("utf-8", errors="replace")
+    try:
+        html = bytes(artifact.content).decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise AssessmentValidationError("Assessment report HTML is not valid UTF-8.") from error
     return inject_report_base_href(html, run=run)
 
 

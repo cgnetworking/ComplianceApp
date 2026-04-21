@@ -1,26 +1,32 @@
-function resolvePortalDataAttribute(name, fallback) {
+function requirePortalDataAttribute(name) {
   if (!document.body || !document.body.dataset) {
-    return fallback;
+    throw new Error("Portal configuration data attributes are unavailable.");
   }
 
   const value = document.body.dataset[name];
-  if (typeof value === "string" && value.trim() !== "") {
-    return value;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Portal configuration data attribute '${name}' is required.`);
   }
-  return fallback;
+  return value.trim();
 }
 
-function resolvePortalBooleanDataAttribute(name) {
-  const value = resolvePortalDataAttribute(name, "false");
-  return value.trim().toLowerCase() === "true";
+function requirePortalBooleanDataAttribute(name) {
+  const value = requirePortalDataAttribute(name).toLowerCase();
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  throw new Error(`Portal configuration data attribute '${name}' must be true or false.`);
 }
 
 window.ISMS_PORTAL_CONFIG = {
-  apiBaseUrl: resolvePortalDataAttribute("apiBaseUrl", "/api"),
-  loginUrl: resolvePortalDataAttribute("loginUrl", "/login/"),
+  apiBaseUrl: requirePortalDataAttribute("apiBaseUrl"),
+  loginUrl: requirePortalDataAttribute("loginUrl"),
   currentUser: {
-    username: resolvePortalDataAttribute("currentUsername", ""),
-    isStaff: resolvePortalBooleanDataAttribute("currentIsStaff"),
-    isPolicyReader: resolvePortalBooleanDataAttribute("currentIsPolicyReader"),
+    username: requirePortalDataAttribute("currentUsername"),
+    isStaff: requirePortalBooleanDataAttribute("currentIsStaff"),
+    isPolicyReader: requirePortalBooleanDataAttribute("currentIsPolicyReader"),
   },
 };

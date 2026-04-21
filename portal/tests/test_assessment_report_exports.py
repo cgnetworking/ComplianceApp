@@ -156,4 +156,4 @@ class AssessmentReportExportTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         payload = json.loads(response.content.decode("utf-8"))
-        self.assertIn("Only staff users can manage assessments.", payload["detail"])
+        self.assertIn("You do not have permission to export assessments.", payload["detail"])

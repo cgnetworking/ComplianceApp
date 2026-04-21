@@ -3,6 +3,8 @@ from __future__ import annotations
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from portal.authorization import PortalAction, PortalResource
+from portal.tests.permissions import grant_user_permissions
 
 INVALID_JSON_BODY = b'{"invalid":'
 
@@ -15,6 +17,14 @@ class ApiJsonValidationTests(TestCase):
             username="api-staff",
             password="password",
             is_staff=True,
+        )
+        grant_user_permissions(
+            self.user,
+            (PortalResource.RISK_RECORD, PortalAction.ADD),
+            (PortalResource.RISK_RECORD, PortalAction.CHANGE),
+            (PortalResource.REVIEW_STATE, PortalAction.CHANGE),
+            (PortalResource.CONTROL_STATE, PortalAction.CHANGE),
+            (PortalResource.MAPPING, PortalAction.CHANGE),
         )
 
     def assert_invalid_json_returns_400(self, method: str, path: str, *, as_staff: bool = False) -> None:
@@ -44,4 +54,3 @@ class ApiJsonValidationTests(TestCase):
 
     def test_assessment_collection_returns_400_for_invalid_json(self) -> None:
         self.assert_invalid_json_returns_400("POST", "/api/assessments/", as_staff=True)
-

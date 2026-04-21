@@ -7,6 +7,11 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
+from ..authorization import (
+    PortalAction,
+    PortalResource,
+    has_portal_permission,
+)
 from ..models import PortalState, ReviewChecklistItem
 from .common import (
     BOOTSTRAP_PAGES,
@@ -39,20 +44,41 @@ def normalize_bootstrap_page(value: object) -> str:
     return normalized if normalized in BOOTSTRAP_PAGES else ""
 
 
+def serialize_assignable_user(user: object) -> dict[str, str] | None:
+    user_model = get_user_model()
+    username_field = getattr(user_model, "USERNAME_FIELD", "username")
+    username = normalize_string(getattr(user, username_field, ""))
+    if not username:
+        return None
+    first_name = normalize_string(getattr(user, "first_name", ""))
+    last_name = normalize_string(getattr(user, "last_name", ""))
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+    email = normalize_string(getattr(user, "email", ""))
+    return {"username": username, "displayName": full_name or email or username}
+
+
 def list_assignable_users() -> list[dict[str, str]]:
     user_model = get_user_model()
     username_field = getattr(user_model, "USERNAME_FIELD", "username")
     assignable_users: list[dict[str, str]] = []
     for user in user_model.objects.filter(is_active=True).order_by(username_field):
-        username = normalize_string(getattr(user, username_field, ""))
-        if not username:
+        serialized_user = serialize_assignable_user(user)
+        if serialized_user is None:
             continue
-        first_name = normalize_string(getattr(user, "first_name", ""))
-        last_name = normalize_string(getattr(user, "last_name", ""))
-        full_name = " ".join(part for part in [first_name, last_name] if part).strip()
-        email = normalize_string(getattr(user, "email", ""))
-        assignable_users.append({"username": username, "displayName": full_name or email or username})
+        assignable_users.append(serialized_user)
     return assignable_users
+
+
+def list_assignable_users_for_viewer(viewer: object | None, *, page: str = "") -> list[dict[str, str]]:
+    if not getattr(viewer, "is_authenticated", False):
+        return []
+    if bool(getattr(viewer, "is_staff", False)):
+        return list_assignable_users()
+    if page != "risks":
+        return []
+
+    serialized_user = serialize_assignable_user(viewer)
+    return [serialized_user] if serialized_user is not None else []
 
 
 def review_state_payload_template(payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -95,12 +121,14 @@ def build_portal_audit_entry(
     metadata: dict[str, object] | None = None,
     occurred_at: datetime | None = None,
 ) -> dict[str, object]:
-    normalized_action = normalize_string(action, "state_changed").replace(" ", "_").lower()
-    normalized_entity_type = normalize_string(entity_type, "record").replace(" ", "_").lower()
+    normalized_action = normalize_string(action).replace(" ", "_").lower()
+    normalized_entity_type = normalize_string(entity_type).replace(" ", "_").lower()
     normalized_entity_id = normalize_string(entity_id)
-    normalized_summary = normalize_string(summary, "State updated.")
-    normalized_actor_username = normalize_string(actor_username, "system")
-    normalized_actor_display_name = normalize_string(actor_display_name, normalized_actor_username)
+    normalized_summary = normalize_string(summary)
+    normalized_actor_username = normalize_string(actor_username)
+    normalized_actor_display_name = normalize_string(actor_display_name)
+    if not normalized_action or not normalized_entity_type or not normalized_summary or not normalized_actor_username:
+        raise ValidationError("Audit entries require action, entityType, summary, and actor_username.")
     timestamp = occurred_at or timezone.now()
     if timezone.is_naive(timestamp):
         timestamp = timezone.make_aware(timestamp, timezone=dt_timezone.utc)
@@ -185,10 +213,12 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
     if not item_text:
         raise ValidationError("Checklist item text is required.")
 
-    category = normalize_string(payload.get("category"), "Custom")
-    frequency = normalize_string(payload.get("frequency"), "Annual")
+    category = normalize_string(payload.get("category"))
+    frequency = normalize_string(payload.get("frequency"))
     start_date = parse_optional_iso_date(payload.get("startDate"))
-    owner = normalize_string(payload.get("owner"), "Shared portal")
+    owner = normalize_string(payload.get("owner"))
+    if not category or not frequency or not owner:
+        raise ValidationError("Checklist items require category, frequency, and owner.")
 
     for _ in range(5):
         external_id = f"checklist-{uuid.uuid4().hex[:12]}"
@@ -315,31 +345,57 @@ def update_review_state(
     return normalized
 
 
-def get_bootstrap_payload(*, policy_reader: bool = False, page: str = "") -> dict[str, object]:
+def review_state_payload_for_viewer(review_state: object, *, viewer: object | None) -> dict[str, object]:
+    normalized = normalize_review_state(review_state)
+    can_view_review_state = has_portal_permission(viewer, PortalResource.REVIEW_STATE, PortalAction.VIEW)
+    can_view_audit_log = has_portal_permission(viewer, PortalResource.AUDIT_LOG, PortalAction.VIEW)
+
+    return {
+        "activities": normalized.get("activities", {}) if can_view_review_state else {},
+        "checklist": normalized.get("checklist", {}) if can_view_review_state else {},
+        "completedAt": normalized.get("completedAt", {}) if can_view_review_state else {},
+        "auditLog": normalized.get("auditLog", []) if can_view_audit_log else [],
+    }
+
+
+def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool = False, page: str = "") -> dict[str, object]:
     normalized_page = normalize_bootstrap_page(page)
     include_all_sections = normalized_page == ""
     include_document_content = include_all_sections
 
-    payload: dict[str, object] = {
-        "persistenceMode": "api",
-        "mapping": get_mapping_bootstrap_payload(include_document_content=include_document_content),
-        "uploadedDocuments": list_uploaded_documents(include_content=include_document_content),
-    }
+    can_view_mapping = has_portal_permission(viewer, PortalResource.MAPPING, PortalAction.VIEW)
+    can_view_policy_documents = has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.VIEW)
+    can_view_review_state = has_portal_permission(viewer, PortalResource.REVIEW_STATE, PortalAction.VIEW)
+    can_view_audit_log = has_portal_permission(viewer, PortalResource.AUDIT_LOG, PortalAction.VIEW)
+    can_view_control_state = has_portal_permission(viewer, PortalResource.CONTROL_STATE, PortalAction.VIEW)
+    can_view_vendor_responses = has_portal_permission(viewer, PortalResource.VENDOR_RESPONSE, PortalAction.VIEW)
+    can_view_risks = has_portal_permission(viewer, PortalResource.RISK_RECORD, PortalAction.VIEW)
 
-    if policy_reader:
-        return payload
+    payload: dict[str, object] = {"persistenceMode": "api"}
+    if can_view_mapping:
+        payload["mapping"] = get_mapping_bootstrap_payload(include_document_content=include_document_content)
+    if can_view_policy_documents:
+        payload["uploadedDocuments"] = list_uploaded_documents(include_content=include_document_content, viewer=viewer)
 
-    payload["assignableUsers"] = list_assignable_users()
+    assignable_users = list_assignable_users_for_viewer(viewer, page=normalized_page)
+    if assignable_users:
+        payload["assignableUsers"] = assignable_users
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_REVIEW_STATE:
-        payload["checklistItems"] = list_review_checklist_items()
-        payload["recommendedChecklistItems"] = list_review_checklist_recommendations()
-        payload["reviewState"] = normalize_review_state(get_state_payload("review_state", {}))
+        if can_view_review_state:
+            payload["checklistItems"] = list_review_checklist_items(viewer=viewer)
+            payload["recommendedChecklistItems"] = list_review_checklist_recommendations(viewer=viewer)
+        if can_view_review_state or can_view_audit_log:
+            payload["reviewState"] = review_state_payload_for_viewer(
+                get_state_payload("review_state", {}),
+                viewer=viewer,
+            )
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
-        payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
-    if include_all_sections:
-        payload["vendorSurveyResponses"] = list_vendor_responses()
-    if include_all_sections or normalized_page == "risks":
-        payload["riskRegister"] = list_risk_register()
+        if can_view_control_state:
+            payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
+    if include_all_sections and can_view_vendor_responses:
+        payload["vendorSurveyResponses"] = list_vendor_responses(viewer=viewer)
+    if (include_all_sections or normalized_page == "risks") and can_view_risks:
+        payload["riskRegister"] = list_risk_register(viewer=viewer)
     return payload
 
 
@@ -355,6 +411,7 @@ __all__ = [
     "delete_review_checklist_item",
     "done_review_state_keys",
     "update_review_state",
+    "review_state_payload_for_viewer",
     "get_bootstrap_payload",
     "ValidationError",
 ]

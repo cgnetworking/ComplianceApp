@@ -9,6 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.utils import timezone
 
+from ..authorization import PortalAction, PortalResource, has_portal_permission, restrict_queryset
 from ..models import UploadedPolicy
 from .common import ValidationError, normalize_string
 from .mapping import get_mapping_payload
@@ -30,21 +31,21 @@ def _is_policy_library_document(document_id: str, *, is_uploaded: bool) -> bool:
     return bool(_POLICY_LIBRARY_ID_PATTERN.fullmatch(document_id))
 
 
-def _safe_filename(value: object, *, fallback: str, extension: str = "") -> str:
+def _safe_filename(value: object, *, extension: str = "") -> str:
     candidate = normalize_string(value)
     if candidate:
         candidate = PurePath(candidate).name
     if not candidate:
-        candidate = fallback
+        raise ValidationError("A file name is required for policy download export.")
 
-    stem = PurePath(candidate).stem or fallback
+    stem = PurePath(candidate).stem
     suffix = PurePath(candidate).suffix
     if extension and not suffix:
         suffix = extension
 
     normalized_stem = _UNSAFE_FILENAME_CHARS.sub("-", stem).strip("-._")
     if not normalized_stem:
-        normalized_stem = fallback
+        raise ValidationError("Policy download file name is invalid.")
     if len(normalized_stem) > 96:
         normalized_stem = normalized_stem[:96].rstrip("-._")
 
@@ -98,41 +99,37 @@ def _mapping_document_by_id(document_id: str) -> dict[str, object] | None:
 
 
 def _uploaded_document_artifact(policy: UploadedPolicy) -> PolicyDownloadArtifact:
-    original_filename = _safe_filename(
-        policy.original_filename,
-        fallback=policy.document_id.lower(),
-    )
-    extension = PurePath(original_filename).suffix.lower().lstrip(".")
-    content_type = _content_type_for_extension(extension)
-
-    raw_text = policy.raw_text or ""
+    normalized_document_id = normalize_string(policy.document_id).lower()
+    if not normalized_document_id:
+        raise ValidationError("Uploaded policy document id is required for download export.")
+    raw_text = normalize_string(policy.raw_text)
     if raw_text:
-        content = raw_text.encode("utf-8")
-    else:
-        fallback_html = policy.content_html or "<p>No embedded content is available for this policy document.</p>"
-        content = fallback_html.encode("utf-8")
-        if not extension:
-            original_filename = _safe_filename(
-                original_filename,
-                fallback=policy.document_id.lower(),
-                extension=".html",
-            )
-            content_type = "text/html; charset=utf-8"
-    return PolicyDownloadArtifact(filename=original_filename, content=content, content_type=content_type)
+        file_name = _safe_filename(f"{normalized_document_id}.txt")
+        return PolicyDownloadArtifact(
+            filename=file_name,
+            content=raw_text.encode("utf-8"),
+            content_type=_content_type_for_extension("txt"),
+        )
+
+    html_content = normalize_string(policy.content_html)
+    if not html_content:
+        raise ValidationError(f"Uploaded policy {policy.document_id} does not have downloadable content.")
+    file_name = _safe_filename(f"{normalized_document_id}.html")
+    return PolicyDownloadArtifact(
+        filename=file_name,
+        content=html_content.encode("utf-8"),
+        content_type="text/html; charset=utf-8",
+    )
 
 
 def _mapping_document_artifact(document: dict[str, object]) -> PolicyDownloadArtifact:
     document_id = normalize_string(document.get("id"))
-    title = normalize_string(document.get("title"), document_id)
-    fallback_name = f"{document_id}-{title}".strip("-").lower() or "policy-document"
-    filename = _safe_filename(
-        document.get("originalFilename"),
-        fallback=fallback_name,
-        extension=".html",
-    )
+    if not document_id:
+        raise ValidationError("Mapping document id is required for download export.")
+    filename = _safe_filename(f"{document_id.lower()}.html")
     html_content = normalize_string(document.get("contentHtml"))
     if not html_content:
-        html_content = "<p>No embedded content is available for this policy document.</p>"
+        raise ValidationError(f"Mapping document {document_id} does not have embedded HTML content.")
     return PolicyDownloadArtifact(
         filename=filename,
         content=html_content.encode("utf-8"),
@@ -140,9 +137,17 @@ def _mapping_document_artifact(document: dict[str, object]) -> PolicyDownloadArt
     )
 
 
-def _iter_all_policy_artifacts() -> Iterable[PolicyDownloadArtifact]:
+def _iter_all_policy_artifacts(*, viewer: object | None = None) -> Iterable[PolicyDownloadArtifact]:
+    if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+        return
+
     seen_ids: set[str] = set()
-    for uploaded_policy in UploadedPolicy.objects.all():
+    for uploaded_policy in restrict_queryset(
+        UploadedPolicy.objects.all(),
+        viewer,
+        PortalAction.EXPORT,
+        resource=PortalResource.POLICY_DOCUMENT,
+    ):
         document_id = normalize_string(uploaded_policy.document_id)
         if not document_id or document_id in seen_ids:
             continue
@@ -173,7 +178,7 @@ def _deduplicate_entry_name(file_name: str, seen: set[str]) -> str:
         counter += 1
 
 
-def build_policy_document_download(document_id: str) -> PolicyDownloadArtifact:
+def build_policy_document_download(document_id: str, *, viewer: object | None = None) -> PolicyDownloadArtifact:
     normalized_id = normalize_string(document_id)
     if not normalized_id:
         raise ValidationError("Policy id is required.")
@@ -184,17 +189,24 @@ def build_policy_document_download(document_id: str) -> PolicyDownloadArtifact:
         uploaded_policy = None
 
     if uploaded_policy is not None:
+        if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+            raise ValidationError("You do not have permission to export this policy document.")
         return _uploaded_document_artifact(uploaded_policy)
 
     mapping_document = _mapping_document_by_id(normalized_id)
     if mapping_document is not None:
+        if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+            raise ValidationError("You do not have permission to export this policy document.")
         return _mapping_document_artifact(mapping_document)
 
     raise ValidationError("Policy document was not found.")
 
 
-def build_all_policies_download() -> PolicyDownloadArtifact:
-    artifacts = list(_iter_all_policy_artifacts())
+def build_all_policies_download(*, viewer: object | None = None) -> PolicyDownloadArtifact:
+    if viewer is not None and not has_portal_permission(viewer, PortalResource.POLICY_DOCUMENT, PortalAction.EXPORT):
+        raise ValidationError("You do not have permission to export policy documents.")
+
+    artifacts = list(_iter_all_policy_artifacts(viewer=viewer))
     if not artifacts:
         raise ValidationError("No policy documents are available for download.")
 
@@ -215,7 +227,7 @@ def build_all_policies_download() -> PolicyDownloadArtifact:
 
 
 def build_attachment_content_disposition(file_name: str) -> str:
-    safe_name = _safe_filename(file_name, fallback="download")
+    safe_name = _safe_filename(file_name)
     return f'attachment; filename="{safe_name}"'
 
 

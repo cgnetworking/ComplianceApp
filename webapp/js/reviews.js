@@ -103,9 +103,20 @@
       return;
     }
 
+    const openActivities = [];
+    const completedActivities = [];
+    activities.forEach((activity) => {
+      if (isReviewTaskCompleted(activity.id, state.monthIndex)) {
+        completedActivities.push(activity);
+        return;
+      }
+      openActivities.push(activity);
+    });
+    const sortedActivities = openActivities.concat(completedActivities);
+
     els.activities.innerHTML = `
       <div class="activity-list">
-        ${activities.map((activity) => {
+        ${sortedActivities.map((activity) => {
           const isDone = isReviewTaskCompleted(activity.id, state.monthIndex);
           return `
             <article class="activity-card ${isDone ? "is-done" : ""}">
@@ -405,18 +416,15 @@
     const recommendedItems = getRecommendedChecklistItems();
     const categories = buildChecklistOptionList(
       defaultChecklistCategories,
-      checklistItems.map((item) => item.category).concat(recommendedItems.map((item) => item.category)),
-      "Custom"
+      checklistItems.map((item) => item.category).concat(recommendedItems.map((item) => item.category))
     );
     const frequencies = buildChecklistOptionList(
       defaultChecklistFrequencies,
-      checklistItems.map((item) => item.frequency).concat(recommendedItems.map((item) => item.frequency)),
-      "Annual"
+      checklistItems.map((item) => item.frequency).concat(recommendedItems.map((item) => item.frequency))
     );
     const owners = buildChecklistOptionList(
       defaultChecklistOwners,
-      checklistItems.map((item) => item.owner).concat(recommendedItems.map((item) => item.owner)),
-      "Head of IT"
+      checklistItems.map((item) => item.owner).concat(recommendedItems.map((item) => item.owner))
     );
 
     const selectedCategory = els.checklistAddCategory.value;
@@ -432,7 +440,7 @@
     els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, selectedOwner || "Head of IT");
     renderChecklistRecommendationOptions();
   }
-  function buildChecklistOptionList(defaultValues, dynamicValues, fallbackValue) {
+  function buildChecklistOptionList(defaultValues, dynamicValues) {
     const options = defaultValues.slice();
     dynamicValues.forEach((value) => {
       if (typeof value !== "string") {
@@ -444,9 +452,6 @@
       }
       options.push(normalized);
     });
-    if (!options.length && fallbackValue) {
-      options.push(fallbackValue);
-    }
     return options;
   }
   function toggleChecklistAddForm(visible) {
