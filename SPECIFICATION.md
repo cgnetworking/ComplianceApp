@@ -133,6 +133,16 @@ The application is a server-rendered HTML product with page-specific vanilla Jav
   - `control_state`
   - `review_state`
 
+#### `PortalAuditLogEntry`
+
+- Stores immutable audit log records as append-only rows:
+  - action
+  - entity type and id
+  - summary
+  - actor identity
+  - occurrence timestamp
+  - metadata payload
+
 #### `ZeroTrustTenantProfile`
 
 - Stores assessment tenant settings: display name, tenant ID, client ID, current certificate thumbprint, and run timestamps.
@@ -180,11 +190,10 @@ Important: manual mapping edits from Controls and Policies are persisted in `con
 
 #### `review_state`
 
-- Stores review completion state and audit entries:
+- Stores review completion state:
   - activity completion flags
   - checklist completion flags
   - completion timestamps
-  - audit log entries
 
 ## 6. Seed Data And Default Behavior
 
@@ -251,7 +260,7 @@ Important: manual mapping edits from Controls and Policies are persisted in `con
 - Supports bidirectional control-to-policy mapping from the UI.
 - Staff users can assign approvers for uploaded policies.
 - Assigned approvers can mark uploaded policies as approved.
-- Policy approval writes an audit entry into `review_state.auditLog`.
+- Policy approval writes an audit entry into `PortalAuditLogEntry`.
 
 ### 7.6 Reviews
 
@@ -271,7 +280,7 @@ Important: manual mapping edits from Controls and Policies are persisted in `con
 
 ### 7.8 Audit Log
 
-- Displays entries from `review_state.auditLog`.
+- Displays entries from the first-class `auditLog` payload backed by `PortalAuditLogEntry`.
 - Current audit coverage is limited.
 - Confirmed event sources in the current code:
   - review completion state changes
@@ -410,8 +419,8 @@ The implemented JSON API is private to the web application and session-authentic
 | --- | --- | --- | --- |
 | Auth, shell, bootstrap | `portal_backend/settings.py`, `portal/views.py`, `portal_backend/urls.py` | `templates/portal/login.html`, `_sidebar.html`, `_auth_controls.html`, `_app_scripts.html`, `webapp/js/shared.js`, `webapp/js/runtime.js` | session auth, `PortalState` bootstrap reads |
 | Controls and home | `portal/views.py`, `portal/services/mapping.py`, `portal/services/common.py`, `portal/view_helpers.py` | `templates/portal/index.html`, `controls.html`, `webapp/js/home.js`, `controls.js`, `shared.js`, `runtime.js` | `PortalState.mapping_state`, `PortalState.control_state` |
-| Policies and approvals | `portal/views.py`, `portal/policy_download_views.py`, `portal/services/policies.py`, `portal/services/uploads.py`, `portal/services/html_sanitization.py`, `portal/contracts.py` | `templates/portal/policies.html`, `webapp/js/policies.js`, `shared.js`, `runtime.js` | `UploadedPolicy`, `PortalState.review_state`, mapping/control overlays |
-| Reviews and audit | `portal/views.py`, `portal/audit_log_export_views.py`, `portal/services/bootstrap.py`, `portal/services/common.py`, `portal/contracts.py` | `templates/portal/reviews.html`, `review_tasks.html`, `audit_log.html`, `webapp/js/reviews.js`, `review_tasks.js`, `audit_log.js`, `shared.js`, `runtime.js` | `ReviewChecklistItem`, `ReviewChecklistRecommendation`, `PortalState.review_state` |
+| Policies and approvals | `portal/views.py`, `portal/policy_download_views.py`, `portal/services/policies.py`, `portal/services/uploads.py`, `portal/services/html_sanitization.py`, `portal/contracts.py` | `templates/portal/policies.html`, `webapp/js/policies.js`, `shared.js`, `runtime.js` | `UploadedPolicy`, `PortalState.review_state`, `PortalAuditLogEntry`, mapping/control overlays |
+| Reviews and audit | `portal/views.py`, `portal/audit_log_export_views.py`, `portal/services/bootstrap.py`, `portal/services/audit_log.py`, `portal/contracts.py` | `templates/portal/reviews.html`, `review_tasks.html`, `audit_log.html`, `webapp/js/reviews.js`, `review_tasks.js`, `audit_log.js`, `shared.js`, `runtime.js` | `ReviewChecklistItem`, `ReviewChecklistRecommendation`, `PortalState.review_state`, `PortalAuditLogEntry` |
 | Risks and vendors | `portal/views.py`, `portal/risk_csv_views.py`, `portal/vendor_download_views.py`, `portal/services/risks.py`, `portal/services/risk_validation.py`, `portal/services/policies.py`, `portal/contracts.py` | `templates/portal/risks.html`, `vendors.html`, `webapp/js/risks.js`, `vendors.js`, `shared.js`, `runtime.js` | `RiskRecord`, `VendorResponse` |
 | Assessments | `portal/assessment_views.py`, `portal/assessment_services.py`, `portal/management/commands/run_assessment_worker.py` | `templates/portal/assessments.html`, `webapp/js/assessments.js`, `shared.js`, `runtime.js` | Zero Trust assessment models |
 | Deployment and operations | `scripts/local_setup.sh`, `deploy/`, `DEPLOYMENT.md` | none | runtime env, NGINX, systemd |

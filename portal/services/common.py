@@ -4,7 +4,6 @@ import csv
 import io
 import json
 import re
-import uuid
 from datetime import date, datetime, timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
@@ -705,54 +704,6 @@ def normalize_audit_metadata(value: object) -> dict[str, object]:
     return normalized
 
 
-def normalize_review_state_audit_entry(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
-        return None
-
-    audit_id = normalize_string(value.get("id"))
-    action = normalize_string(value.get("action"))
-    entity_type = normalize_string(value.get("entityType"))
-    entity_id = normalize_string(value.get("entityId"))
-    summary = normalize_string(value.get("summary"))
-    occurred_at = parse_iso_datetime(value.get("occurredAt")).isoformat()
-
-    actor = value.get("actor") if isinstance(value.get("actor"), dict) else {}
-    username = normalize_string(actor.get("username"))
-    display_name = normalize_string(actor.get("displayName"))
-    if not audit_id or not action or not entity_type or not summary or not username:
-        raise ValidationError("Audit log entries require id, action, entityType, summary, and actor.username.")
-
-    return {
-        "id": audit_id,
-        "action": action,
-        "entityType": entity_type,
-        "entityId": entity_id,
-        "summary": summary,
-        "actor": {
-            "username": username,
-            "displayName": display_name,
-        },
-        "occurredAt": occurred_at,
-        "metadata": normalize_audit_metadata(value.get("metadata")),
-    }
-
-
-def normalize_review_state_audit_log(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        return []
-
-    normalized: list[dict[str, object]] = []
-    for entry in value:
-        try:
-            normalized_entry = normalize_review_state_audit_entry(entry)
-        except ValidationError:
-            continue
-        if normalized_entry is None:
-            continue
-        normalized.append(normalized_entry)
-    return normalized[-2000:]
-
-
 def parse_review_state_month_scope(state_key: str) -> tuple[int | None, str]:
     match = re.match(r"^m([0-9]|1[01])::(.+)$", state_key)
     if not match:
@@ -760,53 +711,18 @@ def parse_review_state_month_scope(state_key: str) -> tuple[int | None, str]:
     return int(match.group(1)), str(match.group(2)).strip()
 
 
-def build_review_done_audit_entry(
-    state_key: str,
-    *,
-    actor_username: str,
-    actor_display_name: str,
-    occurred_at_iso: str,
-) -> dict[str, object]:
-    month_index, scoped_item_id = parse_review_state_month_scope(state_key)
-    metadata: dict[str, object] = {
-        "source": "reviews",
-        "status": "done",
-        "stateKey": state_key,
-    }
-    if month_index is not None:
-        metadata["monthIndex"] = month_index
-    if scoped_item_id:
-        metadata["scopedItemId"] = scoped_item_id
-
-    return {
-        "id": f"audit-{uuid.uuid4().hex[:12]}",
-        "action": "state_changed",
-        "entityType": "task",
-        "entityId": scoped_item_id or state_key,
-        "summary": "State changed to done.",
-        "actor": {
-            "username": actor_username,
-            "displayName": actor_display_name,
-        },
-        "occurredAt": occurred_at_iso,
-        "metadata": metadata,
-    }
-
-
 def normalize_review_state(payload: object) -> dict[str, object]:
     if not isinstance(payload, dict):
-        return {"activities": {}, "checklist": {}, "completedAt": {}, "auditLog": []}
+        return {"activities": {}, "checklist": {}, "completedAt": {}}
 
     activities = normalize_review_state_boolean_map(payload.get("activities"))
     checklist = normalize_review_state_boolean_map(payload.get("checklist"))
     completed_at = normalize_review_state_timestamp_map(payload.get("completedAt"))
-    audit_log = normalize_review_state_audit_log(payload.get("auditLog"))
 
     return {
         "activities": activities,
         "checklist": checklist,
         "completedAt": completed_at,
-        "auditLog": audit_log,
     }
 
 

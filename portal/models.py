@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db.models import Q
 from django.db import models
@@ -225,6 +226,38 @@ class PortalState(models.Model):
 
     def __str__(self) -> str:
         return self.key
+
+
+class PortalAuditLogEntry(models.Model):
+    external_id = models.CharField(max_length=64, unique=True)
+    action = models.CharField(max_length=120)
+    entity_type = models.CharField(max_length=120)
+    entity_id = models.CharField(max_length=255, blank=True, default="")
+    summary = models.TextField()
+    actor_username = models.CharField(max_length=255)
+    actor_display_name = models.CharField(max_length=255, blank=True, default="")
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at", "-id"]
+
+    def __str__(self) -> str:
+        return self.external_id
+
+    def save(self, *args, **kwargs) -> None:
+        if self.pk:
+            raise DjangoValidationError("Portal audit log entries are immutable and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs) -> None:
+        raise DjangoValidationError("Portal audit log entries are immutable and cannot be deleted.")
+
+    def to_portal_dict(self) -> dict[str, object]:
+        from .contracts import serialize_portal_audit_log_entry
+
+        return serialize_portal_audit_log_entry(self)
 
 
 class ZeroTrustRunStatus(models.TextChoices):

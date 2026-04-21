@@ -278,6 +278,9 @@
           if (payload && payload.reviewState && typeof payload.reviewState === "object") {
             state.reviewState = normalizeReviewStateValue(payload.reviewState);
           }
+          if (payload && Array.isArray(payload.auditLog)) {
+            state.auditLog = normalizeAuditLogValue(payload.auditLog);
+          }
 
           refreshDocumentsIndex();
           initializePolicySelection();

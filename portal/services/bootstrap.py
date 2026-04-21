@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -12,21 +11,25 @@ from ..authorization import (
     PortalResource,
     has_portal_permission,
 )
-from ..models import PortalState, ReviewChecklistItem
+from ..models import ReviewChecklistItem
+from .audit_log import (
+    append_portal_audit_entries,
+    append_portal_audit_entry,
+    audit_log_payload_for_viewer,
+    build_policy_approval_audit_entry,
+    build_portal_audit_entry,
+    build_review_done_audit_entry,
+)
 from .common import (
     BOOTSTRAP_PAGES,
     BOOTSTRAP_PAGES_WITH_CONTROL_STATE,
     BOOTSTRAP_PAGES_WITH_REVIEW_STATE,
     ValidationError,
-    build_review_done_audit_entry,
     get_state_payload,
     normalize_control_state,
     normalize_review_state,
-    normalize_review_state_audit_log,
-    normalize_audit_metadata,
     normalize_string,
     parse_optional_iso_date,
-    parse_review_state_month_scope,
     set_state_payload,
 )
 from .policies import (
@@ -80,131 +83,6 @@ def list_assignable_users_for_viewer(viewer: object | None, *, page: str = "") -
     serialized_user = serialize_assignable_user(viewer)
     return [serialized_user] if serialized_user is not None else []
 
-
-def review_state_payload_template(payload: dict[str, object] | None = None) -> dict[str, object]:
-    source = payload if isinstance(payload, dict) else {}
-    return {
-        "activities": source.get("activities", {}),
-        "checklist": source.get("checklist", {}),
-        "completedAt": source.get("completedAt", {}),
-        "auditLog": source.get("auditLog", []),
-    }
-
-
-def append_review_state_audit_entries(entries: list[object]) -> dict[str, object]:
-    normalized_entries = normalize_review_state_audit_log(entries)
-    if not normalized_entries:
-        return normalize_review_state(get_state_payload("review_state", {}))
-
-    with transaction.atomic():
-        record, _ = PortalState.objects.select_for_update().get_or_create(
-            key="review_state",
-            defaults={"payload": review_state_payload_template(normalize_review_state({}))},
-        )
-        previous_state = normalize_review_state(record.payload)
-        existing_audit_log = previous_state.get("auditLog") if isinstance(previous_state.get("auditLog"), list) else []
-        next_state = review_state_payload_template(previous_state)
-        next_state["auditLog"] = normalize_review_state_audit_log(existing_audit_log + normalized_entries)
-        record.payload = next_state
-        record.save(update_fields=["payload", "updated_at"])
-        return next_state
-
-
-def build_portal_audit_entry(
-    *,
-    action: str,
-    entity_type: str,
-    entity_id: str,
-    summary: str,
-    actor_username: str,
-    actor_display_name: str,
-    metadata: dict[str, object] | None = None,
-    occurred_at: datetime | None = None,
-) -> dict[str, object]:
-    normalized_action = normalize_string(action).replace(" ", "_").lower()
-    normalized_entity_type = normalize_string(entity_type).replace(" ", "_").lower()
-    normalized_entity_id = normalize_string(entity_id)
-    normalized_summary = normalize_string(summary)
-    normalized_actor_username = normalize_string(actor_username)
-    normalized_actor_display_name = normalize_string(actor_display_name)
-    if not normalized_action or not normalized_entity_type or not normalized_summary or not normalized_actor_username:
-        raise ValidationError("Audit entries require action, entityType, summary, and actor_username.")
-    timestamp = occurred_at or timezone.now()
-    if timezone.is_naive(timestamp):
-        timestamp = timezone.make_aware(timestamp, timezone=dt_timezone.utc)
-
-    return {
-        "id": f"audit-{uuid.uuid4().hex[:12]}",
-        "action": normalized_action,
-        "entityType": normalized_entity_type,
-        "entityId": normalized_entity_id,
-        "summary": normalized_summary,
-        "actor": {
-            "username": normalized_actor_username,
-            "displayName": normalized_actor_display_name,
-        },
-        "occurredAt": timestamp.isoformat(),
-        "metadata": normalize_audit_metadata(metadata or {}),
-    }
-
-
-def append_portal_audit_entry(
-    *,
-    action: str,
-    entity_type: str,
-    entity_id: str,
-    summary: str,
-    actor_username: str,
-    actor_display_name: str,
-    metadata: dict[str, object] | None = None,
-    occurred_at: datetime | None = None,
-) -> dict[str, object]:
-    return append_review_state_audit_entries(
-        [
-            build_portal_audit_entry(
-                action=action,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                summary=summary,
-                actor_username=actor_username,
-                actor_display_name=actor_display_name,
-                metadata=metadata,
-                occurred_at=occurred_at,
-            )
-        ]
-    )
-
-
-def build_policy_approval_audit_entry(
-    policy: object,
-    *,
-    actor_username: str,
-    actor_display_name: str,
-    occurred_at: datetime,
-) -> dict[str, object]:
-    local_approval_time = timezone.localtime(occurred_at)
-    approval_date = f"{local_approval_time.strftime('%B')} {local_approval_time.day}, {local_approval_time.year}"
-    return {
-        "id": f"audit-{uuid.uuid4().hex[:12]}",
-        "action": "policy_approved",
-        "entityType": "policy",
-        "entityId": policy.document_id,
-        "summary": f"Approved {policy.document_id} / {policy.title} on {approval_date}.",
-        "actor": {
-            "username": actor_username,
-            "displayName": actor_display_name,
-        },
-        "occurredAt": occurred_at.isoformat(),
-        "metadata": {
-            "source": "policies",
-            "policyId": policy.document_id,
-            "policyTitle": policy.title,
-            "approvedBy": actor_username,
-            "approvedAt": occurred_at.isoformat(),
-        },
-    }
-
-
 def create_review_checklist_item(payload: object) -> dict[str, str]:
     if not isinstance(payload, dict):
         raise ValidationError("Checklist item payload must be an object.")
@@ -253,7 +131,6 @@ def delete_review_checklist_item(external_id: str) -> dict[str, str]:
     checklist_state = review_state.get("checklist") if isinstance(review_state.get("checklist"), dict) else {}
     activity_state = review_state.get("activities") if isinstance(review_state.get("activities"), dict) else {}
     completed_at_state = review_state.get("completedAt") if isinstance(review_state.get("completedAt"), dict) else {}
-    audit_log = review_state.get("auditLog") if isinstance(review_state.get("auditLog"), list) else []
 
     def keep_state_entry(key: str) -> bool:
         return key != normalized_id and not key.endswith(f"::{normalized_id}")
@@ -277,7 +154,6 @@ def delete_review_checklist_item(external_id: str) -> dict[str, str]:
                 "activities": filtered_activity_state,
                 "checklist": filtered_checklist_state,
                 "completedAt": filtered_completed_at_state,
-                "auditLog": audit_log,
             },
         )
 
@@ -297,64 +173,64 @@ def update_review_state(
     actor_username: str,
     actor_display_name: str,
 ) -> dict[str, object]:
-    previous_state = normalize_review_state(get_state_payload("review_state", {}))
-    incoming_state = normalize_review_state(payload)
+    with transaction.atomic():
+        previous_state = normalize_review_state(get_state_payload("review_state", {}))
+        incoming_state = normalize_review_state(payload)
 
-    previous_done_keys = done_review_state_keys(previous_state)
-    next_done_keys = done_review_state_keys(incoming_state)
-    previous_completed_at = previous_state.get("completedAt") if isinstance(previous_state.get("completedAt"), dict) else {}
-    incoming_completed_at = incoming_state.get("completedAt") if isinstance(incoming_state.get("completedAt"), dict) else {}
-
-    next_completed_at: dict[str, str] = {}
-    new_entries: list[dict[str, object]] = []
-    now_iso = timezone.now().isoformat()
-
-    for key in sorted(next_done_keys):
-        if key in previous_done_keys:
-            existing_timestamp = ""
-            previous_timestamp = previous_completed_at.get(key)
-            incoming_timestamp = incoming_completed_at.get(key)
-            if isinstance(previous_timestamp, str) and previous_timestamp.strip():
-                existing_timestamp = previous_timestamp.strip()
-            elif isinstance(incoming_timestamp, str) and incoming_timestamp.strip():
-                existing_timestamp = incoming_timestamp.strip()
-            if existing_timestamp:
-                next_completed_at[key] = existing_timestamp
-            continue
-
-        next_completed_at[key] = now_iso
-        new_entries.append(
-            build_review_done_audit_entry(
-                key,
-                actor_username=actor_username,
-                actor_display_name=actor_display_name,
-                occurred_at_iso=now_iso,
-            )
+        previous_done_keys = done_review_state_keys(previous_state)
+        next_done_keys = done_review_state_keys(incoming_state)
+        previous_completed_at = (
+            previous_state.get("completedAt") if isinstance(previous_state.get("completedAt"), dict) else {}
+        )
+        incoming_completed_at = (
+            incoming_state.get("completedAt") if isinstance(incoming_state.get("completedAt"), dict) else {}
         )
 
-    existing_audit_log = previous_state.get("auditLog") if isinstance(previous_state.get("auditLog"), list) else []
-    merged_audit_log = normalize_review_state_audit_log(existing_audit_log + new_entries)
+        next_completed_at: dict[str, str] = {}
+        new_entries: list[dict[str, object]] = []
+        now_iso = timezone.now().isoformat()
 
-    normalized = {
-        "activities": incoming_state.get("activities", {}),
-        "checklist": incoming_state.get("checklist", {}),
-        "completedAt": next_completed_at,
-        "auditLog": merged_audit_log,
-    }
-    set_state_payload("review_state", normalized)
-    return normalized
+        for key in sorted(next_done_keys):
+            if key in previous_done_keys:
+                existing_timestamp = ""
+                previous_timestamp = previous_completed_at.get(key)
+                incoming_timestamp = incoming_completed_at.get(key)
+                if isinstance(previous_timestamp, str) and previous_timestamp.strip():
+                    existing_timestamp = previous_timestamp.strip()
+                elif isinstance(incoming_timestamp, str) and incoming_timestamp.strip():
+                    existing_timestamp = incoming_timestamp.strip()
+                if existing_timestamp:
+                    next_completed_at[key] = existing_timestamp
+                continue
+
+            next_completed_at[key] = now_iso
+            new_entries.append(
+                build_review_done_audit_entry(
+                    key,
+                    actor_username=actor_username,
+                    actor_display_name=actor_display_name,
+                    occurred_at_iso=now_iso,
+                )
+            )
+
+        normalized = {
+            "activities": incoming_state.get("activities", {}),
+            "checklist": incoming_state.get("checklist", {}),
+            "completedAt": next_completed_at,
+        }
+        set_state_payload("review_state", normalized)
+        append_portal_audit_entries(new_entries)
+        return normalized
 
 
 def review_state_payload_for_viewer(review_state: object, *, viewer: object | None) -> dict[str, object]:
     normalized = normalize_review_state(review_state)
     can_view_review_state = has_portal_permission(viewer, PortalResource.REVIEW_STATE, PortalAction.VIEW)
-    can_view_audit_log = has_portal_permission(viewer, PortalResource.AUDIT_LOG, PortalAction.VIEW)
 
     return {
         "activities": normalized.get("activities", {}) if can_view_review_state else {},
         "checklist": normalized.get("checklist", {}) if can_view_review_state else {},
         "completedAt": normalized.get("completedAt", {}) if can_view_review_state else {},
-        "auditLog": normalized.get("auditLog", []) if can_view_audit_log else [],
     }
 
 
@@ -384,11 +260,12 @@ def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool =
         if can_view_review_state:
             payload["checklistItems"] = list_review_checklist_items(viewer=viewer)
             payload["recommendedChecklistItems"] = list_review_checklist_recommendations(viewer=viewer)
-        if can_view_review_state or can_view_audit_log:
             payload["reviewState"] = review_state_payload_for_viewer(
                 get_state_payload("review_state", {}),
                 viewer=viewer,
             )
+        if can_view_audit_log:
+            payload["auditLog"] = audit_log_payload_for_viewer(viewer=viewer)
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
         if can_view_control_state:
             payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
@@ -402,10 +279,10 @@ def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool =
 __all__ = [
     "normalize_bootstrap_page",
     "list_assignable_users",
-    "review_state_payload_template",
-    "append_review_state_audit_entries",
     "build_portal_audit_entry",
     "append_portal_audit_entry",
+    "append_portal_audit_entries",
+    "audit_log_payload_for_viewer",
     "build_policy_approval_audit_entry",
     "create_review_checklist_item",
     "delete_review_checklist_item",

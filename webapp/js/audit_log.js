@@ -36,8 +36,7 @@
   }
 
   function auditLogEntries() {
-    const reviewState = state.reviewState && typeof state.reviewState === "object" ? state.reviewState : {};
-    const entries = Array.isArray(reviewState.auditLog) ? reviewState.auditLog : [];
+    const entries = Array.isArray(state.auditLog) ? state.auditLog : [];
     return normalizeAuditLogEntries(entries);
   }
 
@@ -261,7 +260,7 @@
       const originalLabel = exportTrigger.textContent;
       exportTrigger.disabled = true;
       exportTrigger.textContent = "Exporting...";
-      setAuditExportStatus("Building CSV export from the review state audit log...", "info");
+      setAuditExportStatus("Building CSV export from the audit log...", "info");
 
       try {
         const response = await fetch(`${resolveApiBaseUrl()}/audit-log/export.csv`, {

@@ -25,6 +25,7 @@ from .authorization import (
 )
 from .services.bootstrap import (
     append_portal_audit_entry,
+    audit_log_payload_for_viewer,
     create_review_checklist_item,
     delete_review_checklist_item,
     get_bootstrap_payload,
@@ -484,6 +485,7 @@ def policy_document_approval(request: HttpRequest, document_id: str) -> JsonResp
         {
             "document": updated_document,
             "reviewState": review_state_payload_for_viewer(review_state, viewer=request.user),
+            "auditLog": audit_log_payload_for_viewer(viewer=request.user),
         }
     )
 
@@ -798,7 +800,12 @@ def review_state(request: HttpRequest) -> JsonResponse:
         actor_username=username,
         actor_display_name=display_name,
     )
-    return JsonResponse({"reviewState": review_state_payload_for_viewer(normalized, viewer=request.user)})
+    return JsonResponse(
+        {
+            "reviewState": review_state_payload_for_viewer(normalized, viewer=request.user),
+            "auditLog": audit_log_payload_for_viewer(viewer=request.user),
+        }
+    )
 
 
 @api_login_required

@@ -8,7 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
 from portal.authorization import PortalAction, PortalResource
-from portal.models import PortalState
+from portal.models import PortalAuditLogEntry, PortalState
 from portal.tests.permissions import grant_user_permissions
 
 
@@ -112,10 +112,9 @@ class LoginThrottleTests(TestCase):
         self.assertContains(locked_response, "Too many failed sign-in attempts")
         self.assertNotIn("_auth_user_id", self.client.session)
 
-        review_state = PortalState.objects.get(key="review_state").payload
-        failed_entries = [entry for entry in review_state.get("auditLog", []) if entry.get("action") == "failed_login"]
+        failed_entries = list(PortalAuditLogEntry.objects.filter(action="failed_login"))
         self.assertGreaterEqual(len(failed_entries), 3)
-        reasons = {entry.get("metadata", {}).get("reason") for entry in failed_entries}
+        reasons = {entry.metadata.get("reason") for entry in failed_entries}
         self.assertIn("invalid_credentials", reasons)
         self.assertIn("lockout", reasons)
 
@@ -155,11 +154,10 @@ class LoginThrottleTests(TestCase):
         self.assertEqual(locked_response.status_code, 200)
         self.assertContains(locked_response, "Too many failed sign-in attempts")
 
-        review_state = PortalState.objects.get(key="review_state").payload
-        failed_entries = [entry for entry in review_state.get("auditLog", []) if entry.get("action") == "failed_login"]
+        failed_entries = list(PortalAuditLogEntry.objects.filter(action="failed_login"))
         self.assertTrue(failed_entries)
         self.assertTrue(
-            all(entry.get("metadata", {}).get("clientIp") == "198.51.100.77" for entry in failed_entries)
+            all(entry.metadata.get("clientIp") == "198.51.100.77" for entry in failed_entries)
         )
 
 
@@ -185,25 +183,24 @@ class AuditVisibilityTests(TestCase):
                 "activities": {"m0::task-1": True},
                 "checklist": {"m0::task-1": True},
                 "completedAt": {"m0::task-1": "2026-04-15T08:00:00+00:00"},
-                "auditLog": [
-                    {
-                        "id": "audit-failed-login",
-                        "action": "failed_login",
-                        "entityType": "authentication",
-                        "entityId": "regular-user",
-                        "summary": "Failed password login for regular-user.",
-                        "occurredAt": "2026-04-15T09:30:00+00:00",
-                        "actor": {"username": "regular-user", "displayName": "Regular User"},
-                        "metadata": {
-                            "source": "auth",
-                            "reason": "invalid_credentials",
-                            "usernameAttempted": "regular-user",
-                            "clientIp": "198.51.100.77",
-                            "attemptCount": 2,
-                            "lockoutRemainingSeconds": 0,
-                        },
-                    }
-                ],
+            },
+        )
+        PortalAuditLogEntry.objects.create(
+            external_id="audit-failed-login",
+            action="failed_login",
+            entity_type="authentication",
+            entity_id="regular-user",
+            summary="Failed password login for regular-user.",
+            occurred_at="2026-04-15T09:30:00+00:00",
+            actor_username="regular-user",
+            actor_display_name="Regular User",
+            metadata={
+                "source": "auth",
+                "reason": "invalid_credentials",
+                "usernameAttempted": "regular-user",
+                "clientIp": "198.51.100.77",
+                "attemptCount": 2,
+                "lockoutRemainingSeconds": 0,
             },
         )
         grant_user_permissions(
@@ -220,7 +217,7 @@ class AuditVisibilityTests(TestCase):
         self.assertEqual(review_response.status_code, 200)
         review_payload = review_response.json()
         self.assertNotIn("assignableUsers", review_payload)
-        self.assertEqual(review_payload["reviewState"]["auditLog"], [])
+        self.assertNotIn("auditLog", review_payload)
 
         risks_response = self.client.get("/api/state/?page=risks")
         self.assertEqual(risks_response.status_code, 200)
@@ -236,7 +233,7 @@ class AuditVisibilityTests(TestCase):
         response = self.client.get("/api/state/?page=reviews")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(len(payload["reviewState"]["auditLog"]), 1)
+        self.assertEqual(len(payload["auditLog"]), 1)
         self.assertGreaterEqual(len(payload.get("assignableUsers", [])), 3)
 
     def test_non_staff_user_cannot_access_audit_log_page_or_export(self) -> None:
@@ -262,6 +259,7 @@ class AuditVisibilityTests(TestCase):
                         "activities": {"m0::task-2": True},
                         "checklist": {"m0::task-2": True},
                         "completedAt": {},
+                        "auditLog": [{"id": "audit-injected", "summary": "Ignored"}],
                     }
                 }
             ),
@@ -269,7 +267,8 @@ class AuditVisibilityTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["reviewState"]["auditLog"], [])
+        self.assertEqual(response.json()["auditLog"], [])
 
         stored_review_state = PortalState.objects.get(key="review_state").payload
-        self.assertGreaterEqual(len(stored_review_state.get("auditLog", [])), 2)
+        self.assertNotIn("auditLog", stored_review_state)
+        self.assertGreaterEqual(PortalAuditLogEntry.objects.count(), 2)

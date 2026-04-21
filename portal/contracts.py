@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import (
+    PortalAuditLogEntry,
     ReviewChecklistItem,
     ReviewChecklistRecommendation,
     RiskRecord,
@@ -47,6 +48,22 @@ def serialize_vendor_response(response: VendorResponse) -> dict[str, object]:
         "previewText": response.preview_text,
         "summary": response.summary,
         "status": response.status,
+    }
+
+
+def serialize_portal_audit_log_entry(entry: PortalAuditLogEntry) -> dict[str, object]:
+    return {
+        "id": entry.external_id,
+        "action": entry.action,
+        "entityType": entry.entity_type,
+        "entityId": entry.entity_id,
+        "summary": entry.summary,
+        "actor": {
+            "username": entry.actor_username,
+            "displayName": entry.actor_display_name,
+        },
+        "occurredAt": entry.occurred_at.isoformat(),
+        "metadata": entry.metadata if isinstance(entry.metadata, dict) else {},
     }
 
 

@@ -71,7 +71,6 @@ class PortalObjectPermissionTests(TestCase):
                 "activities": {"m0::task-1": True},
                 "checklist": {"m0::task-1": True},
                 "completedAt": {"m0::task-1": "2026-04-15T08:00:00+00:00"},
-                "auditLog": [{"id": "audit-1", "summary": "Entry"}],
             },
         )
         VendorResponse.objects.create(

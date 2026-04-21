@@ -162,7 +162,7 @@ function normalizeReviewStateTimestampMap(value) {
   return normalized;
 }
 
-function normalizeReviewAuditLogEntries(value) {
+function normalizeAuditLogValue(value) {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -198,19 +198,17 @@ function normalizeReviewAuditLogEntries(value) {
         metadata: entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {},
       };
     })
-    .filter(Boolean)
-    .slice(-2000);
+    .filter(Boolean);
 }
 
 function normalizeReviewStateValue(value) {
   if (!value || typeof value !== "object") {
-    return { activities: {}, checklist: {}, completedAt: {}, auditLog: [] };
+    return { activities: {}, checklist: {}, completedAt: {} };
   }
   return {
     activities: normalizeReviewStateMapByMonth(value.activities),
     checklist: normalizeReviewStateMapByMonth(value.checklist),
     completedAt: normalizeReviewStateTimestampMap(value.completedAt),
-    auditLog: normalizeReviewAuditLogEntries(value.auditLog),
   };
 }
 
@@ -560,6 +558,9 @@ function applyRemoteState(payload) {
   if (payload.reviewState && typeof payload.reviewState === "object") {
     state.reviewState = normalizeReviewStateValue(payload.reviewState);
   }
+  if (Array.isArray(payload.auditLog)) {
+    state.auditLog = normalizeAuditLogValue(payload.auditLog);
+  }
   if (payload.controlState && typeof payload.controlState === "object") {
     state.controlState = payload.controlState;
   }
@@ -580,6 +581,9 @@ async function saveReviewState() {
   }
 
   state.reviewState = normalizeReviewStateValue(payload.reviewState);
+  if (Array.isArray(payload.auditLog)) {
+    state.auditLog = normalizeAuditLogValue(payload.auditLog);
+  }
   return state.reviewState;
 }
 

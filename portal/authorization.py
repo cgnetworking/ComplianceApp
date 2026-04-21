@@ -7,6 +7,7 @@ from django.db.models import Q, QuerySet
 
 from .models import (
     PortalAction,
+    PortalAuditLogEntry,
     PortalPermissionGrant,
     PortalResource,
     ReviewChecklistItem,
@@ -52,6 +53,7 @@ PAGE_PERMISSION_REQUIREMENTS: dict[str, tuple[PermissionRequirement, ...]] = {
 PORTAL_PERMISSION_CACHE_ATTR = "_portal_permission_index"
 
 MODEL_RESOURCE_MAP = {
+    PortalAuditLogEntry: PortalResource.AUDIT_LOG,
     UploadedPolicy: PortalResource.POLICY_DOCUMENT,
     VendorResponse: PortalResource.VENDOR_RESPONSE,
     RiskRecord: PortalResource.RISK_RECORD,

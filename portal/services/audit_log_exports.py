@@ -7,7 +7,8 @@ from datetime import datetime
 
 from django.utils import timezone
 
-from .common import get_state_payload, normalize_review_state, parse_iso_datetime
+from .audit_log import list_portal_audit_log_entries
+from .common import parse_iso_datetime
 
 
 AUDIT_LOG_EXPORT_HEADERS = (
@@ -31,10 +32,6 @@ def _escape_csv_formula(value: object) -> str:
     return normalized
 
 
-def _parse_occurred_at(value: object) -> datetime:
-    return parse_iso_datetime(value)
-
-
 def _normalize_audit_log_row(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
@@ -55,26 +52,23 @@ def _normalize_audit_log_row(value: object) -> dict[str, object] | None:
     }
 
 
-def list_review_state_audit_log_entries() -> list[dict[str, object]]:
-    review_state = normalize_review_state(get_state_payload("review_state", {}))
-    audit_log = review_state.get("auditLog") if isinstance(review_state.get("auditLog"), list) else []
-
+def list_portal_audit_log_export_rows() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for entry in audit_log:
+    for entry in list_portal_audit_log_entries():
         normalized = _normalize_audit_log_row(entry)
         if normalized is None:
             continue
         rows.append(normalized)
 
     rows.sort(
-        key=lambda entry: (_parse_occurred_at(entry.get("occurred_at")), str(entry.get("id") or "")),
+        key=lambda entry: (parse_iso_datetime(entry.get("occurred_at")), str(entry.get("id") or "")),
         reverse=True,
     )
     return rows
 
 
-def build_review_state_audit_log_csv(entries: list[dict[str, object]] | None = None) -> str:
-    rows = entries if entries is not None else list_review_state_audit_log_entries()
+def build_portal_audit_log_csv(entries: list[dict[str, object]] | None = None) -> str:
+    rows = entries if entries is not None else list_portal_audit_log_export_rows()
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer)
     writer.writerow(AUDIT_LOG_EXPORT_HEADERS)
@@ -95,20 +89,20 @@ def build_review_state_audit_log_csv(entries: list[dict[str, object]] | None = N
     return buffer.getvalue()
 
 
-def build_review_state_audit_log_export_filename(now: datetime | None = None) -> str:
+def build_portal_audit_log_export_filename(now: datetime | None = None) -> str:
     export_time = timezone.localtime(now or timezone.now())
     return f"audit_log_export_{export_time.strftime('%Y%m%d_%H%M%S')}.csv"
 
 
-def build_review_state_audit_log_export(now: datetime | None = None) -> tuple[str, str]:
-    csv_content = build_review_state_audit_log_csv()
-    return build_review_state_audit_log_export_filename(now=now), csv_content
+def build_portal_audit_log_export(now: datetime | None = None) -> tuple[str, str]:
+    csv_content = build_portal_audit_log_csv()
+    return build_portal_audit_log_export_filename(now=now), csv_content
 
 
 __all__ = [
     "AUDIT_LOG_EXPORT_HEADERS",
-    "list_review_state_audit_log_entries",
-    "build_review_state_audit_log_csv",
-    "build_review_state_audit_log_export_filename",
-    "build_review_state_audit_log_export",
+    "list_portal_audit_log_export_rows",
+    "build_portal_audit_log_csv",
+    "build_portal_audit_log_export_filename",
+    "build_portal_audit_log_export",
 ]

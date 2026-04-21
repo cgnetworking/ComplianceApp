@@ -257,7 +257,7 @@ def approve_uploaded_policy(
     actor_username: str,
     actor_display_name: str,
 ) -> tuple[dict[str, object], dict[str, object]]:
-    from .bootstrap import append_review_state_audit_entries, build_policy_approval_audit_entry
+    from .audit_log import append_portal_audit_entries, build_policy_approval_audit_entry
 
     normalized_id = normalize_string(document_id)
     if not normalized_id:
@@ -288,7 +288,7 @@ def approve_uploaded_policy(
         policy.approved_at = approval_time
         policy.save(update_fields=["approved_by", "approved_at"])
 
-    review_state = append_review_state_audit_entries(
+    append_portal_audit_entries(
         [
             build_policy_approval_audit_entry(
                 policy,
@@ -298,7 +298,7 @@ def approve_uploaded_policy(
             )
         ]
     )
-    return serialize_uploaded_policy(policy), review_state
+    return serialize_uploaded_policy(policy), normalize_review_state(get_state_payload("review_state", {}))
 
 
 def create_vendor_responses(files: list[UploadedFile]) -> list[dict[str, object]]:
