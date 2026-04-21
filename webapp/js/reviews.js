@@ -103,9 +103,20 @@
       return;
     }
 
+    const openActivities = [];
+    const completedActivities = [];
+    activities.forEach((activity) => {
+      if (isReviewTaskCompleted(activity.id, state.monthIndex)) {
+        completedActivities.push(activity);
+        return;
+      }
+      openActivities.push(activity);
+    });
+    const sortedActivities = openActivities.concat(completedActivities);
+
     els.activities.innerHTML = `
       <div class="activity-list">
-        ${activities.map((activity) => {
+        ${sortedActivities.map((activity) => {
           const isDone = isReviewTaskCompleted(activity.id, state.monthIndex);
           return `
             <article class="activity-card ${isDone ? "is-done" : ""}">
