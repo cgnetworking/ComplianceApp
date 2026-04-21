@@ -130,8 +130,6 @@
     reviewTasksList: document.getElementById("review-tasks-list"),
     reviewTasksStatus: document.getElementById("review-tasks-status"),
     homeUpcoming: document.getElementById("home-upcoming"),
-    homeDomains: document.getElementById("home-domains"),
-    homePolicies: document.getElementById("home-policies"),
     addRiskTrigger: document.getElementById("add-risk-trigger"),
     riskAssigneeFilter: document.getElementById("risk-assignee-filter"),
     riskStatusFilter: document.getElementById("risk-status-filter"),
