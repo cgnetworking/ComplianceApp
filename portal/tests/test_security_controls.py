@@ -216,7 +216,10 @@ class AuditVisibilityTests(TestCase):
         review_response = self.client.get("/api/state/?page=reviews")
         self.assertEqual(review_response.status_code, 200)
         review_payload = review_response.json()
-        self.assertNotIn("assignableUsers", review_payload)
+        self.assertEqual(
+            review_payload.get("assignableUsers"),
+            [{"username": "regular-user", "displayName": "regular-user"}],
+        )
         self.assertNotIn("auditLog", review_payload)
 
         risks_response = self.client.get("/api/state/?page=risks")

@@ -134,7 +134,13 @@
     if (els.riskDateInput) {
       els.riskDateInput.value = isEditing ? selectedRisk.date : todayDateValue();
     }
-    renderRiskOwnerOptions(isEditing ? selectedRisk.owner : "");
+    if (els.riskOwnerSearchInput) {
+      els.riskOwnerSearchInput.value = "";
+    }
+    const preferredOwner = isEditing
+      ? exactPortalAssignableUsername(selectedRisk.owner)
+      : (exactPortalAssignableUsername(state.riskAssignee !== "All" ? state.riskAssignee : "") || preferredPortalAssignableUsername(""));
+    renderRiskOwnerOptions(preferredOwner);
     if (els.riskClosedDateInput) {
       els.riskClosedDateInput.value = isEditing ? selectedRisk.closedDate : "";
     }
@@ -360,11 +366,19 @@
       return;
     }
 
-    const owners = collectAssignableOwnerOptions();
-    if (!owners.length) {
-      els.riskOwnerInput.innerHTML = '<option value="">No assignable users available</option>';
-      els.riskOwnerInput.value = "";
+    const { hasUsers } = populatePortalAssignableUserSelect(els.riskOwnerInput, {
+      query: els.riskOwnerSearchInput ? els.riskOwnerSearchInput.value : "",
+      selectedValue: selectedOwner,
+      blankLabel: "Select risk owner",
+      emptyLabel: "No assignable users available",
+      noMatchesLabel: "No matching users",
+      allowBlank: true,
+    });
+    if (!hasUsers) {
       els.riskOwnerInput.disabled = true;
+      if (els.riskOwnerSearchInput) {
+        els.riskOwnerSearchInput.disabled = true;
+      }
       if (els.riskSubmitButton) {
         els.riskSubmitButton.disabled = true;
       }
@@ -372,59 +386,24 @@
     }
 
     els.riskOwnerInput.disabled = false;
+    if (els.riskOwnerSearchInput) {
+      els.riskOwnerSearchInput.disabled = false;
+    }
     if (els.riskSubmitButton) {
       els.riskSubmitButton.disabled = false;
     }
-
-    els.riskOwnerInput.innerHTML = owners
-      .map((owner) => `<option value="${escapeHtml(owner.value)}">${escapeHtml(owner.label)}</option>`)
-      .join("");
-    const preferredOwner = selectedOwner || (state.riskAssignee !== "All" ? state.riskAssignee : owners[0].value);
-    els.riskOwnerInput.value = valueOrFallback(els.riskOwnerInput, preferredOwner);
   }
   function collectAssignableOwnerOptions() {
-    const options = [];
-    const seen = new Set();
-    const addOption = (value, label) => {
-      const normalizedValue = typeof value === "string" ? value.trim() : "";
-      if (!normalizedValue || seen.has(normalizedValue)) {
-        return;
-      }
-      seen.add(normalizedValue);
-      options.push({
-        value: normalizedValue,
-        label: normalizeRiskOwnerLabel(label),
-      });
-    };
-
-    state.assignableUsers.forEach((user) => {
-      if (!user || typeof user !== "object") {
-        return;
-      }
-      addOption(user.username, formatAssignableUserLabel(user));
-    });
-
-    return options.sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }));
+    return portalAssignableUsers().map((user) => ({
+      value: user.username,
+      label: portalAssignableUserLabel(user),
+    }));
   }
   function collectRiskFilterOwnerOptions() {
     return collectAssignableOwnerOptions();
   }
-  function formatAssignableUserLabel(user) {
-    const username = typeof user.username === "string" ? user.username.trim() : "";
-    const displayName = typeof user.displayName === "string" ? user.displayName.trim() : "";
-    if (!displayName || displayName.toLowerCase() === username.toLowerCase()) {
-      return username;
-    }
-    return `${displayName} (${username})`;
-  }
   function formatRiskOwnerLabel(owner) {
-    const normalizedOwner = typeof owner === "string" ? owner.trim() : "";
-    if (!normalizedOwner) {
-      return "";
-    }
-
-    const matchingUser = state.assignableUsers.find((user) => user && user.username === normalizedOwner);
-    return matchingUser ? formatAssignableUserLabel(matchingUser) : normalizedOwner;
+    return portalDisplayAssignableUserLabel(owner);
   }
   function formatRiskCreatorLabel(createdBy) {
     const normalizedCreator = typeof createdBy === "string" ? createdBy.trim() : "";

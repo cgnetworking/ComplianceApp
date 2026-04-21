@@ -31,7 +31,7 @@
             <div class="activity-top">
               <div>
                 <strong>${escapeHtml(item.item)}</strong>
-                <div class="mini-copy">${escapeHtml(reviewTaskScheduleLabel(item))} / ${escapeHtml(item.owner)}</div>
+                <div class="mini-copy">${escapeHtml(reviewTaskScheduleLabel(item))} / ${escapeHtml(portalDisplayAssignableUserLabel(item.owner))}</div>
               </div>
               <button class="ghost-button" type="button" data-review-task-delete="${escapeHtml(item.id)}">Remove</button>
             </div>

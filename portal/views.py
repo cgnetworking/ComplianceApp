@@ -635,7 +635,7 @@ def risk_register(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"detail": "Risk payload is required."}, status=400)
         payload = body.get("risk")
         try:
-            created_risk = create_risk_record(payload)
+            created_risk = create_risk_record(payload, viewer=request.user)
         except ValidationError as error:
             return JsonResponse({"detail": str(error)}, status=400)
         return JsonResponse({"risk": created_risk}, status=201)
@@ -647,7 +647,7 @@ def risk_register(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"detail": "riskRegister payload is required."}, status=400)
     items = body.get("riskRegister")
     try:
-        risk_register_payload = replace_risk_register(items)
+        risk_register_payload = replace_risk_register(items, viewer=request.user)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
 
@@ -719,7 +719,7 @@ def risk_record(request: HttpRequest, risk_id: str) -> JsonResponse:
         return portal_api_forbidden_response("You do not have permission to modify risk records.")
     payload = body.get("risk")
     try:
-        updated_risk = update_risk_record(risk_id, payload)
+        updated_risk = update_risk_record(risk_id, payload, viewer=request.user)
     except ValidationError as error:
         detail = str(error)
         status_code = 404 if detail == "Risk record was not found." else 400
@@ -741,7 +741,7 @@ def checklist_items(request: HttpRequest) -> JsonResponse:
     payload = body.get("checklistItem")
 
     try:
-        checklist_item = create_review_checklist_item(payload)
+        checklist_item = create_review_checklist_item(payload, viewer=request.user)
     except ValidationError as error:
         return JsonResponse({"detail": str(error)}, status=400)
 
@@ -820,7 +820,7 @@ def control_state(request: HttpRequest) -> JsonResponse:
     if not isinstance(body, dict) or "controlState" not in body:
         return JsonResponse({"detail": "controlState payload is required."}, status=400)
     payload = body.get("controlState")
-    normalized = normalize_control_state(payload)
+    normalized = normalize_control_state(payload, viewer=request.user)
     set_state_payload("control_state", normalized)
     return JsonResponse({"controlState": normalized})
 

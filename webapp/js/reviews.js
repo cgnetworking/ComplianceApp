@@ -123,7 +123,7 @@
               <div class="activity-top">
                 <div>
                   <strong>${escapeHtml(activity.activity)}</strong>
-                  <div class="mini-copy">${escapeHtml(activity.owner)} / ${escapeHtml(activity.scheduleLabel)} / ${escapeHtml(activity.category)}</div>
+                  <div class="mini-copy">${escapeHtml(portalDisplayAssignableUserLabel(activity.owner))} / ${escapeHtml(activity.scheduleLabel)} / ${escapeHtml(activity.category)}</div>
                 </div>
                 <span class="status-pill ${isDone ? "is-success" : "is-active"}">${isDone ? "Done" : "Open"}</span>
               </div>
@@ -199,7 +199,7 @@
   }
   function checklistRecommendationLabel(item) {
     const scheduleLabel = checklistFrequencyWithAnchorLabel(item.frequency, item.startDate);
-    return `${item.item} (${scheduleLabel} / ${item.owner})`;
+    return `${item.item} (${scheduleLabel} / ${portalDisplayAssignableUserLabel(item.owner)})`;
   }
   function normalizeRecommendationQuery(value) {
     return String(value || "").trim().toLowerCase();
@@ -264,8 +264,14 @@
     if (els.checklistAddStartDate && recommendation.startDate) {
       els.checklistAddStartDate.value = normalizeChecklistStartDate(recommendation.startDate);
     }
+    if (els.checklistAddOwnerSearch) {
+      els.checklistAddOwnerSearch.value = "";
+    }
     if (els.checklistAddOwner) {
-      els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, recommendation.owner);
+      renderChecklistOwnerOptions(
+        exactPortalAssignableUsername(recommendation.owner) || preferredPortalAssignableUsername(""),
+        ""
+      );
     }
     if (els.checklistAddItem) {
       els.checklistAddItem.value = recommendation.item;
@@ -422,10 +428,6 @@
       defaultChecklistFrequencies,
       checklistItems.map((item) => item.frequency).concat(recommendedItems.map((item) => item.frequency))
     );
-    const owners = buildChecklistOptionList(
-      defaultChecklistOwners,
-      checklistItems.map((item) => item.owner).concat(recommendedItems.map((item) => item.owner))
-    );
 
     const selectedCategory = els.checklistAddCategory.value;
     const selectedFrequency = els.checklistAddFrequency.value;
@@ -433,12 +435,28 @@
 
     populateSelect(els.checklistAddCategory, categories);
     populateSelect(els.checklistAddFrequency, frequencies);
-    populateSelect(els.checklistAddOwner, owners);
 
     els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, selectedCategory || "Custom");
     els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, selectedFrequency || "Annual");
-    els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, selectedOwner || "Head of IT");
+    renderChecklistOwnerOptions(selectedOwner || preferredPortalAssignableUsername(""), els.checklistAddOwnerSearch ? els.checklistAddOwnerSearch.value : "");
     renderChecklistRecommendationOptions();
+  }
+  function renderChecklistOwnerOptions(selectedOwner = "", query = "") {
+    if (!els.checklistAddOwner) {
+      return;
+    }
+
+    const { hasUsers } = populatePortalAssignableUserSelect(els.checklistAddOwner, {
+      query,
+      selectedValue: selectedOwner,
+      blankLabel: "Select checklist owner",
+      emptyLabel: "No assignable users available",
+      noMatchesLabel: "No matching users",
+      allowBlank: true,
+    });
+    if (els.checklistAddOwnerSearch) {
+      els.checklistAddOwnerSearch.disabled = !hasUsers;
+    }
   }
   function buildChecklistOptionList(defaultValues, dynamicValues) {
     const options = defaultValues.slice();
@@ -479,9 +497,13 @@
     if (els.checklistAddFrequency && !els.checklistAddFrequency.value) {
       els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, "Annual");
     }
-    if (els.checklistAddOwner && !els.checklistAddOwner.value) {
-      els.checklistAddOwner.value = valueOrFallback(els.checklistAddOwner, "Head of IT");
+    if (els.checklistAddOwnerSearch) {
+      els.checklistAddOwnerSearch.value = "";
     }
+    renderChecklistOwnerOptions(
+      (els.checklistAddOwner && els.checklistAddOwner.value) || preferredPortalAssignableUsername(""),
+      ""
+    );
     renderChecklistRecommendationOptions();
     if (els.checklistAddItem) {
       els.checklistAddItem.focus();
@@ -496,6 +518,9 @@
     setUploadStatus(els.checklistAddStatus, "", "");
     if (els.checklistAddFrequency) {
       els.checklistAddFrequency.value = "";
+    }
+    if (els.checklistAddOwnerSearch) {
+      els.checklistAddOwnerSearch.value = "";
     }
     if (els.checklistRecommendationSelect) {
       els.checklistRecommendationSelect.value = "";
@@ -523,13 +548,17 @@
       setUploadStatus(els.checklistAddStatus, "Checklist item text is required.", "error");
       return;
     }
+    if (!owner) {
+      setUploadStatus(els.checklistAddStatus, "Select an owner from the portal user directory.", "error");
+      return;
+    }
 
     const payload = {
       category: category || "Custom",
       item: itemText,
       frequency: frequency || "Annual",
       startDate,
-      owner: owner || "Shared portal",
+      owner,
     };
 
     await submitChecklistItem(payload, {
@@ -554,6 +583,15 @@
     }
 
     const startDate = els.checklistAddStartDate ? normalizeChecklistStartDate(els.checklistAddStartDate.value) : "";
+    const owner = els.checklistAddOwner ? els.checklistAddOwner.value : "";
+    if (!owner) {
+      setUploadStatus(
+        els.checklistAddStatus,
+        "Select an owner from the portal user directory before quick adding.",
+        "error"
+      );
+      return;
+    }
 
     await submitChecklistItem(
       {
@@ -561,7 +599,7 @@
         item: recommendation.item,
         frequency: recommendation.frequency,
         startDate: startDate || normalizeChecklistStartDate(recommendation.startDate),
-        owner: recommendation.owner,
+        owner,
       },
       {
         statusMessage: "Adding recommended checklist task...",

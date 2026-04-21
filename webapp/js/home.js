@@ -16,7 +16,7 @@
         ${upcoming.map((activity) => `
           <article class="list-card">
             <strong>${escapeHtml(activity.activity)}</strong>
-            <div class="mini-copy">${escapeHtml(activity.month)} / ${escapeHtml(activity.frequency)} / ${escapeHtml(activity.owner)}</div>
+            <div class="mini-copy">${escapeHtml(activity.month)} / ${escapeHtml(activity.frequency)} / ${escapeHtml(portalDisplayAssignableUserLabel(activity.owner))}</div>
             <div class="mini-copy">Evidence: ${escapeHtml(activity.evidence)}</div>
           </article>
         `).join("")}

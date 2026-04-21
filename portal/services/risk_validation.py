@@ -6,6 +6,7 @@ from .common import (
     parse_iso_datetime,
     parse_optional_iso_date,
 )
+from .user_directory import resolve_assignable_username
 
 RISK_RECORD_MODEL_FIELDS = (
     "risk",
@@ -36,7 +37,7 @@ def normalize_risk_score(value: object) -> int:
     return score if 1 <= score <= 25 else 0
 
 
-def normalize_risk_record(item: object) -> dict[str, object]:
+def normalize_risk_record(item: object, *, viewer: object | None = None) -> dict[str, object]:
     if not isinstance(item, dict):
         raise ValidationError("Each risk record must be an object.")
 
@@ -56,6 +57,9 @@ def normalize_risk_record(item: object) -> dict[str, object]:
         raise ValidationError(
             "Each risk requires an id, description, owner, probability, impact, createdAt, updatedAt, and date."
         )
+    resolved_owner = resolve_assignable_username(owner, viewer=viewer, page="risks")
+    if not resolved_owner:
+        raise ValidationError("Risk owner must be selected from an active user.")
     if stated_initial_risk_level and stated_initial_risk_level != initial_risk_level:
         raise ValidationError("Risk initialRiskLevel must equal probability multiplied by impact.")
     if closed_date and closed_date < raised_date:
@@ -64,7 +68,7 @@ def normalize_risk_record(item: object) -> dict[str, object]:
     return {
         "external_id": external_id,
         "risk": risk_text,
-        "owner": owner,
+        "owner": resolved_owner,
         "probability": probability,
         "impact": impact,
         "initial_risk_level": initial_risk_level,

@@ -246,6 +246,14 @@
         return;
       }
 
+      const ownerSearch = event.target.closest("[data-control-owner-search]");
+      if (ownerSearch && typeof renderControlOwnerOptions === "function") {
+        const picker = ownerSearch.closest("[data-control-owner-picker]");
+        const select = picker ? picker.querySelector("[data-control-owner]") : null;
+        renderControlOwnerOptions(picker, select ? select.value : "", ownerSearch.value);
+        return;
+      }
+
       const reason = event.target.closest("[data-exclusion-reason]");
       if (!reason) {
         return;
@@ -449,6 +457,17 @@
       });
     }
 
+    if (els.checklistAddOwnerSearch) {
+      els.checklistAddOwnerSearch.addEventListener("input", () => {
+        if (typeof renderChecklistOwnerOptions === "function") {
+          renderChecklistOwnerOptions(
+            els.checklistAddOwner ? els.checklistAddOwner.value : "",
+            els.checklistAddOwnerSearch.value
+          );
+        }
+      });
+    }
+
     if (els.checklistAddForm) {
       els.checklistAddForm.addEventListener("submit", handleChecklistAddSubmit);
     }
@@ -506,6 +525,14 @@
         renderRiskFormStatus();
       });
       els.riskForm.addEventListener("submit", handleRiskFormSubmit);
+    }
+
+    if (els.riskOwnerSearchInput) {
+      els.riskOwnerSearchInput.addEventListener("input", () => {
+        if (typeof renderRiskOwnerOptions === "function") {
+          renderRiskOwnerOptions(els.riskOwnerInput ? els.riskOwnerInput.value : "");
+        }
+      });
     }
 
     if (els.riskDeleteButton && !els.riskDeleteButton.dataset.bound) {
@@ -793,6 +820,127 @@
   }
   function populateSelect(select, values) {
     select.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+  }
+  function portalAssignableUsers() {
+    const users = Array.isArray(state.assignableUsers) ? state.assignableUsers : [];
+    return users
+      .filter((user) => user && typeof user === "object" && typeof user.username === "string" && user.username.trim())
+      .slice()
+      .sort((left, right) => {
+        const leftLabel = portalAssignableUserLabel(left);
+        const rightLabel = portalAssignableUserLabel(right);
+        return leftLabel.localeCompare(rightLabel, undefined, { numeric: true, sensitivity: "base" });
+      });
+  }
+  function findPortalAssignableUser(username) {
+    const normalizedUsername = typeof username === "string" ? username.trim().toLowerCase() : "";
+    if (!normalizedUsername) {
+      return null;
+    }
+    return portalAssignableUsers().find((user) => user.username.trim().toLowerCase() === normalizedUsername) || null;
+  }
+  function portalAssignableUserLabel(user) {
+    if (!user || typeof user !== "object") {
+      return "";
+    }
+    const username = typeof user.username === "string" ? user.username.trim() : "";
+    const displayName = typeof user.displayName === "string" ? user.displayName.trim() : "";
+    if (!displayName || displayName.toLowerCase() === username.toLowerCase()) {
+      return username;
+    }
+    return `${displayName} (${username})`;
+  }
+  function portalDisplayAssignableUserLabel(username) {
+    const normalizedUsername = typeof username === "string" ? username.trim() : "";
+    if (!normalizedUsername) {
+      return "";
+    }
+    const matchingUser = findPortalAssignableUser(normalizedUsername);
+    return matchingUser ? portalAssignableUserLabel(matchingUser) : normalizedUsername;
+  }
+  function portalCurrentUsername() {
+    const currentUser = window.ISMS_PORTAL_CONFIG && window.ISMS_PORTAL_CONFIG.currentUser;
+    return currentUser && typeof currentUser.username === "string" ? currentUser.username.trim() : "";
+  }
+  function preferredPortalAssignableUsername(username) {
+    const matchingUser = findPortalAssignableUser(username);
+    if (matchingUser) {
+      return matchingUser.username;
+    }
+    const currentUsername = portalCurrentUsername();
+    const currentUser = findPortalAssignableUser(currentUsername);
+    if (currentUser) {
+      return currentUser.username;
+    }
+    const users = portalAssignableUsers();
+    return users.length ? users[0].username : "";
+  }
+  function exactPortalAssignableUsername(username) {
+    const matchingUser = findPortalAssignableUser(username);
+    return matchingUser ? matchingUser.username : "";
+  }
+  function populatePortalAssignableUserSelect(
+    select,
+    {
+      query = "",
+      selectedValue = "",
+      blankLabel = "Select a user",
+      emptyLabel = blankLabel,
+      noMatchesLabel = "No matching users",
+      allowBlank = true,
+    } = {}
+  ) {
+    if (!select) {
+      return { hasUsers: false, selectedValue: "" };
+    }
+
+    const users = portalAssignableUsers();
+    if (!users.length) {
+      select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
+      select.disabled = true;
+      select.value = "";
+      return { hasUsers: false, selectedValue: "" };
+    }
+
+    const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";
+    const normalizedSelectedValue = typeof selectedValue === "string" ? selectedValue.trim() : "";
+    let filteredUsers = users.filter((user) => {
+      if (!normalizedQuery) {
+        return true;
+      }
+      const label = portalAssignableUserLabel(user).toLowerCase();
+      const username = user.username.trim().toLowerCase();
+      return label.includes(normalizedQuery) || username.includes(normalizedQuery);
+    });
+
+    const selectedUser = findPortalAssignableUser(normalizedSelectedValue);
+    if (selectedUser && !filteredUsers.some((user) => user.username === selectedUser.username)) {
+      filteredUsers = [selectedUser].concat(filteredUsers);
+    }
+
+    const options = [];
+    if (allowBlank) {
+      options.push({ value: "", label: blankLabel, disabled: false });
+    }
+    if (filteredUsers.length) {
+      filteredUsers.forEach((user) => {
+        options.push({
+          value: user.username,
+          label: portalAssignableUserLabel(user),
+          disabled: false,
+        });
+      });
+    } else {
+      options.push({ value: "", label: noMatchesLabel, disabled: true });
+    }
+
+    select.innerHTML = options
+      .map((option) => `<option value="${escapeHtml(option.value)}"${option.disabled ? " disabled" : ""}>${escapeHtml(option.label)}</option>`)
+      .join("");
+    select.disabled = false;
+    const nextSelectedValue = selectedUser ? selectedUser.username : "";
+    select.value = valueOrFallback(select, nextSelectedValue);
+    return { hasUsers: true, selectedValue: select.value };
   }
   function openSharedSearchablePicker(picker, input, list) {
     if (!picker || !input || !list || input.disabled) {

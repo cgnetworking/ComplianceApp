@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
@@ -39,6 +38,7 @@ from .uploads import (
     sanitize_uploaded_html,
     summarize_vendor_survey,
 )
+from .user_directory import resolve_assignable_username
 
 
 def serialize_policy_document_payload(document: dict[str, object], *, include_content: bool) -> dict[str, object]:
@@ -109,25 +109,6 @@ def get_policy_document(
                 return serialize_policy_document_payload(item, include_content=include_content)
 
     raise ValidationError("Policy document was not found.")
-
-
-def resolve_assignable_username(identifier: str) -> str:
-    normalized_identifier = normalize_string(identifier)
-    if not normalized_identifier:
-        return ""
-
-    user_model = get_user_model()
-    username_field = getattr(user_model, "USERNAME_FIELD", "username")
-    user = user_model.objects.filter(is_active=True).filter(**{f"{username_field}__iexact": normalized_identifier}).first()
-    if user is None:
-        has_email_field = any(getattr(field, "name", "") == "email" for field in user_model._meta.get_fields())
-        if has_email_field:
-            user = user_model.objects.filter(is_active=True, email__iexact=normalized_identifier).first()
-    if user is None:
-        return ""
-
-    return normalize_string(getattr(user, username_field, ""))
-
 
 def normalize_policy_approver_value(value: object) -> str:
     normalized = normalize_string(value)

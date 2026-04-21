@@ -140,6 +140,12 @@
       buildReviewFrequencyOptions(control.effectiveReviewFrequency),
       control.effectiveReviewFrequency
     );
+    const linkedOwner = exactPortalAssignableUsername(control.owner);
+    const ownerHelpText = linkedOwner
+      ? "Select an active portal user to own this control."
+      : control.owner
+        ? `Current mapped owner: ${control.owner}. Choose a portal user to override it.`
+        : "Select an active portal user to own this control.";
 
     els.controlDetail.innerHTML = `
       <div class="detail-header">
@@ -158,14 +164,18 @@
       <div class="detail-grid">
         <article class="detail-card">
           <strong>Owner</strong>
-          <label class="form-field">
+          <div class="form-field" data-control-owner-picker="${escapeHtml(control.id)}">
             <input
-              type="text"
-              data-control-owner="${escapeHtml(control.id)}"
-              value="${escapeHtml(control.owner)}"
-              placeholder="Assign owner (name or username)"
+              type="search"
+              data-control-owner-search="${escapeHtml(control.id)}"
+              placeholder="Search users"
+              autocomplete="off"
             >
-          </label>
+            <select data-control-owner="${escapeHtml(control.id)}">
+              ${buildControlOwnerOptionsMarkup(linkedOwner)}
+            </select>
+            <p class="helper-note">${escapeHtml(ownerHelpText)}</p>
+          </div>
         </article>
         <article class="detail-card">
           <strong>Review frequency</strong>
@@ -513,6 +523,38 @@
   }
   function normalizeControlOwner(value) {
     return typeof value === "string" ? value.trim() : "";
+  }
+  function buildControlOwnerOptionsMarkup(selectedOwner) {
+    const select = document.createElement("select");
+    populatePortalAssignableUserSelect(select, {
+      selectedValue: selectedOwner,
+      blankLabel: "Select control owner",
+      emptyLabel: "No assignable users available",
+      noMatchesLabel: "No matching users",
+      allowBlank: true,
+    });
+    return select.innerHTML;
+  }
+  function renderControlOwnerOptions(picker, selectedOwner = "", query = "") {
+    if (!picker) {
+      return;
+    }
+    const searchInput = picker.querySelector("[data-control-owner-search]");
+    const select = picker.querySelector("[data-control-owner]");
+    if (!select) {
+      return;
+    }
+    const { hasUsers } = populatePortalAssignableUserSelect(select, {
+      query,
+      selectedValue: selectedOwner,
+      blankLabel: "Select control owner",
+      emptyLabel: "No assignable users available",
+      noMatchesLabel: "No matching users",
+      allowBlank: true,
+    });
+    if (searchInput) {
+      searchInput.disabled = !hasUsers;
+    }
   }
   function normalizeControlPolicyDocumentIds(value) {
     if (!Array.isArray(value)) {

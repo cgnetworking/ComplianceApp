@@ -45,8 +45,8 @@ def _payload_created_by(payload: object) -> str:
     return normalize_string(payload.get("createdBy"))
 
 
-def _normalize_risk_record_with_creator(payload: object) -> dict[str, object]:
-    normalized = normalize_risk_record(payload)
+def _normalize_risk_record_with_creator(payload: object, *, viewer: object | None = None) -> dict[str, object]:
+    normalized = normalize_risk_record(payload, viewer=viewer)
     requested_created_by = _payload_created_by(payload)
     if not requested_created_by:
         raise ValidationError("Each risk requires createdBy.")
@@ -62,14 +62,14 @@ def _prepare_risk_upsert_items(items: object) -> list[object]:
     raise ValidationError("Risk register payload must be a list.")
 
 
-def upsert_risk_register(items: object) -> list[dict[str, object]]:
+def upsert_risk_register(items: object, *, viewer: object | None = None) -> list[dict[str, object]]:
     records_to_upsert = _prepare_risk_upsert_items(items)
 
     with transaction.atomic():
         for item in records_to_upsert:
             if not isinstance(item, dict):
                 raise ValidationError("Each risk record must be an object.")
-            record = _normalize_risk_record_with_creator(item)
+            record = _normalize_risk_record_with_creator(item, viewer=viewer)
             RiskRecord.objects.update_or_create(
                 external_id=record["external_id"],
                 defaults=risk_record_model_values(record),
@@ -78,12 +78,12 @@ def upsert_risk_register(items: object) -> list[dict[str, object]]:
     return list_risk_register()
 
 
-def replace_risk_register(items: object) -> list[dict[str, object]]:
-    return upsert_risk_register(items)
+def replace_risk_register(items: object, *, viewer: object | None = None) -> list[dict[str, object]]:
+    return upsert_risk_register(items, viewer=viewer)
 
 
-def create_risk_record(payload: object) -> dict[str, object]:
-    record = _normalize_risk_record_with_creator(payload)
+def create_risk_record(payload: object, *, viewer: object | None = None) -> dict[str, object]:
+    record = _normalize_risk_record_with_creator(payload, viewer=viewer)
     if RiskRecord.objects.filter(external_id=record["external_id"]).exists():
         raise ValidationError("Risk record already exists.")
 
@@ -94,7 +94,7 @@ def create_risk_record(payload: object) -> dict[str, object]:
     return serialize_risk_record(created)
 
 
-def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
+def update_risk_record(external_id: str, payload: object, *, viewer: object | None = None) -> dict[str, object]:
     normalized_external_id = normalize_string(external_id)
     if not normalized_external_id:
         raise ValidationError("Risk id is required.")
@@ -113,7 +113,7 @@ def update_risk_record(external_id: str, payload: object) -> dict[str, object]:
     merged_payload = serialize_risk_record(existing)
     merged_payload.update(payload)
     merged_payload["id"] = normalized_external_id
-    normalized_record = _normalize_risk_record_with_creator(merged_payload)
+    normalized_record = _normalize_risk_record_with_creator(merged_payload, viewer=viewer)
     next_values = risk_record_model_values(normalized_record)
 
     for field_name in RISK_RECORD_UPDATE_FIELDS:

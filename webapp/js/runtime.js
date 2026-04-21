@@ -33,7 +33,6 @@
     "Custom",
   ];
   const defaultChecklistFrequencies = ["Annual", "Quarterly", "Monthly", "Semi-annual", "Per event", "Not scheduled"];
-  const defaultChecklistOwners = ["Head of IT", "CTO", "Shared portal"];
   const domainColors = {
     Organizational: "#7442b8",
     People: "#9d3f9d",
@@ -125,6 +124,7 @@
     checklistAddItem: document.getElementById("checklist-add-item"),
     checklistAddFrequency: document.getElementById("checklist-add-frequency"),
     checklistAddStartDate: document.getElementById("checklist-add-start-date"),
+    checklistAddOwnerSearch: document.getElementById("checklist-add-owner-search"),
     checklistAddOwner: document.getElementById("checklist-add-owner"),
     checklistRecommendationSelect: document.getElementById("checklist-recommendation-select"),
     checklistRecommendationAdd: document.getElementById("checklist-recommendation-add"),
@@ -142,6 +142,7 @@
     riskFormCopy: document.getElementById("risk-form-copy"),
     riskNameInput: document.getElementById("risk-name"),
     riskDateInput: document.getElementById("risk-date"),
+    riskOwnerSearchInput: document.getElementById("risk-owner-search"),
     riskOwnerInput: document.getElementById("risk-owner"),
     riskClosedDateInput: document.getElementById("risk-closed-date"),
     riskSubmitButton: document.getElementById("risk-submit-button"),
@@ -186,7 +187,7 @@
   }
 
   async function loadAssignableUsers() {
-    if (page !== "risks") {
+    if (!new Set(["controls", "reviews", "risks"]).has(page)) {
       return;
     }
     if (!Array.isArray(state.assignableUsers) || !state.assignableUsers.length) {

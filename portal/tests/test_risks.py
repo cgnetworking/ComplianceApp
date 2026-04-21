@@ -41,7 +41,7 @@ class RiskMutationTests(TestCase):
             "probability": probability,
             "impact": impact,
             "date": "2026-01-10",
-            "owner": "Risk Owner",
+            "owner": self.user.username,
         }
         if created_by:
             payload["createdBy"] = created_by
@@ -147,7 +147,7 @@ class RiskMutationTests(TestCase):
                             "probability": 4,
                             "impact": 4,
                             "date": "2026-01-10",
-                            "owner": "Risk Owner",
+                            "owner": self.user.username,
                         }
                     ]
                 }
@@ -161,8 +161,8 @@ class RiskMutationTests(TestCase):
     def test_bulk_put_accepts_csv_text_to_import_risks(self) -> None:
         csv_payload = (
             "id,risk,probability,impact,date,owner,createdBy\\n"
-            ",Imported risk 1,3,4,2026-02-01,Risk Owner,risk-user\\n"
-            ",Imported risk 2,2,2,2026-02-02,Risk Owner,\\n"
+            ",Imported risk 1,3,4,2026-02-01,risk-user,risk-user\\n"
+            ",Imported risk 2,2,2,2026-02-02,risk-user,\\n"
         )
         response = self.client.put(
             "/api/risks/",

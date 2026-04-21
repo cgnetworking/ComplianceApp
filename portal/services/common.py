@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from ..models import PortalState
 from .html_sanitization import sanitize_uploaded_html
+from .user_directory import resolve_assignable_username
 
 
 ANNEX_A_CONTROL_DOMAIN_BY_FAMILY = {
@@ -726,7 +727,7 @@ def normalize_review_state(payload: object) -> dict[str, object]:
     }
 
 
-def normalize_control_state(payload: object) -> dict[str, object]:
+def normalize_control_state(payload: object, *, strict: bool = True, viewer: object | None = None) -> dict[str, object]:
     if not isinstance(payload, dict):
         return {}
 
@@ -739,6 +740,9 @@ def normalize_control_state(payload: object) -> dict[str, object]:
         applicability = raw_applicability if raw_applicability in ALLOWED_CONTROL_APPLICABILITY else ""
         review_frequency = normalize_string(value.get("reviewFrequency"))
         owner = normalize_string(value.get("owner"))
+        resolved_owner = resolve_assignable_username(owner, viewer=viewer, page="controls") if owner else ""
+        if owner and not resolved_owner and strict:
+            raise ValidationError("Control owner must be selected from an active user.")
         has_policy_document_override = isinstance(value.get("policyDocumentIds"), list)
         policy_document_ids: list[str] = []
         if has_policy_document_override:
@@ -755,14 +759,14 @@ def normalize_control_state(payload: object) -> dict[str, object]:
         if reason and applicability != "Excluded":
             raise ValidationError("Control exclusion reason requires applicability 'Excluded'.")
 
-        if reason or applicability or review_frequency or owner or has_policy_document_override or preferred_document_id:
+        if reason or applicability or review_frequency or resolved_owner or has_policy_document_override or preferred_document_id:
             entry: dict[str, object] = {"reason": reason}
             if applicability:
                 entry["applicability"] = applicability
             if review_frequency:
                 entry["reviewFrequency"] = review_frequency
-            if owner:
-                entry["owner"] = owner
+            if resolved_owner:
+                entry["owner"] = resolved_owner
             if has_policy_document_override:
                 entry["policyDocumentIds"] = policy_document_ids
             if preferred_document_id:

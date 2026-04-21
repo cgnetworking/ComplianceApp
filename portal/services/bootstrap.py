@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 
-from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
@@ -40,6 +39,7 @@ from .policies import (
     list_vendor_responses,
 )
 from .risks import list_risk_register
+from .user_directory import list_assignable_users_for_viewer, resolve_assignable_username
 
 
 def normalize_bootstrap_page(value: object) -> str:
@@ -47,43 +47,7 @@ def normalize_bootstrap_page(value: object) -> str:
     return normalized if normalized in BOOTSTRAP_PAGES else ""
 
 
-def serialize_assignable_user(user: object) -> dict[str, str] | None:
-    user_model = get_user_model()
-    username_field = getattr(user_model, "USERNAME_FIELD", "username")
-    username = normalize_string(getattr(user, username_field, ""))
-    if not username:
-        return None
-    first_name = normalize_string(getattr(user, "first_name", ""))
-    last_name = normalize_string(getattr(user, "last_name", ""))
-    full_name = " ".join(part for part in [first_name, last_name] if part).strip()
-    email = normalize_string(getattr(user, "email", ""))
-    return {"username": username, "displayName": full_name or email or username}
-
-
-def list_assignable_users() -> list[dict[str, str]]:
-    user_model = get_user_model()
-    username_field = getattr(user_model, "USERNAME_FIELD", "username")
-    assignable_users: list[dict[str, str]] = []
-    for user in user_model.objects.filter(is_active=True).order_by(username_field):
-        serialized_user = serialize_assignable_user(user)
-        if serialized_user is None:
-            continue
-        assignable_users.append(serialized_user)
-    return assignable_users
-
-
-def list_assignable_users_for_viewer(viewer: object | None, *, page: str = "") -> list[dict[str, str]]:
-    if not getattr(viewer, "is_authenticated", False):
-        return []
-    if bool(getattr(viewer, "is_staff", False)):
-        return list_assignable_users()
-    if page != "risks":
-        return []
-
-    serialized_user = serialize_assignable_user(viewer)
-    return [serialized_user] if serialized_user is not None else []
-
-def create_review_checklist_item(payload: object) -> dict[str, str]:
+def create_review_checklist_item(payload: object, *, viewer: object | None = None) -> dict[str, str]:
     if not isinstance(payload, dict):
         raise ValidationError("Checklist item payload must be an object.")
 
@@ -97,6 +61,9 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
     owner = normalize_string(payload.get("owner"))
     if not category or not frequency or not owner:
         raise ValidationError("Checklist items require category, frequency, and owner.")
+    resolved_owner = resolve_assignable_username(owner, viewer=viewer, page="reviews")
+    if not resolved_owner:
+        raise ValidationError("Checklist item owner must be selected from an active user.")
 
     for _ in range(5):
         external_id = f"checklist-{uuid.uuid4().hex[:12]}"
@@ -107,7 +74,7 @@ def create_review_checklist_item(payload: object) -> dict[str, str]:
                 item=item_text,
                 frequency=frequency,
                 start_date=start_date,
-                owner=owner,
+                owner=resolved_owner,
             )
             return created.to_portal_dict()
 
@@ -268,7 +235,7 @@ def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool =
             payload["auditLog"] = audit_log_payload_for_viewer(viewer=viewer)
     if include_all_sections or normalized_page in BOOTSTRAP_PAGES_WITH_CONTROL_STATE:
         if can_view_control_state:
-            payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}))
+            payload["controlState"] = normalize_control_state(get_state_payload("control_state", {}), strict=False)
     if include_all_sections and can_view_vendor_responses:
         payload["vendorSurveyResponses"] = list_vendor_responses(viewer=viewer)
     if (include_all_sections or normalized_page == "risks") and can_view_risks:
@@ -278,7 +245,7 @@ def get_bootstrap_payload(*, viewer: object | None = None, policy_reader: bool =
 
 __all__ = [
     "normalize_bootstrap_page",
-    "list_assignable_users",
+    "list_assignable_users_for_viewer",
     "build_portal_audit_entry",
     "append_portal_audit_entry",
     "append_portal_audit_entries",
