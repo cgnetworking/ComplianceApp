@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives.serialization import pkcs12
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from portal.assessment_services import (
     AssessmentValidationError,
     assessment_script_contents,
+    claim_next_zero_trust_run,
+    create_zero_trust_run,
     delete_zero_trust_profile,
     generate_zero_trust_certificate,
+    get_zero_trust_run_detail,
     ingest_assessment_artifacts,
 )
 from portal.models import ZeroTrustAssessmentRun, ZeroTrustCertificate, ZeroTrustRunStatus, ZeroTrustTenantProfile
@@ -141,6 +146,128 @@ class AssessmentCertificateStorageTests(TestCase):
                     "Stop or finish the active assessment run before deleting this tenant.",
                 ):
                     delete_zero_trust_profile(profile.external_id)
+
+    @override_settings(ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS=10)
+    def test_get_run_detail_marks_old_unclaimed_queued_run_stale(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-stale-queued",
+            display_name="Stale Queued Tenant",
+            tenant_id="tenant-stale-queued",
+            client_id="client-stale-queued",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                generate_zero_trust_certificate(profile.external_id)
+                queued_payload = create_zero_trust_run(profile.external_id)
+                queued_run_id = str(queued_payload["id"])
+                ZeroTrustAssessmentRun.objects.filter(external_id=queued_run_id).update(
+                    created_at=timezone.now() - timedelta(seconds=61)
+                )
+
+                detail = get_zero_trust_run_detail(queued_run_id)
+
+        self.assertEqual(detail["run"]["status"], ZeroTrustRunStatus.STALE)
+        self.assertIn("No assessment worker claimed the queued run.", detail["run"]["statusMessage"])
+
+    @override_settings(ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS=10)
+    def test_get_run_detail_keeps_queued_run_when_another_run_is_active(self) -> None:
+        profile_queued = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-queued-active-check",
+            display_name="Queued Active Check Tenant",
+            tenant_id="tenant-queued-active-check",
+            client_id="client-queued-active-check",
+        )
+        profile_running = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-running-active-check",
+            display_name="Running Active Check Tenant",
+            tenant_id="tenant-running-active-check",
+            client_id="client-running-active-check",
+        )
+
+        queued_run = ZeroTrustAssessmentRun.objects.create(
+            external_id="zt-run-queued-active-check",
+            profile=profile_queued,
+            status=ZeroTrustRunStatus.QUEUED,
+            status_message="Queued for background execution.",
+        )
+        ZeroTrustAssessmentRun.objects.filter(pk=queued_run.pk).update(
+            created_at=timezone.now() - timedelta(seconds=61)
+        )
+        running_run = ZeroTrustAssessmentRun.objects.create(
+            external_id="zt-run-running-active-check",
+            profile=profile_running,
+            status=ZeroTrustRunStatus.RUNNING,
+            status_message="PowerShell assessment is running.",
+            started_at=timezone.now(),
+            last_heartbeat_at=timezone.now(),
+            lease_expires_at=timezone.now() + timedelta(seconds=300),
+        )
+
+        detail = get_zero_trust_run_detail(queued_run.external_id)
+        queued_run.refresh_from_db()
+        running_run.refresh_from_db()
+
+        self.assertEqual(detail["run"]["status"], ZeroTrustRunStatus.QUEUED)
+        self.assertEqual(queued_run.status, ZeroTrustRunStatus.QUEUED)
+        self.assertEqual(running_run.status, ZeroTrustRunStatus.RUNNING)
+
+    @override_settings(ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS=10)
+    def test_create_run_replaces_expired_queued_run(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-requeue",
+            display_name="Requeue Tenant",
+            tenant_id="tenant-requeue",
+            client_id="client-requeue",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                generate_zero_trust_certificate(profile.external_id)
+                first_payload = create_zero_trust_run(profile.external_id)
+                first_run_id = str(first_payload["id"])
+                ZeroTrustAssessmentRun.objects.filter(external_id=first_run_id).update(
+                    created_at=timezone.now() - timedelta(seconds=61)
+                )
+
+                second_payload = create_zero_trust_run(profile.external_id)
+
+        first_run = ZeroTrustAssessmentRun.objects.get(external_id=first_run_id)
+        self.assertEqual(first_run.status, ZeroTrustRunStatus.STALE)
+        self.assertEqual(second_payload["status"], ZeroTrustRunStatus.QUEUED)
+        self.assertNotEqual(second_payload["id"], first_run_id)
+
+    def test_claim_next_run_marks_queued_run_claimed(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-claim",
+            display_name="Claim Tenant",
+            tenant_id="tenant-claim",
+            client_id="client-claim",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                generate_zero_trust_certificate(profile.external_id)
+                queued_payload = create_zero_trust_run(profile.external_id)
+                claimed_run = claim_next_zero_trust_run(worker_id="worker-test")
+
+        assert claimed_run is not None
+        self.assertEqual(claimed_run.external_id, queued_payload["id"])
+        claimed_run.refresh_from_db()
+        self.assertEqual(claimed_run.status, ZeroTrustRunStatus.CLAIMED)
+        self.assertEqual(claimed_run.worker_id, "worker-test")
 
     def test_assessment_script_reads_runtime_password_file_without_embedded_secret(self) -> None:
         profile = ZeroTrustTenantProfile.objects.create(

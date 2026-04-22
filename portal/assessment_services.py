@@ -268,6 +268,7 @@ def build_run_payload(run: ZeroTrustAssessmentRun | None) -> dict[str, object] |
 
 
 def list_zero_trust_profiles() -> list[dict[str, object]]:
+    mark_stale_zero_trust_runs()
     return [build_profile_payload(profile) for profile in ZeroTrustTenantProfile.objects.all()]
 
 
@@ -283,6 +284,7 @@ def get_zero_trust_profile(profile_id: str) -> ZeroTrustTenantProfile:
 
 
 def get_zero_trust_profile_detail(profile_id: str) -> dict[str, object]:
+    mark_stale_zero_trust_runs()
     profile = get_zero_trust_profile(profile_id)
     runs = profile.assessment_runs.select_related("certificate").order_by("-created_at")[:25]
     return {
@@ -505,6 +507,7 @@ def get_zero_trust_certificate_download(profile_id: str) -> tuple[str, bytes]:
 
 
 def create_zero_trust_run(profile_id: str, *, actor_username: str = "") -> dict[str, object]:
+    mark_stale_zero_trust_runs()
     profile = get_zero_trust_profile(profile_id)
     certificate = current_profile_certificate(profile)
     if certificate is None:
@@ -553,6 +556,7 @@ def list_zero_trust_run_logs(run_id: str, *, after_sequence: int = 0, limit: int
 
 
 def get_zero_trust_run_detail(run_id: str) -> dict[str, object]:
+    mark_stale_zero_trust_runs()
     run = get_zero_trust_run(run_id)
     return {
         "run": build_run_payload(run),
@@ -574,23 +578,61 @@ def stale_run_candidates() -> list[ZeroTrustAssessmentRun]:
     )
 
 
+def stale_queued_run_claim_timeout_seconds() -> int:
+    return max(60, int(settings.ASSESSMENT_WORKER_POLL_INTERVAL_SECONDS) * 6)
+
+
+def mark_stale_unclaimed_queued_zero_trust_runs(*, now: datetime | None = None) -> int:
+    marked = 0
+    current_time = now or timezone.now()
+    cutoff = current_time - timedelta(seconds=stale_queued_run_claim_timeout_seconds())
+    active_statuses = {
+        ZeroTrustRunStatus.CLAIMED,
+        ZeroTrustRunStatus.RUNNING,
+        ZeroTrustRunStatus.INGESTING,
+    }
+    stale_message = "No assessment worker claimed the queued run. Ensure the assessment worker service is running."
+
+    while True:
+        with transaction.atomic():
+            if ZeroTrustAssessmentRun.objects.filter(status__in=active_statuses).exists():
+                return marked
+
+            run = (
+                ZeroTrustAssessmentRun.objects.select_for_update(skip_locked=True)
+                .filter(status=ZeroTrustRunStatus.QUEUED, created_at__lt=cutoff)
+                .order_by("created_at")
+                .first()
+            )
+            if run is None:
+                return marked
+
+            run.status = ZeroTrustRunStatus.STALE
+            run.status_message = stale_message
+            run.completed_at = current_time
+            run.save(update_fields=["status", "status_message", "completed_at", "updated_at"])
+
+        create_run_log(run, stale_message, level="error", stream="system")
+        marked += 1
+
+
 def mark_stale_zero_trust_runs() -> int:
     marked = 0
+    current_time = timezone.now()
     for run in stale_run_candidates():
         run.status = ZeroTrustRunStatus.STALE
         run.status_message = "Worker lease expired before the run finished."
-        run.completed_at = timezone.now()
+        run.completed_at = current_time
         run.save(update_fields=["status", "status_message", "completed_at", "updated_at"])
         create_run_log(run, run.status_message, level="error", stream="system")
         marked += 1
-    return marked
+    return marked + mark_stale_unclaimed_queued_zero_trust_runs(now=current_time)
 
 
 def claim_next_zero_trust_run(*, worker_id: str) -> ZeroTrustAssessmentRun | None:
     with transaction.atomic():
         run = (
             ZeroTrustAssessmentRun.objects.select_for_update(skip_locked=True)
-            .select_related("profile", "certificate")
             .filter(status=ZeroTrustRunStatus.QUEUED)
             .order_by("created_at")
             .first()
