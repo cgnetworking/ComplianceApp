@@ -25,6 +25,32 @@
     return Boolean(run && ["queued", "claimed", "running", "ingesting"].includes(run.status));
   }
 
+  function zeroTrustRunStartedLabel(run) {
+    if (!run) {
+      return "-";
+    }
+    if (run.startedAt) {
+      return formatShortDateTime(run.startedAt);
+    }
+    if (run.status === "claimed") {
+      return "Starting";
+    }
+    return "Not started";
+  }
+
+  function zeroTrustRunCompletedLabel(run) {
+    if (!run) {
+      return "-";
+    }
+    if (run.completedAt) {
+      return formatShortDateTime(run.completedAt);
+    }
+    if (run.status === "running" || run.status === "ingesting") {
+      return "In progress";
+    }
+    return "Not completed";
+  }
+
   function zeroTrustHasStoredReports() {
     if (zeroTrustRuns.some((run) => Boolean(run && run.hasReport))) {
       return true;
@@ -380,8 +406,8 @@
               <td>
                 <button class="table-link-button" type="button" data-assessment-run-select="${escapeHtml(run.id)}">${escapeHtml(run.statusLabel)}</button>
               </td>
-              <td>${escapeHtml(formatShortDateTime(run.startedAt || run.createdAt))}</td>
-              <td>${escapeHtml(run.completedAt ? formatShortDateTime(run.completedAt) : "In progress")}</td>
+              <td>${escapeHtml(zeroTrustRunStartedLabel(run))}</td>
+              <td>${escapeHtml(zeroTrustRunCompletedLabel(run))}</td>
               <td><span class="status-pill ${statusClass}">${escapeHtml(run.statusLabel)}</span></td>
               <td>${escapeHtml(run.hasReport ? "Stored" : "Pending")}</td>
             </tr>
