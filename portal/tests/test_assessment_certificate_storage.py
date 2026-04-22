@@ -15,7 +15,7 @@ from portal.assessment_services import (
     generate_zero_trust_certificate,
     ingest_assessment_artifacts,
 )
-from portal.models import ZeroTrustAssessmentRun, ZeroTrustCertificate, ZeroTrustTenantProfile
+from portal.models import ZeroTrustAssessmentRun, ZeroTrustCertificate, ZeroTrustRunStatus, ZeroTrustTenantProfile
 
 
 class AssessmentCertificateStorageTests(TestCase):
@@ -80,6 +80,67 @@ class AssessmentCertificateStorageTests(TestCase):
                 delete_zero_trust_profile(profile.external_id)
 
                 self.assertFalse(pfx_path.exists())
+
+    def test_profile_delete_allows_queued_assessment_runs(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-delete-queued",
+            display_name="Delete Queued Tenant",
+            tenant_id="tenant-delete-queued",
+            client_id="client-delete-queued",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                payload = generate_zero_trust_certificate(profile.external_id)
+                certificate = ZeroTrustCertificate.objects.get(external_id=payload["certificate"]["id"])
+
+                ZeroTrustAssessmentRun.objects.create(
+                    external_id="zt-run-delete-queued",
+                    profile=profile,
+                    certificate=certificate,
+                    status=ZeroTrustRunStatus.QUEUED,
+                    status_message="Queued for background execution.",
+                )
+
+                delete_zero_trust_profile(profile.external_id)
+
+        self.assertFalse(ZeroTrustTenantProfile.objects.filter(external_id=profile.external_id).exists())
+        self.assertFalse(ZeroTrustAssessmentRun.objects.filter(external_id="zt-run-delete-queued").exists())
+
+    def test_profile_delete_blocks_claimed_assessment_runs(self) -> None:
+        profile = ZeroTrustTenantProfile.objects.create(
+            external_id="zt-profile-delete-claimed",
+            display_name="Delete Claimed Tenant",
+            tenant_id="tenant-delete-claimed",
+            client_id="client-delete-claimed",
+        )
+
+        with TemporaryDirectory() as certificate_root, TemporaryDirectory() as secret_root:
+            password_file = self.write_password_file(secret_root)
+            with override_settings(
+                ASSESSMENT_CERTIFICATE_ROOT=certificate_root,
+                ASSESSMENT_PFX_PASSWORD_FILE=password_file,
+            ):
+                payload = generate_zero_trust_certificate(profile.external_id)
+                certificate = ZeroTrustCertificate.objects.get(external_id=payload["certificate"]["id"])
+
+                ZeroTrustAssessmentRun.objects.create(
+                    external_id="zt-run-delete-claimed",
+                    profile=profile,
+                    certificate=certificate,
+                    status=ZeroTrustRunStatus.CLAIMED,
+                    status_message="Claimed by worker worker-1.",
+                )
+
+                with self.assertRaisesMessage(
+                    AssessmentValidationError,
+                    "Stop or finish the active assessment run before deleting this tenant.",
+                ):
+                    delete_zero_trust_profile(profile.external_id)
 
     def test_assessment_script_reads_runtime_password_file_without_embedded_secret(self) -> None:
         profile = ZeroTrustTenantProfile.objects.create(

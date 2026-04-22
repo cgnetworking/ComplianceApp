@@ -292,20 +292,27 @@ def get_zero_trust_profile_detail(profile_id: str) -> dict[str, object]:
 
 
 def delete_zero_trust_profile(profile_id: str) -> dict[str, object]:
-    profile = get_zero_trust_profile(profile_id)
-    active_statuses = [
-        ZeroTrustRunStatus.QUEUED,
-        ZeroTrustRunStatus.CLAIMED,
-        ZeroTrustRunStatus.RUNNING,
-        ZeroTrustRunStatus.INGESTING,
-    ]
-    if profile.assessment_runs.filter(status__in=active_statuses).exists():
-        raise AssessmentValidationError("Stop or finish the active assessment run before deleting this tenant.")
-
-    deleted_profile = build_profile_payload(profile)
-    certificate_paths = list(profile.certificates.values_list("pfx_path", flat=True))
+    normalized_profile_id = normalize_string(profile_id)
+    if not normalized_profile_id:
+        raise AssessmentValidationError("Assessment profile id is required.")
 
     with transaction.atomic():
+        try:
+            profile = ZeroTrustTenantProfile.objects.select_for_update().get(external_id=normalized_profile_id)
+        except ZeroTrustTenantProfile.DoesNotExist as error:
+            raise AssessmentValidationError("Assessment profile was not found.") from error
+
+        locked_runs = list(profile.assessment_runs.select_for_update().all())
+        active_statuses = {
+            ZeroTrustRunStatus.CLAIMED,
+            ZeroTrustRunStatus.RUNNING,
+            ZeroTrustRunStatus.INGESTING,
+        }
+        if any(run.status in active_statuses for run in locked_runs):
+            raise AssessmentValidationError("Stop or finish the active assessment run before deleting this tenant.")
+
+        deleted_profile = build_profile_payload(profile)
+        certificate_paths = list(profile.certificates.values_list("pfx_path", flat=True))
         profile.delete()
 
     for certificate_path in certificate_paths:
