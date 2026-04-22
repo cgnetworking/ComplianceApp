@@ -82,10 +82,21 @@
           <textarea id="checklist-add-item" placeholder="Describe the review check to perform." required></textarea>
         </label>
 
-        <label class="form-field" for="checklist-add-owner">
+        <label class="form-field" for="checklist-add-owner-search">
           <span>Owner</span>
-          <input id="checklist-add-owner-search" type="search" placeholder="Search users" autocomplete="off">
-          <select id="checklist-add-owner" required></select>
+          <div class="recommendation-picker" id="checklist-add-owner-picker">
+            <input
+              id="checklist-add-owner-search"
+              type="search"
+              placeholder="Select checklist owner"
+              autocomplete="off"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-controls="checklist-add-owner-list"
+            >
+            <div class="recommendation-picker-list" id="checklist-add-owner-list" role="listbox" hidden></div>
+          </div>
+          <input id="checklist-add-owner" type="hidden">
         </label>
 
         <div class="form-actions">

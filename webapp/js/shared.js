@@ -247,10 +247,9 @@
       }
 
       const ownerSearch = event.target.closest("[data-control-owner-search]");
-      if (ownerSearch && typeof renderControlOwnerOptions === "function") {
+      if (ownerSearch && typeof handleControlOwnerPickerInputChanged === "function") {
         const picker = ownerSearch.closest("[data-control-owner-picker]");
-        const select = picker ? picker.querySelector("[data-control-owner]") : null;
-        renderControlOwnerOptions(picker, select ? select.value : "", ownerSearch.value);
+        handleControlOwnerPickerInputChanged(picker);
         return;
       }
 
@@ -459,11 +458,8 @@
 
     if (els.checklistAddOwnerSearch) {
       els.checklistAddOwnerSearch.addEventListener("input", () => {
-        if (typeof renderChecklistOwnerOptions === "function") {
-          renderChecklistOwnerOptions(
-            els.checklistAddOwner ? els.checklistAddOwner.value : "",
-            els.checklistAddOwnerSearch.value
-          );
+        if (typeof handleChecklistOwnerPickerInputChanged === "function") {
+          handleChecklistOwnerPickerInputChanged();
         }
       });
     }
@@ -529,8 +525,8 @@
 
     if (els.riskOwnerSearchInput) {
       els.riskOwnerSearchInput.addEventListener("input", () => {
-        if (typeof renderRiskOwnerOptions === "function") {
-          renderRiskOwnerOptions(els.riskOwnerInput ? els.riskOwnerInput.value : "");
+        if (typeof handleRiskOwnerPickerInputChanged === "function") {
+          handleRiskOwnerPickerInputChanged();
         }
       });
     }
@@ -878,6 +874,91 @@
   function exactPortalAssignableUsername(username) {
     const matchingUser = findPortalAssignableUser(username);
     return matchingUser ? matchingUser.username : "";
+  }
+  function normalizePortalAssignableUserQuery(value) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+  }
+  function filteredPortalAssignableUsers(query) {
+    const normalizedQuery = normalizePortalAssignableUserQuery(query);
+    if (!normalizedQuery) {
+      return portalAssignableUsers();
+    }
+    return portalAssignableUsers().filter((user) => {
+      const label = portalAssignableUserLabel(user).toLowerCase();
+      const username = user.username.trim().toLowerCase();
+      return label.includes(normalizedQuery) || username.includes(normalizedQuery);
+    });
+  }
+  function findExactPortalAssignableUserByInput(rawValue) {
+    const normalizedValue = normalizePortalAssignableUserQuery(rawValue);
+    if (!normalizedValue) {
+      return null;
+    }
+    return portalAssignableUsers().find((user) => {
+      const label = portalAssignableUserLabel(user).toLowerCase();
+      const username = user.username.trim().toLowerCase();
+      return label === normalizedValue || username === normalizedValue;
+    }) || null;
+  }
+  function findPortalAssignableUserByInputValue(rawValue, exactOnly = false) {
+    const exactMatch = findExactPortalAssignableUserByInput(rawValue);
+    if (exactMatch) {
+      return exactMatch;
+    }
+    if (exactOnly) {
+      return null;
+    }
+    const matchingUsers = filteredPortalAssignableUsers(rawValue);
+    return matchingUsers.length ? matchingUsers[0] : null;
+  }
+  function renderPortalAssignableUserPickerOptions({
+    list,
+    query = "",
+    selectedValue = "",
+    blankLabel = "Select a user",
+    emptyLabel = blankLabel,
+    noMatchesLabel = "No matching users",
+    allowBlank = true,
+    optionDataAttribute = "data-assignable-username",
+  } = {}) {
+    if (!list) {
+      return { hasUsers: false };
+    }
+
+    const users = portalAssignableUsers();
+    if (!users.length) {
+      renderSharedSearchablePickerOptions({
+        list,
+        options: [],
+        selectedId: "",
+        optionDataAttribute,
+        emptyMessage: emptyLabel,
+        getOptionId: (item) => item.id,
+        getOptionLabel: (item) => item.label,
+      });
+      return { hasUsers: false };
+    }
+
+    const normalizedQuery = normalizePortalAssignableUserQuery(query);
+    const filteredUsers = filteredPortalAssignableUsers(normalizedQuery);
+    const options = [];
+    if (!normalizedQuery && allowBlank) {
+      options.push({ id: "", label: blankLabel });
+    }
+    filteredUsers.forEach((user) => {
+      options.push({ id: user.username, label: portalAssignableUserLabel(user) });
+    });
+
+    renderSharedSearchablePickerOptions({
+      list,
+      options,
+      selectedId: typeof selectedValue === "string" ? selectedValue.trim() : "",
+      optionDataAttribute,
+      emptyMessage: normalizedQuery ? noMatchesLabel : emptyLabel,
+      getOptionId: (item) => item.id,
+      getOptionLabel: (item) => item.label,
+    });
+    return { hasUsers: true };
   }
   function populatePortalAssignableUserSelect(
     select,

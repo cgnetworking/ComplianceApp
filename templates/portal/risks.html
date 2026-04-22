@@ -139,10 +139,21 @@
             <input id="risk-date" name="risk-date" type="date" required>
           </label>
 
-          <label class="form-field" for="risk-owner">
+          <label class="form-field" for="risk-owner-search">
             <span>Risk Owner</span>
-            <input id="risk-owner-search" type="search" placeholder="Search users" autocomplete="off">
-            <select id="risk-owner" name="risk-owner" required></select>
+            <div class="recommendation-picker" id="risk-owner-picker">
+              <input
+                id="risk-owner-search"
+                type="search"
+                placeholder="Select risk owner"
+                autocomplete="off"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="risk-owner-list"
+              >
+              <div class="recommendation-picker-list" id="risk-owner-list" role="listbox" hidden></div>
+            </div>
+            <input id="risk-owner" name="risk-owner" type="hidden">
           </label>
         </div>
 

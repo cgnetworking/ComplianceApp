@@ -197,6 +197,12 @@
   function checklistRecommendationList() {
     return document.getElementById("checklist-recommendation-list");
   }
+  function checklistOwnerPicker() {
+    return document.getElementById("checklist-add-owner-picker");
+  }
+  function checklistOwnerList() {
+    return document.getElementById("checklist-add-owner-list");
+  }
   function checklistRecommendationLabel(item) {
     const scheduleLabel = checklistFrequencyWithAnchorLabel(item.frequency, item.startDate);
     return `${item.item} (${scheduleLabel} / ${portalDisplayAssignableUserLabel(item.owner)})`;
@@ -264,13 +270,9 @@
     if (els.checklistAddStartDate && recommendation.startDate) {
       els.checklistAddStartDate.value = normalizeChecklistStartDate(recommendation.startDate);
     }
-    if (els.checklistAddOwnerSearch) {
-      els.checklistAddOwnerSearch.value = "";
-    }
     if (els.checklistAddOwner) {
       renderChecklistOwnerOptions(
-        exactPortalAssignableUsername(recommendation.owner) || preferredPortalAssignableUsername(""),
-        ""
+        exactPortalAssignableUsername(recommendation.owner) || preferredPortalAssignableUsername("")
       );
     }
     if (els.checklistAddItem) {
@@ -438,25 +440,128 @@
 
     els.checklistAddCategory.value = valueOrFallback(els.checklistAddCategory, selectedCategory || "Custom");
     els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, selectedFrequency || "Annual");
-    renderChecklistOwnerOptions(selectedOwner || preferredPortalAssignableUsername(""), els.checklistAddOwnerSearch ? els.checklistAddOwnerSearch.value : "");
+    renderChecklistOwnerOptions(selectedOwner || preferredPortalAssignableUsername(""));
     renderChecklistRecommendationOptions();
   }
-  function renderChecklistOwnerOptions(selectedOwner = "", query = "") {
-    if (!els.checklistAddOwner) {
+  function openChecklistOwnerPicker() {
+    const picker = checklistOwnerPicker();
+    const input = els.checklistAddOwnerSearch;
+    const list = checklistOwnerList();
+    openSharedSearchablePicker(picker, input, list);
+  }
+  function closeChecklistOwnerPicker() {
+    const picker = checklistOwnerPicker();
+    const input = els.checklistAddOwnerSearch;
+    const list = checklistOwnerList();
+    if (input && els.checklistAddOwner) {
+      input.value = els.checklistAddOwner.value ? portalDisplayAssignableUserLabel(els.checklistAddOwner.value) : "";
+    }
+    closeSharedSearchablePicker(picker, input, list);
+  }
+  function applyChecklistOwnerSelection(username, shouldClose = true) {
+    if (!els.checklistAddOwner || !els.checklistAddOwnerSearch) {
       return;
     }
 
-    const { hasUsers } = populatePortalAssignableUserSelect(els.checklistAddOwner, {
-      query,
-      selectedValue: selectedOwner,
+    const resolvedUsername = exactPortalAssignableUsername(username);
+    els.checklistAddOwner.value = resolvedUsername || "";
+    checklistOwnerPickerState.showAll = false;
+    els.checklistAddOwnerSearch.value = els.checklistAddOwner.value
+      ? portalDisplayAssignableUserLabel(els.checklistAddOwner.value)
+      : "";
+    renderChecklistOwnerOptions(els.checklistAddOwner.value);
+    if (shouldClose) {
+      closeChecklistOwnerPicker();
+    }
+  }
+  function bindChecklistOwnerPickerEvents() {
+    const picker = checklistOwnerPicker();
+    const input = els.checklistAddOwnerSearch;
+    const list = checklistOwnerList();
+    if (!picker || !input || !list) {
+      return;
+    }
+
+    bindSharedSearchablePickerEvents({
+      picker,
+      input,
+      list,
+      boundDatasetKey: "checklistOwnerPickerBound",
+      optionSelector: "[data-checklist-owner-option]",
+      onOpen: () => {
+        checklistOwnerPickerState.showAll = true;
+        renderChecklistOwnerOptions(els.checklistAddOwner ? els.checklistAddOwner.value : "");
+        openChecklistOwnerPicker();
+        window.setTimeout(() => {
+          if (document.activeElement === input) {
+            input.select();
+          }
+        }, 0);
+      },
+      onClose: () => {
+        checklistOwnerPickerState.showAll = false;
+        closeChecklistOwnerPicker();
+      },
+      onEnter: () => {
+        if (!input.value.trim()) {
+          applyChecklistOwnerSelection("", true);
+          return true;
+        }
+        const selectedUser = findPortalAssignableUserByInputValue(input.value);
+        if (!selectedUser) {
+          return false;
+        }
+        applyChecklistOwnerSelection(selectedUser.username, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        applyChecklistOwnerSelection(option.dataset.checklistOwnerOption || "", true);
+      },
+    });
+  }
+  function renderChecklistOwnerOptions(selectedOwner = "") {
+    const list = checklistOwnerList();
+    if (!els.checklistAddOwner || !els.checklistAddOwnerSearch || !list) {
+      return;
+    }
+
+    bindChecklistOwnerPickerEvents();
+
+    const committedUsername = exactPortalAssignableUsername(selectedOwner || els.checklistAddOwner.value);
+    els.checklistAddOwner.value = committedUsername || "";
+    if (!checklistOwnerPickerState.showAll) {
+      els.checklistAddOwnerSearch.value = els.checklistAddOwner.value
+        ? portalDisplayAssignableUserLabel(els.checklistAddOwner.value)
+        : "";
+    }
+
+    const highlightedUser = checklistOwnerPickerState.showAll
+      ? null
+      : findPortalAssignableUserByInputValue(els.checklistAddOwnerSearch.value);
+    const { hasUsers } = renderPortalAssignableUserPickerOptions({
+      list,
+      query: checklistOwnerPickerState.showAll ? "" : els.checklistAddOwnerSearch.value,
+      selectedValue: checklistOwnerPickerState.showAll
+        ? els.checklistAddOwner.value
+        : (highlightedUser ? highlightedUser.username : els.checklistAddOwner.value),
+      optionDataAttribute: "data-checklist-owner-option",
       blankLabel: "Select checklist owner",
       emptyLabel: "No assignable users available",
       noMatchesLabel: "No matching users",
       allowBlank: true,
     });
-    if (els.checklistAddOwnerSearch) {
-      els.checklistAddOwnerSearch.disabled = !hasUsers;
+    els.checklistAddOwnerSearch.disabled = !hasUsers;
+    els.checklistAddOwnerSearch.placeholder = hasUsers ? "Select checklist owner" : "No assignable users available";
+    if (!hasUsers) {
+      els.checklistAddOwner.value = "";
+      checklistOwnerPickerState.showAll = false;
+      closeChecklistOwnerPicker();
     }
+  }
+  function handleChecklistOwnerPickerInputChanged() {
+    checklistOwnerPickerState.showAll = false;
+    renderChecklistOwnerOptions(els.checklistAddOwner ? els.checklistAddOwner.value : "");
+    openChecklistOwnerPicker();
   }
   function buildChecklistOptionList(defaultValues, dynamicValues) {
     const options = defaultValues.slice();
@@ -497,12 +602,8 @@
     if (els.checklistAddFrequency && !els.checklistAddFrequency.value) {
       els.checklistAddFrequency.value = valueOrFallback(els.checklistAddFrequency, "Annual");
     }
-    if (els.checklistAddOwnerSearch) {
-      els.checklistAddOwnerSearch.value = "";
-    }
     renderChecklistOwnerOptions(
       (els.checklistAddOwner && els.checklistAddOwner.value) || preferredPortalAssignableUsername(""),
-      ""
     );
     renderChecklistRecommendationOptions();
     if (els.checklistAddItem) {
@@ -530,6 +631,8 @@
     }
     recommendationPickerState.selectedId = "";
     recommendationPickerState.showAll = false;
+    checklistOwnerPickerState.showAll = false;
+    closeChecklistOwnerPicker();
     closeChecklistRecommendationPicker();
   }
   async function handleChecklistAddSubmit(event) {
@@ -768,5 +871,8 @@
   }
   const recommendationPickerState = {
     selectedId: "",
+    showAll: false,
+  };
+  const checklistOwnerPickerState = {
     showAll: false,
   };

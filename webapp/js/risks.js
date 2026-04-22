@@ -1,6 +1,12 @@
   const probabilityFieldNames = ["risk-probability", "probability", "initial-risk-probability"];
   const impactFieldNames = ["risk-impact", "impact", "initial-risk-impact"];
 
+  function riskOwnerPicker() {
+    return document.getElementById("risk-owner-picker");
+  }
+  function riskOwnerList() {
+    return document.getElementById("risk-owner-list");
+  }
   function renderRisksPage() {
     renderRiskAssigneeFilter();
     renderRiskStatusFilter();
@@ -133,9 +139,6 @@
     }
     if (els.riskDateInput) {
       els.riskDateInput.value = isEditing ? selectedRisk.date : todayDateValue();
-    }
-    if (els.riskOwnerSearchInput) {
-      els.riskOwnerSearchInput.value = "";
     }
     const preferredOwner = isEditing
       ? exactPortalAssignableUsername(selectedRisk.owner)
@@ -362,13 +365,31 @@
     });
   }
   function renderRiskOwnerOptions(selectedOwner) {
-    if (!els.riskOwnerInput) {
+    const list = riskOwnerList();
+    if (!els.riskOwnerInput || !els.riskOwnerSearchInput || !list) {
       return;
     }
 
-    const { hasUsers } = populatePortalAssignableUserSelect(els.riskOwnerInput, {
-      query: els.riskOwnerSearchInput ? els.riskOwnerSearchInput.value : "",
-      selectedValue: selectedOwner,
+    bindRiskOwnerPickerEvents();
+
+    const committedUsername = exactPortalAssignableUsername(selectedOwner || els.riskOwnerInput.value);
+    els.riskOwnerInput.value = committedUsername || "";
+    if (!riskOwnerPickerState.showAll) {
+      els.riskOwnerSearchInput.value = els.riskOwnerInput.value
+        ? portalDisplayAssignableUserLabel(els.riskOwnerInput.value)
+        : "";
+    }
+
+    const highlightedUser = riskOwnerPickerState.showAll
+      ? null
+      : findPortalAssignableUserByInputValue(els.riskOwnerSearchInput.value);
+    const { hasUsers } = renderPortalAssignableUserPickerOptions({
+      list,
+      query: riskOwnerPickerState.showAll ? "" : els.riskOwnerSearchInput.value,
+      selectedValue: riskOwnerPickerState.showAll
+        ? els.riskOwnerInput.value
+        : (highlightedUser ? highlightedUser.username : els.riskOwnerInput.value),
+      optionDataAttribute: "data-risk-owner-option",
       blankLabel: "Select risk owner",
       emptyLabel: "No assignable users available",
       noMatchesLabel: "No matching users",
@@ -376,9 +397,12 @@
     });
     if (!hasUsers) {
       els.riskOwnerInput.disabled = true;
-      if (els.riskOwnerSearchInput) {
-        els.riskOwnerSearchInput.disabled = true;
-      }
+      els.riskOwnerInput.value = "";
+      els.riskOwnerSearchInput.value = "";
+      els.riskOwnerSearchInput.disabled = true;
+      els.riskOwnerSearchInput.placeholder = "No assignable users available";
+      riskOwnerPickerState.showAll = false;
+      closeRiskOwnerPicker();
       if (els.riskSubmitButton) {
         els.riskSubmitButton.disabled = true;
       }
@@ -386,12 +410,92 @@
     }
 
     els.riskOwnerInput.disabled = false;
-    if (els.riskOwnerSearchInput) {
-      els.riskOwnerSearchInput.disabled = false;
-    }
+    els.riskOwnerSearchInput.disabled = false;
+    els.riskOwnerSearchInput.placeholder = "Select risk owner";
     if (els.riskSubmitButton) {
       els.riskSubmitButton.disabled = false;
     }
+  }
+  function openRiskOwnerPicker() {
+    const picker = riskOwnerPicker();
+    const input = els.riskOwnerSearchInput;
+    const list = riskOwnerList();
+    openSharedSearchablePicker(picker, input, list);
+  }
+  function closeRiskOwnerPicker() {
+    const picker = riskOwnerPicker();
+    const input = els.riskOwnerSearchInput;
+    const list = riskOwnerList();
+    if (input && els.riskOwnerInput) {
+      input.value = els.riskOwnerInput.value ? portalDisplayAssignableUserLabel(els.riskOwnerInput.value) : "";
+    }
+    closeSharedSearchablePicker(picker, input, list);
+  }
+  function applyRiskOwnerSelection(username, shouldClose = true) {
+    if (!els.riskOwnerInput || !els.riskOwnerSearchInput) {
+      return;
+    }
+
+    const resolvedUsername = exactPortalAssignableUsername(username);
+    els.riskOwnerInput.value = resolvedUsername || "";
+    riskOwnerPickerState.showAll = false;
+    els.riskOwnerSearchInput.value = els.riskOwnerInput.value
+      ? portalDisplayAssignableUserLabel(els.riskOwnerInput.value)
+      : "";
+    renderRiskOwnerOptions(els.riskOwnerInput.value);
+    if (shouldClose) {
+      closeRiskOwnerPicker();
+    }
+  }
+  function bindRiskOwnerPickerEvents() {
+    const picker = riskOwnerPicker();
+    const input = els.riskOwnerSearchInput;
+    const list = riskOwnerList();
+    if (!picker || !input || !list) {
+      return;
+    }
+
+    bindSharedSearchablePickerEvents({
+      picker,
+      input,
+      list,
+      boundDatasetKey: "riskOwnerPickerBound",
+      optionSelector: "[data-risk-owner-option]",
+      onOpen: () => {
+        riskOwnerPickerState.showAll = true;
+        renderRiskOwnerOptions(els.riskOwnerInput ? els.riskOwnerInput.value : "");
+        openRiskOwnerPicker();
+        window.setTimeout(() => {
+          if (document.activeElement === input) {
+            input.select();
+          }
+        }, 0);
+      },
+      onClose: () => {
+        riskOwnerPickerState.showAll = false;
+        closeRiskOwnerPicker();
+      },
+      onEnter: () => {
+        if (!input.value.trim()) {
+          applyRiskOwnerSelection("", true);
+          return true;
+        }
+        const selectedUser = findPortalAssignableUserByInputValue(input.value);
+        if (!selectedUser) {
+          return false;
+        }
+        applyRiskOwnerSelection(selectedUser.username, true);
+        return true;
+      },
+      onOptionClick: (option) => {
+        applyRiskOwnerSelection(option.dataset.riskOwnerOption || "", true);
+      },
+    });
+  }
+  function handleRiskOwnerPickerInputChanged() {
+    riskOwnerPickerState.showAll = false;
+    renderRiskOwnerOptions(els.riskOwnerInput ? els.riskOwnerInput.value : "");
+    openRiskOwnerPicker();
   }
   function collectAssignableOwnerOptions() {
     return portalAssignableUsers().map((user) => ({
@@ -608,6 +712,9 @@
     }
     return String(window.ISMS_PORTAL_CONFIG.currentUser.username).trim();
   }
+  const riskOwnerPickerState = {
+    showAll: false,
+  };
   function bindRiskCsvActions() {
     const exportTrigger = document.getElementById("risk-export-trigger");
     const importTrigger = document.getElementById("risk-import-trigger");

@@ -165,15 +165,25 @@
         <article class="detail-card">
           <strong>Owner</strong>
           <div class="form-field" data-control-owner-picker="${escapeHtml(control.id)}">
-            <input
-              type="search"
-              data-control-owner-search="${escapeHtml(control.id)}"
-              placeholder="Search users"
-              autocomplete="off"
-            >
-            <select data-control-owner="${escapeHtml(control.id)}">
-              ${buildControlOwnerOptionsMarkup(linkedOwner)}
-            </select>
+            <div class="recommendation-picker">
+              <input
+                type="search"
+                data-control-owner-search="${escapeHtml(control.id)}"
+                placeholder="Select control owner"
+                autocomplete="off"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-controls="control-owner-list-${escapeHtml(control.id)}"
+              >
+              <div
+                class="recommendation-picker-list"
+                id="control-owner-list-${escapeHtml(control.id)}"
+                data-control-owner-list
+                role="listbox"
+                hidden
+              ></div>
+              <input type="hidden" data-control-owner="${escapeHtml(control.id)}" value="${escapeHtml(linkedOwner)}">
+            </div>
             <p class="helper-note">${escapeHtml(ownerHelpText)}</p>
           </div>
         </article>
@@ -254,7 +264,9 @@
         </div>
       </div>
     `;
+    controlOwnerPickerState.showAll = false;
     renderControlPolicyOptions();
+    renderControlOwnerOptions();
     renderControlPersistenceStatus();
   }
   function controlPolicyMapper() {
@@ -524,37 +536,156 @@
   function normalizeControlOwner(value) {
     return typeof value === "string" ? value.trim() : "";
   }
-  function buildControlOwnerOptionsMarkup(selectedOwner) {
-    const select = document.createElement("select");
-    populatePortalAssignableUserSelect(select, {
-      selectedValue: selectedOwner,
+  function controlOwnerPicker() {
+    if (!els.controlDetail) {
+      return null;
+    }
+    return els.controlDetail.querySelector("[data-control-owner-picker]");
+  }
+  function controlOwnerPickerInput(picker = controlOwnerPicker()) {
+    if (!picker) {
+      return null;
+    }
+    return picker.querySelector("[data-control-owner-search]");
+  }
+  function controlOwnerPickerList(picker = controlOwnerPicker()) {
+    if (!picker) {
+      return null;
+    }
+    return picker.querySelector("[data-control-owner-list]");
+  }
+  function controlOwnerHiddenInput(picker = controlOwnerPicker()) {
+    if (!picker) {
+      return null;
+    }
+    return picker.querySelector("[data-control-owner]");
+  }
+  function openControlOwnerPicker(picker = controlOwnerPicker()) {
+    const input = controlOwnerPickerInput(picker);
+    const list = controlOwnerPickerList(picker);
+    openSharedSearchablePicker(picker, input, list);
+  }
+  function closeControlOwnerPicker(picker = controlOwnerPicker()) {
+    const input = controlOwnerPickerInput(picker);
+    const list = controlOwnerPickerList(picker);
+    const hiddenInput = controlOwnerHiddenInput(picker);
+    if (input && hiddenInput) {
+      input.value = hiddenInput.value ? portalDisplayAssignableUserLabel(hiddenInput.value) : "";
+    }
+    closeSharedSearchablePicker(picker, input, list);
+  }
+  function applyControlOwnerSelection(username, { shouldNotify = false, shouldClose = true } = {}) {
+    const picker = controlOwnerPicker();
+    const input = controlOwnerPickerInput(picker);
+    const hiddenInput = controlOwnerHiddenInput(picker);
+    if (!picker || !input || !hiddenInput) {
+      return;
+    }
+
+    const resolvedUsername = exactPortalAssignableUsername(username);
+    const previousValue = hiddenInput.value;
+    hiddenInput.value = resolvedUsername || "";
+    controlOwnerPickerState.showAll = false;
+    input.value = hiddenInput.value ? portalDisplayAssignableUserLabel(hiddenInput.value) : "";
+    renderControlOwnerOptions(picker);
+    if (shouldClose) {
+      closeControlOwnerPicker(picker);
+    }
+    if (shouldNotify && previousValue !== hiddenInput.value) {
+      hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+  function bindControlOwnerPickerEvents(picker = controlOwnerPicker()) {
+    const input = controlOwnerPickerInput(picker);
+    const list = controlOwnerPickerList(picker);
+    if (!picker || !input || !list) {
+      return;
+    }
+
+    bindSharedSearchablePickerEvents({
+      picker,
+      input,
+      list,
+      boundDatasetKey: "controlOwnerPickerBound",
+      optionSelector: "[data-control-owner-option]",
+      onOpen: () => {
+        controlOwnerPickerState.showAll = true;
+        renderControlOwnerOptions(picker);
+        openControlOwnerPicker(picker);
+        window.setTimeout(() => {
+          if (document.activeElement === input) {
+            input.select();
+          }
+        }, 0);
+      },
+      onClose: () => {
+        controlOwnerPickerState.showAll = false;
+        closeControlOwnerPicker(picker);
+      },
+      onEnter: () => {
+        if (!input.value.trim()) {
+          applyControlOwnerSelection("", { shouldNotify: true, shouldClose: true });
+          return true;
+        }
+        const selectedUser = findPortalAssignableUserByInputValue(input.value);
+        if (!selectedUser) {
+          return false;
+        }
+        applyControlOwnerSelection(selectedUser.username, { shouldNotify: true, shouldClose: true });
+        return true;
+      },
+      onOptionClick: (option) => {
+        applyControlOwnerSelection(option.dataset.controlOwnerOption || "", { shouldNotify: true, shouldClose: true });
+      },
+    });
+  }
+  function renderControlOwnerOptions(picker = controlOwnerPicker(), selectedOwner = "") {
+    const input = controlOwnerPickerInput(picker);
+    const list = controlOwnerPickerList(picker);
+    const hiddenInput = controlOwnerHiddenInput(picker);
+    if (!picker || !input || !list || !hiddenInput) {
+      return;
+    }
+
+    bindControlOwnerPickerEvents(picker);
+
+    const committedUsername = exactPortalAssignableUsername(selectedOwner || hiddenInput.value);
+    hiddenInput.value = committedUsername || "";
+    if (!controlOwnerPickerState.showAll) {
+      input.value = hiddenInput.value ? portalDisplayAssignableUserLabel(hiddenInput.value) : "";
+    }
+
+    const highlightedUser = controlOwnerPickerState.showAll
+      ? null
+      : findPortalAssignableUserByInputValue(input.value);
+    const { hasUsers } = renderPortalAssignableUserPickerOptions({
+      list,
+      query: controlOwnerPickerState.showAll ? "" : input.value,
+      selectedValue: controlOwnerPickerState.showAll
+        ? hiddenInput.value
+        : (highlightedUser ? highlightedUser.username : hiddenInput.value),
+      optionDataAttribute: "data-control-owner-option",
       blankLabel: "Select control owner",
       emptyLabel: "No assignable users available",
       noMatchesLabel: "No matching users",
       allowBlank: true,
     });
-    return select.innerHTML;
+
+    input.disabled = !hasUsers;
+    input.placeholder = hasUsers ? "Select control owner" : "No assignable users available";
+    if (!hasUsers) {
+      hiddenInput.value = "";
+      controlOwnerPickerState.showAll = false;
+      closeControlOwnerPicker(picker);
+    }
   }
-  function renderControlOwnerOptions(picker, selectedOwner = "", query = "") {
+  function handleControlOwnerPickerInputChanged(picker = controlOwnerPicker()) {
     if (!picker) {
       return;
     }
-    const searchInput = picker.querySelector("[data-control-owner-search]");
-    const select = picker.querySelector("[data-control-owner]");
-    if (!select) {
-      return;
-    }
-    const { hasUsers } = populatePortalAssignableUserSelect(select, {
-      query,
-      selectedValue: selectedOwner,
-      blankLabel: "Select control owner",
-      emptyLabel: "No assignable users available",
-      noMatchesLabel: "No matching users",
-      allowBlank: true,
-    });
-    if (searchInput) {
-      searchInput.disabled = !hasUsers;
-    }
+    controlOwnerPickerState.showAll = false;
+    renderControlOwnerOptions(picker);
+    openControlOwnerPicker(picker);
   }
   function normalizeControlPolicyDocumentIds(value) {
     if (!Array.isArray(value)) {
@@ -762,6 +893,9 @@
     };
     return saveControlStateEntry(controlId, nextState);
   }
+  const controlOwnerPickerState = {
+    showAll: false,
+  };
   async function updateControlReason(controlId, reason) {
     const control = controlsById.get(controlId);
     if (!control || isBaseExcluded(control)) {
