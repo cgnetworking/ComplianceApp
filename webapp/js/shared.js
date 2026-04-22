@@ -1258,6 +1258,18 @@
     }).format(parsed);
     return `${formatDateWithOrdinal(parsed)}, ${time}`;
   }
+  function formatShortDateTime(value) {
+    const parsed = parseDisplayDateValue(value);
+    if (!parsed) {
+      return "-";
+    }
+
+    const time = new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(parsed);
+    return `${formatDateWithOrdinal(parsed)}, ${time}`;
+  }
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")

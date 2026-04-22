@@ -381,17 +381,6 @@
 
     return Array.isArray(payload.responses) ? payload.responses : [];
   }
-  function formatShortDateTime(value) {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-      return "-";
-    }
-    const time = new Intl.DateTimeFormat(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(parsed);
-    return `${formatDateWithOrdinal(parsed)}, ${time}`;
-  }
   function formatFileSize(value) {
     const bytes = Number(value) || 0;
     if (bytes < 1024) {
