@@ -302,6 +302,7 @@ class AssessmentCertificateStorageTests(TestCase):
 
         self.assertIn("/run/credentials/portal-assessment-worker.service/assessment-pfx-password", script)
         self.assertIn("[System.IO.File]::ReadAllText($pfxPasswordPath).Trim()", script)
+        self.assertIn("The web app and assessment worker may be using different assessment-pfx-password secrets.", script)
         self.assertNotIn("test-assessment-password", script)
 
     @override_settings(ASSESSMENT_MODULE_VERSION="2.2.0")
